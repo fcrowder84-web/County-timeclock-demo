@@ -457,12 +457,8 @@
         }
 
         function showLogin() {
-
-            document.getElementById("loginView")
-                .classList.remove("hidden");
-
-            document.getElementById("supervisorView")
-                .classList.add("hidden");
+            clearToken();
+            window.location.replace("https://employee.edgefieldcountysc.org/apps/timeclock/launch?return_to=supervisor");
         }
 
         function showSupervisorView() {
@@ -472,50 +468,6 @@
 
             document.getElementById("supervisorView")
                 .classList.remove("hidden");
-        }
-
-        async function login() {
-
-            const employeeNumber =
-                document.getElementById("loginEmployeeNumber").value;
-
-            const pin =
-                document.getElementById("loginPin").value;
-
-            const response = await fetch(`${apiBase}/login`, {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/json"
-                },
-                body: JSON.stringify({
-                    employee_number: employeeNumber,
-                    pin: pin
-                })
-            });
-
-            const data = await response.json();
-
-            if (data.error) {
-                showMessage(data.error, true);
-                return;
-            }
-
-            setPermissions(data.permissions || []);
-
-            if (!hasSupervisorAccess()) {
-                showMessage("Supervisor access required", true);
-                return;
-            }
-
-            setToken(data.token);
-
-            currentUser = data.user;
-
-            showSupervisorView();
-
-            renderUserInfo();
-
-            loadDashboard();
         }
 
         async function logout() {

@@ -8,7 +8,7 @@ services:
       PGTZ: America/New_York
       POSTGRES_DB: county_timeclock
       POSTGRES_USER: timeclock_user
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change_this_password}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
     volumes:
       - ./postgres/data:/var/lib/postgresql/data
     ports:
@@ -32,17 +32,17 @@ services:
       PGHOST: postgres
       PGPORT: 5432
       PGDATABASE: county_timeclock
-      PGUSER: timeclock_user
-      PGPASSWORD: ${POSTGRES_PASSWORD:-change_this_password}
-      TIMECLOCK_SSO_SECRET: ${TIMECLOCK_SSO_SECRET}
+      PGUSER: timeclock_app
+      PGPASSWORD: ${TIMECLOCK_DB_APP_PASSWORD:?TIMECLOCK_DB_APP_PASSWORD is required}
+      TIMECLOCK_SSO_SECRET: ${TIMECLOCK_SSO_SECRET:?TIMECLOCK_SSO_SECRET is required}
       TIMECLOCK_SSO_ISSUER: edgefield-employee-portal
       TIMECLOCK_SSO_AUDIENCE: edgefield-timeclock
       SESSION_TTL_HOURS: ${SESSION_TTL_HOURS:-8}
       PORTAL_DIRECTORY_URL: ${PORTAL_DIRECTORY_URL}
-      PORTAL_DIRECTORY_API_KEY: ${PORTAL_DIRECTORY_API_KEY}
+      PORTAL_DIRECTORY_API_KEY: ${PORTAL_DIRECTORY_API_KEY:?PORTAL_DIRECTORY_API_KEY is required}
       PORTAL_SYNC_INTERVAL_MINUTES: ${PORTAL_SYNC_INTERVAL_MINUTES:-5}
     ports:
-      - "3000:3000"
+      - "127.0.0.1:3000:3000"
 
   frontend:
     build: ./frontend

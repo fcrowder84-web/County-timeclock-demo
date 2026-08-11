@@ -475,8 +475,8 @@
         }
 
         function showLogin() {
-            document.getElementById("loginView").classList.remove("hidden");
-            document.getElementById("employeeView").classList.add("hidden");
+            clearToken();
+            window.location.replace("https://employee.edgefieldcountysc.org/apps/timeclock/launch?return_to=employee");
         }
 
         function showEmployeeView() {
@@ -492,47 +492,6 @@
                 Department:
                 ${currentUser.department_name || currentUser.department || "-"}
             `;
-        }
-
-        async function login() {
-            const employeeNumber = document.getElementById("loginEmployeeNumber").value;
-            const pin = document.getElementById("loginPin").value;
-
-            const response = await fetch(`${apiBase}/login`, {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/json"
-                },
-                body: JSON.stringify({
-                    employee_number: employeeNumber,
-                    pin: pin
-                })
-            });
-
-            const data = await response.json();
-
-            if (data.error) {
-                showMessage(data.error, true);
-                return;
-            }
-
-            setToken(data.token);
-            currentUser = data.user;
-            setPermissions(data.permissions || []);
-
-            document.getElementById("loginPin").value = "";
-
-            if (currentUser.must_change_pin) {
-                showPinChangeView();
-            } else {
-                showEmployeeView();
-            }
-            renderUserInfo();
-            applyPermissionUi();
-            if (hasPermission("view_own_time")) {
-                await loadPayPeriodNavigator();
-                await loadMyTimecard();
-            }
         }
 
         async function logout() {

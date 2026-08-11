@@ -2,11 +2,11 @@ FROM node:20
 
 WORKDIR /app
 
-COPY package.json .
+COPY package.json package-lock.json ./
 
-RUN npm install
+RUN npm ci --omit=dev
 
-COPY . .
+COPY server.js ./server.js
 
 EXPOSE 3000
 
