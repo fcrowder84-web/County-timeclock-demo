@@ -1,0 +1,11 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Signing Out</title></head>
+<body><p>Signing out…</p><script>
+(async()=>{
+  const token=localStorage.getItem('timeclock_token');
+  try{if(token)await fetch('/api/logout',{method:'POST',headers:{Authorization:`Bearer ${token}`}})}catch(_){}
+  localStorage.removeItem('timeclock_token');
+  sessionStorage.clear();
+  window.location.replace('https://employee.edgefieldcountysc.org/logout');
+})();
+</script></body></html>

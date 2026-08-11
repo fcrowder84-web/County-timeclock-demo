@@ -1,0 +1,1636 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+
+    <meta charset="UTF-8">
+    <title>Supervisor Portal</title>
+
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 1500px;
+            margin: 40px auto;
+            padding: 20px;
+            background: #f4f6f9;
+        }
+
+        h1,
+        h2,
+        h3 {
+            margin-top: 0;
+        }
+
+        .card {
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 2px 6px rgba(0, 0, 0, 0.12);
+            margin-bottom: 20px;
+        }
+
+        .topbar {
+            background: white;
+            border-radius: 10px;
+            padding: 15px 20px;
+            box-shadow: 0 2px 6px rgba(0, 0, 0, 0.12);
+            margin-bottom: 20px;
+            overflow: auto;
+        }
+
+        .btn-logout {
+            background: #2c3e50;
+            color: white;
+            float: right;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        th,
+        td {
+            padding: 12px;
+            border-bottom: 1px solid #ddd;
+            text-align: left;
+        }
+
+        th {
+            background: #ececec;
+        }
+
+        button {
+            padding: 8px 14px;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            margin-right: 5px;
+            margin-bottom: 5px;
+        }
+
+        input,
+        textarea,
+        select {
+            width: 100%;
+            padding: 10px;
+            margin-top: 5px;
+            margin-bottom: 15px;
+            box-sizing: border-box;
+            font-size: 15px;
+        }
+
+        .btn-primary {
+            background: #1f3c5b;
+            color: white;
+        }
+
+        .btn-approve {
+            background: #27ae60;
+            color: white;
+        }
+
+        .btn-return {
+            background: #c0392b;
+            color: white;
+        }
+
+        .btn-edit {
+            background: #f39c12;
+            color: white;
+        }
+
+        .btn-audit {
+            background: #8e44ad;
+            color: white;
+        }
+
+        .btn-home {
+            background: #566573;
+            color: white;
+        }
+
+        .btn-request {
+            background: #2980b9;
+            color: white;
+        }
+
+        .status-good {
+            background: #d4edda;
+            color: #155724;
+            font-weight: bold;
+        }
+
+        .status-warning {
+            background: #fff3cd;
+            color: #856404;
+            font-weight: bold;
+        }
+
+        .status-bad {
+            background: #f8d7da;
+            color: #721c24;
+            font-weight: bold;
+        }
+
+        .status-pill {
+            display: inline-block;
+            padding: 5px 10px;
+            border-radius: 14px;
+            font-size: 12px;
+            text-transform: uppercase;
+        }
+
+        .summary-row {
+            display: flex;
+            gap: 20px;
+            margin-bottom: 15px;
+        }
+
+        .summary-box {
+            background: #f5f5f5;
+            padding: 15px;
+            border-radius: 8px;
+            flex: 1;
+        }
+
+        .day-color-a {
+            background: #ffffff;
+        }
+
+        .day-color-b {
+            background: #f1f6fb;
+        }
+
+        .day-start td {
+            border-top: 3px solid #b8c7d9;
+        }
+
+        #messageBox {
+            margin-bottom: 20px;
+            padding: 12px;
+            border-radius: 6px;
+            display: none;
+        }
+
+        .success {
+            background: #d4edda;
+            color: #155724;
+        }
+
+        .error {
+            background: #f8d7da;
+            color: #721c24;
+        }
+
+        .hidden {
+            display: none;
+        }
+
+        .login-card {
+            max-width: 420px;
+            margin: 80px auto;
+        }
+
+        .modal-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.5);
+            display: none;
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+        }
+
+        .modal {
+            background: white;
+            width: 900px;
+            max-width: 98%;
+            max-height: 90vh;
+            overflow-y: auto;
+            padding: 25px;
+            border-radius: 10px;
+        }
+
+        .modal-buttons {
+            text-align: right;
+        }
+    </style>
+
+</head>
+
+<body>
+
+    <div id="messageBox"></div>
+
+    <div id="loginView" class="card login-card">
+
+        <h1>Supervisor Login</h1>
+
+        <label>Employee Number</label>
+        <input type="text" id="loginEmployeeNumber">
+
+        <label>PIN</label>
+        <input type="password" id="loginPin">
+
+        <button class="btn-primary" onclick="login()">
+            Legacy PIN Login
+        </button>
+
+        <button class="btn-approve" onclick="portalLogin()">
+            Sign In Through Employee Portal
+        </button>
+
+        <button class="btn-home" onclick="goHome()">
+            Home
+        </button>
+
+    </div>
+
+    <div id="supervisorView" class="hidden">
+
+        <div class="topbar">
+
+            <button class="btn-logout" onclick="logout()">
+                Sign Out
+            </button>
+
+            <button class="btn-home" style="float:right;margin-right:10px;" onclick="goHome()">
+                Home
+            </button>
+
+            <div id="userInfo"></div>
+
+        </div>
+
+        <h1>Supervisor / Payroll Timecards</h1>
+
+        <div id="payPeriodNavigator"></div>
+
+        <div id="summaryBox"></div>
+
+        <div id="requestsBox"></div>
+
+        <div id="employeesBox"></div>
+
+    </div>
+
+    <div class="modal-overlay" id="timecardModal">
+
+        <div class="modal">
+
+            <h2 id="modalTitle">Employee Timecard</h2>
+
+            <div id="modalContent"></div>
+
+            <div class="modal-buttons">
+
+                <button onclick="closeTimecardModal()">
+                    Close
+                </button>
+
+            </div>
+
+        </div>
+
+    </div>
+
+    <script>
+
+        const apiBase = "/api";
+
+        let currentUser = null;
+        let currentPermissions = new Set();
+        let selectedPeriodStart = new URLSearchParams(window.location.search).get("periodStart") || null;
+        let selectedEmployeeId = new URLSearchParams(window.location.search).get("employeeId") || null;
+        let payPeriodOptions = [];
+
+        function withSelectedPeriod(url) {
+            if (!selectedPeriodStart || !url.startsWith(apiBase)) return url;
+            const separator = url.includes("?") ? "&" : "?";
+            return `${url}${separator}period_start=${encodeURIComponent(selectedPeriodStart)}`;
+        }
+
+        function formatPeriodDate(value) {
+            return value ? new Date(`${value.slice(0, 10)}T12:00:00`).toLocaleDateString() : "";
+        }
+
+        function setSelectedPeriod(periodStart) {
+            const url = new URL(window.location.href);
+            url.searchParams.set("periodStart", periodStart);
+            if (selectedEmployeeId) url.searchParams.set("employeeId", selectedEmployeeId);
+            window.location.href = url.toString();
+        }
+
+        function renderPayPeriodNavigator() {
+            const container = document.getElementById("payPeriodNavigator");
+            if (!container || !payPeriodOptions.length || !selectedPeriodStart) return;
+            const index = payPeriodOptions.findIndex(p => p.pay_period_start === selectedPeriodStart);
+            const previous = payPeriodOptions[index + 1];
+            const next = payPeriodOptions[index - 1];
+            container.innerHTML = `
+                <div class="card">
+                    <h2>Pay Period</h2>
+                    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+                        <button ${previous ? "" : "disabled"} onclick="setSelectedPeriod('${previous?.pay_period_start || selectedPeriodStart}')">Previous</button>
+                        <select onchange="setSelectedPeriod(this.value)" style="max-width:300px;">
+                            ${payPeriodOptions.map(period => `<option value="${period.pay_period_start}" ${period.pay_period_start === selectedPeriodStart ? "selected" : ""}>${formatPeriodDate(period.pay_period_start)} through ${formatPeriodDate(period.pay_period_end)}${period.is_current ? " (Current)" : ""}</option>`).join("")}
+                        </select>
+                        <button ${next ? "" : "disabled"} onclick="setSelectedPeriod('${next?.pay_period_start || selectedPeriodStart}')">Next</button>
+                    </div>
+                </div>`;
+        }
+
+        async function loadPayPeriodNavigator() {
+            const response = await apiFetch(`${apiBase}/pay-periods`);
+            const data = await response.json();
+            payPeriodOptions = data.periods || [];
+            if (!selectedPeriodStart) selectedPeriodStart = data.current.pay_period_start;
+            renderPayPeriodNavigator();
+        }
+
+        const supervisorPermissionKeys = [
+            "view_assigned_employees", "view_department_time", "view_live_status",
+            "add_employee_entry", "edit_employee_time", "approve_punch_correction",
+            "approve_timecard", "return_timecard", "view_payroll_records",
+            "review_approved_timecards", "edit_payroll_time", "view_all_timeclock_records",
+            "view_timeclock_audit", "manage_employee_timeclock_settings",
+            "manage_supervisor_assignments"
+        ];
+
+        function portalLogin() {
+            window.location.href = "https://employee.edgefieldcountysc.org/apps/timeclock/launch?return_to=supervisor";
+        }
+
+        function setPermissions(permissions) {
+            currentPermissions = new Set(permissions || []);
+        }
+
+        function hasPermission(permission) {
+            return currentPermissions.has("app_admin") || currentPermissions.has(permission);
+        }
+
+        function hasAnyPermission(keys) {
+            return keys.some(hasPermission);
+        }
+
+        function hasSupervisorAccess() {
+            return hasAnyPermission(supervisorPermissionKeys);
+        }
+
+        function getToken() {
+            return localStorage.getItem("timeclock_token");
+        }
+
+        function setToken(token) {
+            localStorage.setItem("timeclock_token", token);
+        }
+
+        function clearToken() {
+            localStorage.removeItem("timeclock_token");
+        }
+
+        function showMessage(message, isError = false) {
+
+            const box = document.getElementById("messageBox");
+
+            box.style.display = "block";
+
+            box.className = isError
+                ? "error"
+                : "success";
+
+            box.innerText = message;
+
+            setTimeout(() => {
+                box.style.display = "none";
+            }, 5000);
+        }
+
+        function goHome() {
+            window.location.href = "/index.html";
+        }
+
+        async function apiFetch(url, options = {}) {
+
+            const token = getToken();
+
+            const headers = {
+                ...(options.headers || {})
+            };
+
+            if (token) {
+                headers["Authorization"] = `Bearer ${token}`;
+            }
+
+            if (!headers["Content-Type"] && options.body) {
+                headers["Content-Type"] = "application/json";
+            }
+
+            url = withSelectedPeriod(url);
+
+            const response = await fetch(url, {
+                ...options,
+                headers
+            });
+
+            if (response.status === 401) {
+
+                clearToken();
+
+                showLogin();
+
+                throw new Error("Login required");
+            }
+
+            if (response.status === 403) {
+                let message = "You do not have permission for this action";
+                try {
+                    const errorData = await response.clone().json();
+                    message = errorData.error || message;
+                } catch (_) {}
+                showMessage(message, true);
+                throw new Error(message);
+            }
+
+            return response;
+        }
+
+        function showLogin() {
+
+            document.getElementById("loginView")
+                .classList.remove("hidden");
+
+            document.getElementById("supervisorView")
+                .classList.add("hidden");
+        }
+
+        function showSupervisorView() {
+
+            document.getElementById("loginView")
+                .classList.add("hidden");
+
+            document.getElementById("supervisorView")
+                .classList.remove("hidden");
+        }
+
+        async function login() {
+
+            const employeeNumber =
+                document.getElementById("loginEmployeeNumber").value;
+
+            const pin =
+                document.getElementById("loginPin").value;
+
+            const response = await fetch(`${apiBase}/login`, {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json"
+                },
+                body: JSON.stringify({
+                    employee_number: employeeNumber,
+                    pin: pin
+                })
+            });
+
+            const data = await response.json();
+
+            if (data.error) {
+                showMessage(data.error, true);
+                return;
+            }
+
+            setPermissions(data.permissions || []);
+
+            if (!hasSupervisorAccess()) {
+                showMessage("Supervisor access required", true);
+                return;
+            }
+
+            setToken(data.token);
+
+            currentUser = data.user;
+
+            showSupervisorView();
+
+            renderUserInfo();
+
+            loadDashboard();
+        }
+
+        async function logout() {
+
+            try {
+
+                await apiFetch(`${apiBase}/logout`, {
+                    method: "POST"
+                });
+
+            } catch (err) { }
+
+            clearToken();
+
+            window.location.href = "/global-logout.html";
+        }
+
+        async function checkExistingLogin() {
+
+            const token = getToken();
+
+            if (!token) {
+                showLogin();
+                return;
+            }
+
+            try {
+
+                const response =
+                    await apiFetch(`${apiBase}/me`);
+
+                const data =
+                    await response.json();
+
+                currentUser = data.user;
+                setPermissions(data.permissions || []);
+
+                if (!hasSupervisorAccess()) {
+                    showMessage("Supervisor access required", true);
+                    window.location.href = "/index.html";
+                    return;
+                }
+
+                showSupervisorView();
+
+                renderUserInfo();
+
+                loadDashboard();
+
+            } catch (err) {
+
+                showLogin();
+            }
+        }
+
+        function renderUserInfo() {
+
+            document.getElementById("userInfo").innerHTML = `
+                Logged in as:
+                <strong>
+                    ${currentUser.first_name}
+                    ${currentUser.last_name}
+                </strong>
+                <br>
+                Department:
+                ${currentUser.department_name || currentUser.department || "-"}
+            `;
+        }
+
+        async function loadDashboard() {
+            if (!payPeriodOptions.length) await loadPayPeriodNavigator();
+
+            const canViewSummary = hasAnyPermission([
+                "view_assigned_employees", "view_department_time", "view_live_status",
+                "view_payroll_records", "review_approved_timecards", "view_all_timeclock_records"
+            ]);
+            if (canViewSummary) loadSummary();
+            else document.getElementById("summaryBox").innerHTML = "";
+
+            if (hasPermission("approve_punch_correction")) loadRequests();
+            else document.getElementById("requestsBox").innerHTML = "";
+
+            if (hasAnyPermission([
+                "view_assigned_employees", "view_department_time",
+                "manage_employee_timeclock_settings", "manage_supervisor_assignments"
+            ])) loadTeamStructure();
+            else document.getElementById("employeesBox").innerHTML = "";
+
+            if (selectedEmployeeId) viewTimecard(selectedEmployeeId);
+        }
+
+        function getStatus(row) {
+
+            if (
+                row.status === "supervisor_approved"
+            ) {
+                return {
+                    text: "Approved",
+                    className: "status-good"
+                };
+            }
+
+            if (
+                row.status === "employee_submitted"
+            ) {
+                return {
+                    text: "Waiting Review",
+                    className: "status-warning"
+                };
+            }
+
+            return {
+                text: "Not Submitted",
+                className: "status-bad"
+            };
+        }
+
+        async function loadSummary() {
+
+            const response =
+                await apiFetch(
+                    `${apiBase}/supervisor/pay-period-status`
+                );
+
+            const data =
+                await response.json();
+
+            let html = `
+                <div class="card">
+
+                    <h2>
+                        Selected Pay Period
+                    </h2>
+
+                    <div class="summary-row">
+
+                        <div class="summary-box">
+                            <strong>Pay Period</strong><br>
+                            ${data.pay_period_start}
+                            through
+                            ${data.pay_period_end}
+                        </div>
+
+                        <div class="summary-box">
+                            <strong>Total Employees</strong><br>
+                            ${data.employees.length}
+                        </div>
+
+                    </div>
+
+                    <table>
+
+                        <thead>
+                            <tr>
+                                <th>Employee</th>
+                                <th>Department</th>
+                                <th>Status</th>
+                                <th>Total Hours</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+
+                        <tbody>
+            `;
+
+            data.employees.forEach(row => {
+
+                const status =
+                    getStatus(row);
+
+                html += `
+                    <tr>
+
+                        <td>
+                            ${row.first_name}
+                            ${row.last_name}
+                        </td>
+
+                        <td>
+                            ${row.department || "-"}
+                        </td>
+
+                        <td>
+                            <span class="status-pill ${status.className}">
+                                ${status.text}
+                            </span>
+                        </td>
+
+                        <td>
+                            ${row.total_hours || 0}
+                        </td>
+
+                        <td>
+
+                            ${hasAnyPermission(["view_assigned_employees", "view_department_time", "view_payroll_records", "review_approved_timecards", "view_all_timeclock_records"]) ? `
+                            <button class="btn-primary" onclick="viewTimecard(${row.id})">
+                                View Timecard
+                            </button>` : ""}
+
+                            ${hasPermission("approve_timecard") ? `
+                            <button class="btn-approve" onclick="approveTimecard(${row.id})">
+                                Approve
+                            </button>` : ""}
+
+                            ${hasAnyPermission(["return_timecard", "return_to_supervisor"]) ? `
+                            <button class="btn-return" onclick="returnTimecard(${row.id})">
+                                Return
+                            </button>` : ""}
+
+                        </td>
+
+                    </tr>
+                `;
+            });
+
+            html += `
+                        </tbody>
+                    </table>
+
+                </div>
+            `;
+
+            document.getElementById("summaryBox")
+                .innerHTML = html;
+        }
+
+        async function loadRequests() {
+
+            const response =
+                await apiFetch(
+                    `${apiBase}/supervisor/change-requests`
+                );
+
+            const requests =
+                await response.json();
+
+            let html = `
+                <div class="card">
+
+                    <h2>
+                        Pending Change Requests
+                    </h2>
+            `;
+
+            if (requests.length === 0) {
+
+                html += `
+                    <p>
+                        No pending requests.
+                    </p>
+                `;
+
+            } else {
+
+                html += `
+                    <table>
+
+                        <thead>
+                            <tr>
+                                <th>Employee</th>
+                                <th>Department</th>
+                                <th>Requested Change</th>
+                                <th>Reason</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+
+                        <tbody>
+                `;
+
+                requests.forEach(request => {
+
+                    html += `
+                        <tr>
+
+                            <td>
+                                ${request.first_name}
+                                ${request.last_name}
+                            </td>
+
+                            <td>
+                                ${request.department || "-"}
+                            </td>
+
+                            <td>
+                                ${
+                                    request.requested_clock_in_display
+                                        ? `<strong>Clock In:</strong><br>${request.requested_clock_in_display}`
+                                        : `<strong>Clock In:</strong><br>No change requested`
+                                }
+
+                                <br><br>
+
+                                ${
+                                    request.requested_clock_out_display
+                                        ? `<strong>Clock Out:</strong><br>${request.requested_clock_out_display}`
+                                        : `<strong>Clock Out:</strong><br>No change requested`
+                                }
+                            </td>
+
+                            <td>
+                                ${request.employee_reason}
+                            </td>
+
+                            <td>
+
+                                <button
+                                    class="btn-approve"
+                                    onclick="approveRequest(${request.id})">
+                                    Approve
+                                </button>
+
+                                <button
+                                    class="btn-return"
+                                    onclick="denyRequest(${request.id})">
+                                    Deny
+                                </button>
+
+                            </td>
+
+                        </tr>
+                    `;
+                });
+
+                html += `
+                        </tbody>
+                    </table>
+                `;
+            }
+
+            html += `</div>`;
+
+            document.getElementById("requestsBox")
+                .innerHTML = html;
+        }
+
+        async function approveRequest(requestId) {
+
+            const note =
+                prompt(
+                    "Supervisor note (optional):"
+                ) || "";
+
+            const response =
+                await apiFetch(
+                    `${apiBase}/supervisor/approve-change-request`,
+                    {
+                        method: "POST",
+                        body: JSON.stringify({
+                            request_id: requestId,
+                            supervisor_note: note
+                        })
+                    }
+                );
+
+            const data =
+                await response.json();
+
+            showMessage(
+                data.message || data.error,
+                !!data.error
+            );
+
+            loadDashboard();
+        }
+
+        async function denyRequest(requestId) {
+
+            const note =
+                prompt(
+                    "Reason for denial:"
+                ) || "";
+
+            const response =
+                await apiFetch(
+                    `${apiBase}/supervisor/deny-change-request`,
+                    {
+                        method: "POST",
+                        body: JSON.stringify({
+                            request_id: requestId,
+                            supervisor_note: note
+                        })
+                    }
+                );
+
+            const data =
+                await response.json();
+
+            showMessage(
+                data.message || data.error,
+                !!data.error
+            );
+
+            loadDashboard();
+        }
+
+        async function approveTimecard(employeeId) {
+
+            const confirmed =
+                confirm(
+                    "Approve this employee timecard?"
+                );
+
+            if (!confirmed) return;
+
+            const response =
+                await apiFetch(
+                    `${apiBase}/supervisor/approve-timecard`,
+                    {
+                        method: "POST",
+                        body: JSON.stringify({
+                            employee_id: employeeId
+                        })
+                    }
+                );
+
+            const data =
+                await response.json();
+
+            showMessage(
+                data.message || data.error,
+                !!data.error
+            );
+
+            loadDashboard();
+        }
+
+        async function returnTimecard(employeeId) {
+
+            let targetStage = "employee";
+            if (hasAnyPermission(["return_to_supervisor", "edit_payroll_time"])) {
+                const choice = prompt(
+                    "Return to employee or supervisor? Enter employee or supervisor.",
+                    "employee"
+                );
+                if (!choice) return;
+                targetStage = choice.trim().toLowerCase();
+                if (!["employee", "supervisor"].includes(targetStage)) {
+                    showMessage("Return target must be employee or supervisor", true);
+                    return;
+                }
+            }
+
+            const note = prompt("Why are you returning this timecard?");
+
+            if (!note) return;
+
+            const response =
+                await apiFetch(
+                    `${apiBase}/supervisor/return-timecard`,
+                    {
+                        method: "POST",
+                        body: JSON.stringify({
+                            employee_id: employeeId,
+                            supervisor_note: note,
+                            target_stage: targetStage
+                        })
+                    }
+                );
+
+            const data =
+                await response.json();
+
+            showMessage(
+                data.message || data.error,
+                !!data.error
+            );
+
+            loadDashboard();
+        }
+
+        async function viewTimecard(employeeId) {
+            selectedEmployeeId = String(employeeId);
+            const url = new URL(window.location.href);
+            url.searchParams.set("employeeId", selectedEmployeeId);
+            if (selectedPeriodStart) url.searchParams.set("periodStart", selectedPeriodStart);
+            window.history.replaceState({}, "", url);
+
+            const response =
+                await apiFetch(
+                    `${apiBase}/supervisor/employee-timecard/${employeeId}`
+                );
+
+            const data =
+                await response.json();
+
+            document.getElementById("modalTitle")
+                .innerText =
+                `${data.employee.first_name} ${data.employee.last_name}`;
+
+            let html = `
+                <div class="summary-row">
+
+                    <div class="summary-box">
+                        <strong>Department</strong><br>
+                        ${data.employee.department || "-"}
+                    </div>
+
+                    <div class="summary-box">
+                        <strong>Status</strong><br>
+                        ${data.approval?.status || "Not Submitted"}
+                    </div>
+
+                    <div class="summary-box">
+                        <strong>Pay Period</strong><br>
+                        ${formatPeriodDate(data.pay_period_start)} through ${formatPeriodDate(data.pay_period_end)}
+                    </div>
+
+                    <div class="summary-box">
+                        <strong>Edit Access</strong><br>
+                        ${data.edit_mode === "payroll" ? "Payroll override" : data.edit_mode === "supervisor" ? "Unlocked for supervisor" : "Locked"}
+                    </div>
+
+                </div>
+
+                <table>
+
+                    <thead>
+                        <tr>
+                            <th>Date</th>
+                            <th>Clock In</th>
+                            <th>Clock Out</th>
+                            <th>Hours</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+
+                    <tbody>
+            `;
+
+            let previousDate = null;
+            let dayColorIndex = -1;
+
+            data.entries.forEach(entry => {
+
+                const isNewDay =
+                    entry.entry_date !== previousDate;
+
+                if (isNewDay) {
+                    dayColorIndex++;
+                    previousDate = entry.entry_date;
+                }
+
+                const dayClass =
+                    dayColorIndex % 2 === 0
+                        ? "day-color-a"
+                        : "day-color-b";
+
+                const startClass =
+                    isNewDay
+                        ? "day-start"
+                        : "";
+
+                html += `
+                    <tr class="${dayClass} ${startClass}">
+
+                        <td>
+                            ${entry.entry_date}
+                        </td>
+
+                        <td>
+                            ${entry.clock_in_time}
+                        </td>
+
+                        <td>
+                            ${entry.clock_out_time || "Open"}
+                        </td>
+
+                        <td>
+                            ${entry.hours_worked || 0}
+                        </td>
+
+                        <td>
+
+                            ${data.can_edit_entries && hasAnyPermission(["edit_employee_time", "edit_payroll_time"]) ? `
+                            <button
+                                class="btn-edit"
+                                onclick="editEntry(
+                                    ${entry.id},
+                                    '${entry.entry_date_iso}',
+                                    '${entry.clock_in_time_24}',
+                                    '${entry.clock_out_date_iso || entry.entry_date_iso}',
+                                    '${entry.clock_out_time_24 || ""}'
+                                )">
+                                Edit
+                            </button>` : ""}
+
+                            ${hasPermission("view_timeclock_audit") ? `<button
+                                class="btn-audit"
+                                onclick="viewAudit(${entry.id})">
+                                Audit
+                            </button>` : ""}
+
+                        </td>
+
+                    </tr>
+                `;
+            });
+
+            html += `
+                    </tbody>
+                </table>
+            `;
+
+            if (
+                data.change_requests &&
+                data.change_requests.length > 0
+            ) {
+
+                html += `
+                    <div class="card" style="margin-top:20px;">
+
+                        <h3>
+                            Change Requests
+                        </h3>
+
+                        <table>
+
+                            <thead>
+                                <tr>
+                                    <th>Status</th>
+                                    <th>Requested</th>
+                                    <th>Reason</th>
+                                    <th>Supervisor Note</th>
+                                </tr>
+                            </thead>
+
+                            <tbody>
+                `;
+
+                data.change_requests.forEach(request => {
+
+                    html += `
+                        <tr>
+
+                            <td>
+                                ${request.status}
+                            </td>
+
+                            <td>
+                                ${request.created_at_display}
+                            </td>
+
+                            <td>
+                                ${request.employee_reason}
+                            </td>
+
+                            <td>
+                                ${request.supervisor_note || "-"}
+                            </td>
+
+                        </tr>
+                    `;
+                });
+
+                html += `
+                            </tbody>
+                        </table>
+
+                    </div>
+                `;
+            }
+
+            document.getElementById("modalContent")
+                .innerHTML = html;
+
+            document.getElementById("timecardModal")
+                .style.display = "flex";
+        }
+
+        async function editEntry(
+            entryId,
+            clockInDate,
+            clockInTime,
+            clockOutDate,
+            clockOutTime
+        ) {
+
+            const newClockInDate =
+                prompt(
+                    "Clock In Date",
+                    clockInDate
+                );
+
+            if (!newClockInDate) return;
+
+            const newClockInTime =
+                prompt(
+                    "Clock In Time (24hr)",
+                    clockInTime
+                );
+
+            if (!newClockInTime) return;
+
+            const newClockOutDate =
+                prompt(
+                    "Clock Out Date",
+                    clockOutDate || ""
+                );
+
+            const newClockOutTime =
+                prompt(
+                    "Clock Out Time (24hr)",
+                    clockOutTime || ""
+                );
+
+            const reason =
+                prompt(
+                    "Reason for edit:"
+                );
+
+            if (!reason) return;
+
+            let newClockOut = null;
+
+            if (
+                newClockOutDate &&
+                newClockOutTime
+            ) {
+                newClockOut =
+                    `${newClockOutDate} ${newClockOutTime}:00`;
+            }
+
+            const response =
+                await apiFetch(
+                    `${apiBase}/supervisor/edit-time-entry`,
+                    {
+                        method: "POST",
+                        body: JSON.stringify({
+                            time_entry_id: entryId,
+                            new_clock_in:
+                                `${newClockInDate} ${newClockInTime}:00`,
+                            new_clock_out: newClockOut,
+                            reason
+                        })
+                    }
+                );
+
+            const data =
+                await response.json();
+
+            showMessage(
+                data.message || data.error,
+                !!data.error
+            );
+        }
+
+        async function viewAudit(entryId) {
+
+            const response =
+                await apiFetch(
+                    `${apiBase}/supervisor/time-entry-audit/${entryId}`
+                );
+
+            const data =
+                await response.json();
+
+            let html = `
+                <div class="card">
+
+                    <h2>
+                        Audit History
+                    </h2>
+            `;
+
+            if (
+                !data.audit ||
+                data.audit.length === 0
+            ) {
+
+                html += `
+                    <p>
+                        No audit history found.
+                    </p>
+                `;
+
+            } else {
+
+                html += `
+                    <table>
+
+                        <thead>
+                            <tr>
+                                <th>Changed By</th>
+                                <th>Old Values</th>
+                                <th>New Values</th>
+                                <th>Reason</th>
+                                <th>Changed</th>
+                            </tr>
+                        </thead>
+
+                        <tbody>
+                `;
+
+                data.audit.forEach(item => {
+
+                    html += `
+                        <tr>
+
+                            <td>
+                                ${item.changed_by_first_name || ""}
+                                ${item.changed_by_last_name || ""}
+                            </td>
+
+                            <td>
+                                In:
+                                ${item.old_clock_in_display || "-"}
+                                <br>
+                                Out:
+                                ${item.old_clock_out_display || "-"}
+                            </td>
+
+                            <td>
+                                In:
+                                ${item.new_clock_in_display || "-"}
+                                <br>
+                                Out:
+                                ${item.new_clock_out_display || "-"}
+                            </td>
+
+                            <td>
+                                ${item.reason || "-"}
+                            </td>
+
+                            <td>
+                                ${item.changed_at_display || "-"}
+                            </td>
+
+                        </tr>
+                    `;
+                });
+
+                html += `
+                        </tbody>
+                    </table>
+                `;
+            }
+
+            html += `</div>`;
+
+            document.getElementById("modalTitle")
+                .innerText = "Audit History";
+
+            document.getElementById("modalContent")
+                .innerHTML = html;
+
+            document.getElementById("timecardModal")
+                .style.display = "flex";
+        }
+
+        function closeTimecardModal() {
+
+            document.getElementById("timecardModal")
+                .style.display = "none";
+
+            selectedEmployeeId = null;
+            const url = new URL(window.location.href);
+            url.searchParams.delete("employeeId");
+            window.history.replaceState({}, "", url);
+        }
+
+            let teamStructureData = null;
+
+            function employeeName(person) {
+                return `${person.first_name} ${person.last_name}`;
+            }
+
+            async function loadTeamStructure() {
+                const response = await apiFetch(`${apiBase}/supervisor/team-structure`);
+                const data = await response.json();
+                if (!response.ok || data.error) {
+                    showMessage(data.error || "Unable to load team structure", true);
+                    return;
+                }
+                teamStructureData = data;
+
+                const assignmentsByEmployee = new Map();
+                (data.assignments || []).forEach(item => assignmentsByEmployee.set(Number(item.employee_id), item));
+
+                let html = `
+                <div class="card">
+                    <h2>Team Structure</h2>
+                    <p>Employee accounts and application permissions remain managed in the Employee Portal. This section controls who reviews each employee's TimeClock records and signed timecard.</p>
+                    <p><strong>Workflow:</strong> Employee signs the completed two-week timecard → assigned supervisor confirms or returns it → approved timecard proceeds to Payroll.</p>
+                </div>`;
+
+                (data.departments || []).forEach(department => {
+                    const people = (data.employees || []).filter(person => Number(person.department_id) === Number(department.id));
+                    const headOptions = people.map(person => `<option value="${person.id}" ${Number(department.department_head_id) === Number(person.id) ? "selected" : ""}>${employeeName(person)}</option>`).join("");
+                    const canSetHead = hasPermission("manage_supervisor_assignments") && data.can_manage_all;
+
+                    const supervisorIds = new Set((data.assignments || [])
+                        .filter(item => Number(item.department_id) === Number(department.id))
+                        .map(item => Number(item.supervisor_employee_id)));
+                    people.filter(person => person.is_supervisor).forEach(person => supervisorIds.add(Number(person.id)));
+
+                    const supervisors = people.filter(person => supervisorIds.has(Number(person.id)));
+                    const unassigned = people.filter(person => {
+                        const assigned = assignmentsByEmployee.has(Number(person.id));
+                        const isHead = Number(department.department_head_id) === Number(person.id);
+                        return !assigned && !isHead;
+                    });
+
+                    html += `
+                    <div class="card">
+                        <h2>${department.name}</h2>
+                        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:16px;align-items:end;margin-bottom:18px;">
+                            <div>
+                                <label><strong>Department Head</strong></label>
+                                ${canSetHead ? `
+                                <select id="departmentHead-${department.id}">
+                                    <option value="">Not assigned</option>
+                                    ${headOptions}
+                                </select>
+                                <button style="margin-top:8px" onclick="saveDepartmentHead(${department.id})">Save Department Head</button>` : `
+                                <div style="margin-top:8px">${department.department_head_first_name ? `${department.department_head_first_name} ${department.department_head_last_name}` : "Not assigned"}</div>`}
+                            </div>
+                            <div>
+                                <label><strong>Assign employee to supervisor</strong></label>
+                                <select id="teamEmployee-${department.id}">
+                                    <option value="">Select employee</option>
+                                    ${people.map(person => `<option value="${person.id}">${employeeName(person)}</option>`).join("")}
+                                </select>
+                                <select id="teamSupervisor-${department.id}" style="margin-top:8px">
+                                    <option value="">Select supervisor</option>
+                                    ${people.map(person => `<option value="${person.id}">${employeeName(person)}</option>`).join("")}
+                                </select>
+                                <button style="margin-top:8px" onclick="assignEmployee(${department.id})">Assign</button>
+                            </div>
+                        </div>`;
+
+                    if (supervisors.length) {
+                        html += `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:14px;">`;
+                        supervisors.forEach(supervisor => {
+                            const assignedEmployees = (data.assignments || []).filter(item =>
+                                Number(item.department_id) === Number(department.id) &&
+                                Number(item.supervisor_employee_id) === Number(supervisor.id)
+                            );
+                            html += `
+                            <div style="border:1px solid #d5dbe3;border-radius:10px;padding:14px;">
+                                <h3 style="margin-top:0">Supervisor: ${employeeName(supervisor)}</h3>
+                                ${assignedEmployees.length ? `<ul style="padding-left:18px">${assignedEmployees.map(item => `
+                                    <li style="margin-bottom:8px">${item.employee_first_name} ${item.employee_last_name}
+                                    <button style="margin-left:8px;padding:4px 8px" onclick="unassignEmployee(${item.employee_id},${department.id})">Remove</button></li>`).join("")}</ul>` : `<p>No employees assigned.</p>`}
+                            </div>`;
+                        });
+                        html += `</div>`;
+                    }
+
+                    html += `
+                        <div style="margin-top:16px">
+                            <strong>Unassigned employees:</strong>
+                            ${unassigned.length ? unassigned.map(employeeName).join(", ") : "None"}
+                        </div>
+                    </div>`;
+                });
+
+                document.getElementById("employeesBox").innerHTML = html;
+            }
+
+            async function saveDepartmentHead(departmentId) {
+                const employeeId = document.getElementById(`departmentHead-${departmentId}`).value || null;
+                const response = await apiFetch(`${apiBase}/supervisor/team-structure/department-head`, {
+                    method: "POST",
+                    body: JSON.stringify({ department_id: departmentId, employee_id: employeeId })
+                });
+                const data = await response.json();
+                showMessage(data.message || data.error, !response.ok || !!data.error);
+                if (response.ok) loadTeamStructure();
+            }
+
+            async function assignEmployee(departmentId) {
+                const employeeId = document.getElementById(`teamEmployee-${departmentId}`).value;
+                const supervisorId = document.getElementById(`teamSupervisor-${departmentId}`).value;
+                if (!employeeId || !supervisorId) {
+                    showMessage("Select both an employee and a supervisor", true);
+                    return;
+                }
+                if (employeeId === supervisorId) {
+                    showMessage("An employee cannot supervise themselves", true);
+                    return;
+                }
+                const response = await apiFetch(`${apiBase}/supervisor/team-structure/assign`, {
+                    method: "POST",
+                    body: JSON.stringify({
+                        department_id: departmentId,
+                        employee_id: employeeId,
+                        supervisor_employee_id: supervisorId
+                    })
+                });
+                const data = await response.json();
+                showMessage(data.message || data.error, !response.ok || !!data.error);
+                if (response.ok) loadTeamStructure();
+            }
+
+            async function unassignEmployee(employeeId, departmentId) {
+                if (!confirm("Remove this employee from their assigned supervisor?")) return;
+                const response = await apiFetch(`${apiBase}/supervisor/team-structure/unassign`, {
+                    method: "POST",
+                    body: JSON.stringify({ employee_id: employeeId, department_id: departmentId })
+                });
+                const data = await response.json();
+                showMessage(data.message || data.error, !response.ok || !!data.error);
+                if (response.ok) loadTeamStructure();
+            }
+
+            async function createStaff() {
+                const employee_number =
+                    document.getElementById("newEmployeeNumber").value;
+
+                const first_name =
+                    document.getElementById("newFirstName").value;
+
+                const last_name =
+                    document.getElementById("newLastName").value;
+
+                const department_id =
+                    document.getElementById("newDepartmentId").value;
+
+                const role =
+                    document.getElementById("newRole").value;
+
+                const response =
+                    await apiFetch(`${apiBase}/supervisor/create-staff`, {
+                        method: "POST",
+                        body: JSON.stringify({
+                            employee_number,
+                            first_name,
+                            last_name,
+                            department_id,
+                            role
+                        })
+                    });
+
+                const data = await response.json();
+
+                if (data.error) {
+
+                    showMessage(data.error, true);
+
+                    return;
+                }
+
+                showMessage(data.message);
+
+                loadTeamStructure();
+            }
+
+            async function resetPin(employeeId) {
+                const confirmed = confirm(
+                    "Reset this employee's PIN to 1111?\n\nThey will be required to create a new PIN at next login."
+                );
+
+                if (!confirmed) return;
+
+                const response =
+                    await apiFetch(`${apiBase}/supervisor/reset-pin`, {
+                        method: "POST",
+                        body: JSON.stringify({
+                            employee_id: employeeId
+                        })
+                    });
+
+                const data = await response.json();
+
+                showMessage(data.message || data.error, !!data.error);
+
+                loadTeamStructure();
+            }
+
+            async function deactivateStaff(employeeId) {
+                alert(
+                    "WARNING: This will remove the employee from future active lists.\n\nHistorical timecard data will NOT be deleted."
+                );
+
+                const confirmation = prompt(
+                    "Type DEACTIVATE to confirm."
+                );
+
+                const response =
+                    await apiFetch(`${apiBase}/supervisor/deactivate-staff`, {
+                        method: "POST",
+                        body: JSON.stringify({
+                            employee_id: employeeId,
+                            confirmation
+                        })
+                    });
+
+                const data = await response.json();
+
+                showMessage(data.message || data.error, !!data.error);
+
+                loadDashboard();
+            }
+
+            async function reactivateStaff(employeeId) {
+                const response =
+                    await apiFetch(`${apiBase}/supervisor/reactivate-staff`, {
+                        method: "POST",
+                        body: JSON.stringify({
+                            employee_id: employeeId
+                        })
+                    });
+
+                const data = await response.json();
+
+                showMessage(data.message || data.error, !!data.error);
+
+                loadDashboard();
+            }
+
+        checkExistingLogin();
+
+    </script>
+
+</body>
+
+</html>

@@ -1,0 +1,1035 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta charset="UTF-8">
+    <title>Employee Portal</title>
+
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 1300px;
+            margin: 40px auto;
+            padding: 20px;
+            background: #f4f6f9;
+        }
+
+        h1,
+        h2 {
+            margin-top: 0;
+        }
+
+        .card {
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 2px 6px rgba(0, 0, 0, 0.12);
+            margin-bottom: 20px;
+        }
+
+        .topbar {
+            background: white;
+            border-radius: 10px;
+            padding: 15px 20px;
+            box-shadow: 0 2px 6px rgba(0, 0, 0, 0.12);
+            margin-bottom: 20px;
+            overflow: auto;
+        }
+
+        .btn-logout {
+            background: #2c3e50;
+            color: white;
+            float: right;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        th,
+        td {
+            padding: 12px;
+            border-bottom: 1px solid #ddd;
+            text-align: left;
+        }
+
+        th {
+            background: #ececec;
+        }
+
+        button {
+            padding: 8px 14px;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            margin-right: 5px;
+            margin-bottom: 5px;
+        }
+
+        input,
+        textarea,
+        select {
+            width: 100%;
+            padding: 10px;
+            margin-top: 5px;
+            margin-bottom: 15px;
+            box-sizing: border-box;
+            font-size: 15px;
+        }
+
+        .btn-primary {
+            background: #1f3c5b;
+            color: white;
+        }
+
+        .btn-clock-in {
+            background: #27ae60;
+            color: white;
+        }
+
+        .btn-clock-out {
+            background: #c0392b;
+            color: white;
+        }
+
+        .btn-request {
+            background: #f39c12;
+            color: white;
+        }
+
+        .btn-submit {
+            background: #2980b9;
+            color: white;
+        }
+
+        .btn-home {
+            background: #566573;
+            color: white;
+        }
+
+        .day-color-a {
+            background: #ffffff;
+        }
+
+        .day-color-b {
+            background: #f1f6fb;
+        }
+
+        .day-start td {
+            border-top: 3px solid #b8c7d9;
+        }
+
+        .summary-row {
+            display: flex;
+            gap: 20px;
+            margin-bottom: 15px;
+        }
+
+        .summary-box {
+            background: #f5f5f5;
+            padding: 15px;
+            border-radius: 8px;
+            flex: 1;
+        }
+
+        #messageBox {
+            margin-bottom: 20px;
+            padding: 12px;
+            border-radius: 6px;
+            display: none;
+        }
+
+        .success {
+            background: #d4edda;
+            color: #155724;
+        }
+
+        .error {
+            background: #f8d7da;
+            color: #721c24;
+        }
+
+        .modal-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.5);
+            display: none;
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+        }
+
+        .modal {
+            background: white;
+            width: 520px;
+            max-width: 95%;
+            padding: 25px;
+            border-radius: 10px;
+        }
+
+        .modal-buttons {
+            text-align: right;
+        }
+
+        .login-card {
+            max-width: 420px;
+            margin: 80px auto;
+        }
+
+        .hidden {
+            display: none;
+        }
+
+        .status-pill {
+            display: inline-block;
+            padding: 4px 9px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: bold;
+            text-transform: uppercase;
+        }
+
+        .status-pending {
+            background: #fff3cd;
+            color: #856404;
+        }
+
+        .status-approved {
+            background: #d4edda;
+            color: #155724;
+        }
+
+        .status-denied {
+            background: #f8d7da;
+            color: #721c24;
+        }
+
+        .status-submitted {
+            color: #d68910;
+            font-weight: bold;
+        }
+
+        .status-complete {
+            color: #27ae60;
+            font-weight: bold;
+        }
+
+        .status-needed {
+            color: #c0392b;
+            font-weight: bold;
+        }
+    </style>
+</head>
+
+<body>
+
+    <div id="messageBox"></div>
+
+    <div id="loginView" class="card login-card">
+        <h1>Employee Login</h1>
+
+        <label>Employee Number</label>
+        <input type="text" id="loginEmployeeNumber" placeholder="Employee Number">
+
+        <label>PIN</label>
+        <input type="password" id="loginPin" placeholder="PIN">
+
+        <button class="btn-primary" onclick="login()">Legacy PIN Login</button>
+        <button class="btn-submit" onclick="portalLogin()">Sign In Through Employee Portal</button>
+        <button class="btn-home" onclick="goHome()">Home</button>
+    </div>
+
+    <div id="pinChangeView" class="hidden">
+    
+        <div class="card login-card">
+    
+            <h1>PIN Change Required</h1>
+    
+            <p>
+                Your PIN was reset by a supervisor.
+                You must create a new PIN before continuing.
+            </p>
+    
+            <label>New PIN</label>
+            <input type="password" id="newPin1">
+    
+            <label>Confirm New PIN</label>
+            <input type="password" id="newPin2">
+    
+            <button class="btn-primary" onclick="changePin()">
+                Change PIN
+            </button>
+    
+        </div>
+    
+        </div>
+
+    <div id="employeeView" class="hidden">
+
+        <div class="topbar">
+            <button class="btn-logout" onclick="logout()">Sign Out</button>
+            <div id="userInfo"></div>
+        </div>
+
+        <h1>Employee Portal</h1>
+
+        <div class="card">
+            <h2>Clock Actions</h2>
+
+            <button id="clockInButton" class="btn-clock-in" onclick="clockIn()">Clock In</button>
+            <button id="clockOutButton" class="btn-clock-out" onclick="clockOut()">Clock Out</button>
+            <button id="submitTimecardButton" class="btn-submit" onclick="submitTimecard()">Submit Timecard</button>
+            <button class="btn-home" onclick="goHome()">Home</button>
+        </div>
+
+        <div id="payPeriodNavigator"></div>
+
+        <div id="timecardBox"></div>
+
+        <div id="requestsBox"></div>
+
+    </div>
+
+    <div class="modal-overlay" id="requestModal">
+        <div class="modal">
+            <h2>Request Punch Change</h2>
+
+            <label>What needs to be adjusted?</label>
+            <select id="requestChangeType" onchange="updateRequestFieldVisibility()">
+                <option value="clock_in">Clock In Only</option>
+                <option value="clock_out">Clock Out Only</option>
+                <option value="both">Both Clock In and Clock Out</option>
+            </select>
+
+            <div id="requestClockInFields">
+                <label>Clock In Date</label>
+                <input type="date" id="requestClockInDate">
+
+                <label>Clock In Time</label>
+                <select id="requestClockInTime"></select>
+            </div>
+
+            <div id="requestClockOutFields">
+                <label>Clock Out Date</label>
+                <input type="date" id="requestClockOutDate">
+
+                <label>Clock Out Time</label>
+                <select id="requestClockOutTime"></select>
+            </div>
+
+            <label>Reason for Request</label>
+            <textarea id="requestReason" rows="4"></textarea>
+
+            <div class="modal-buttons">
+                <button onclick="closeRequestModal()">Cancel</button>
+                <button class="btn-request" onclick="submitChangeRequest()">Submit Request</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const apiBase = "/api";
+
+        let currentUser = null;
+        let currentEntryId = null;
+        let currentPermissions = new Set();
+        let selectedPeriodStart = new URLSearchParams(window.location.search).get("periodStart") || null;
+        let payPeriodOptions = [];
+        let currentEditMode = "request";
+
+        function withSelectedPeriod(url) {
+            if (!selectedPeriodStart || !url.startsWith(apiBase)) return url;
+            const separator = url.includes("?") ? "&" : "?";
+            return `${url}${separator}period_start=${encodeURIComponent(selectedPeriodStart)}`;
+        }
+
+        function formatPeriodDate(value) {
+            if (!value) return "";
+            return new Date(`${value.slice(0, 10)}T12:00:00`).toLocaleDateString();
+        }
+
+        function setSelectedPeriod(periodStart) {
+            const url = new URL(window.location.href);
+            url.searchParams.set("periodStart", periodStart);
+            window.location.href = url.toString();
+        }
+
+        function renderPayPeriodNavigator() {
+            const container = document.getElementById("payPeriodNavigator");
+            if (!container || !payPeriodOptions.length || !selectedPeriodStart) return;
+            const currentIndex = payPeriodOptions.findIndex(p => p.pay_period_start === selectedPeriodStart);
+            const selected = payPeriodOptions[currentIndex] || payPeriodOptions.find(p => p.is_current);
+            const previous = payPeriodOptions[currentIndex + 1];
+            const next = payPeriodOptions[currentIndex - 1];
+
+            container.innerHTML = `
+                <div class="card">
+                    <h2>Pay Period</h2>
+                    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+                        <button class="btn-secondary" ${previous ? "" : "disabled"} onclick="setSelectedPeriod('${previous?.pay_period_start || selectedPeriodStart}')">Previous</button>
+                        <select onchange="setSelectedPeriod(this.value)" style="max-width:280px;">
+                            ${payPeriodOptions.map(period => `
+                                <option value="${period.pay_period_start}" ${period.pay_period_start === selectedPeriodStart ? "selected" : ""}>
+                                    ${formatPeriodDate(period.pay_period_start)} through ${formatPeriodDate(period.pay_period_end)}${period.is_current ? " (Current)" : ""}
+                                </option>`).join("")}
+                        </select>
+                        <button class="btn-secondary" ${next ? "" : "disabled"} onclick="setSelectedPeriod('${next?.pay_period_start || selectedPeriodStart}')">Next</button>
+                    </div>
+                </div>`;
+        }
+
+        async function loadPayPeriodNavigator() {
+            const response = await apiFetch(`${apiBase}/pay-periods`);
+            const data = await response.json();
+            payPeriodOptions = data.periods || [];
+            if (!selectedPeriodStart) selectedPeriodStart = data.current.pay_period_start;
+            renderPayPeriodNavigator();
+        }
+
+        function portalLogin() {
+            window.location.href = "https://employee.edgefieldcountysc.org/apps/timeclock/launch?return_to=employee";
+        }
+
+        function setPermissions(permissions) {
+            currentPermissions = new Set(permissions || []);
+        }
+
+        function hasPermission(permission) {
+            return currentPermissions.has("app_admin") || currentPermissions.has(permission);
+        }
+
+        function applyPermissionUi() {
+            const clockAllowed = hasPermission("clock_in_out");
+            document.getElementById("clockInButton").style.display = clockAllowed ? "inline-block" : "none";
+            document.getElementById("clockOutButton").style.display = clockAllowed ? "inline-block" : "none";
+            document.getElementById("submitTimecardButton").style.display = hasPermission("submit_timecard") ? "inline-block" : "none";
+        }
+
+        function getToken() {
+            return localStorage.getItem("timeclock_token");
+        }
+
+        function setToken(token) {
+            localStorage.setItem("timeclock_token", token);
+        }
+
+        function clearToken() {
+            localStorage.removeItem("timeclock_token");
+        }
+
+        function goHome() {
+            window.location.href = "/index.html";
+        }
+
+        function showMessage(message, isError = false) {
+            const box = document.getElementById("messageBox");
+            box.style.display = "block";
+            box.className = isError ? "error" : "success";
+            box.innerText = message;
+
+            setTimeout(() => {
+                box.style.display = "none";
+            }, 5000);
+        }
+
+        async function apiFetch(url, options = {}) {
+            const token = getToken();
+
+            const headers = {
+                ...(options.headers || {})
+            };
+
+            if (token) {
+                headers["Authorization"] = `Bearer ${token}`;
+            }
+
+            if (!headers["Content-Type"] && options.body) {
+                headers["Content-Type"] = "application/json";
+            }
+
+            url = withSelectedPeriod(url);
+
+            const response = await fetch(url, {
+                ...options,
+                headers
+            });
+
+            if (response.status === 401) {
+                clearToken();
+                showLogin();
+                throw new Error("Login required");
+            }
+
+            if (response.status === 403) {
+                let message = "You do not have permission for this action";
+                try {
+                    const errorData = await response.clone().json();
+                    message = errorData.error || message;
+                } catch (_) {}
+                showMessage(message, true);
+                throw new Error(message);
+            }
+
+            return response;
+        }
+
+        function showLogin() {
+            document.getElementById("loginView").classList.remove("hidden");
+            document.getElementById("employeeView").classList.add("hidden");
+        }
+
+        function showEmployeeView() {
+            document.getElementById("loginView").classList.add("hidden");
+            document.getElementById("employeeView").classList.remove("hidden");
+        }
+
+        function renderUserInfo() {
+            document.getElementById("userInfo").innerHTML = `
+                Logged in as:
+                <strong>${currentUser.first_name} ${currentUser.last_name}</strong>
+                <br>
+                Department:
+                ${currentUser.department_name || currentUser.department || "-"}
+            `;
+        }
+
+        async function login() {
+            const employeeNumber = document.getElementById("loginEmployeeNumber").value;
+            const pin = document.getElementById("loginPin").value;
+
+            const response = await fetch(`${apiBase}/login`, {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json"
+                },
+                body: JSON.stringify({
+                    employee_number: employeeNumber,
+                    pin: pin
+                })
+            });
+
+            const data = await response.json();
+
+            if (data.error) {
+                showMessage(data.error, true);
+                return;
+            }
+
+            setToken(data.token);
+            currentUser = data.user;
+            setPermissions(data.permissions || []);
+
+            document.getElementById("loginPin").value = "";
+
+            if (currentUser.must_change_pin) {
+                showPinChangeView();
+            } else {
+                showEmployeeView();
+            }
+            renderUserInfo();
+            applyPermissionUi();
+            if (hasPermission("view_own_time")) {
+                await loadPayPeriodNavigator();
+                await loadMyTimecard();
+            }
+        }
+
+        async function logout() {
+            try {
+                await apiFetch(`${apiBase}/logout`, {
+                    method: "POST"
+                });
+            } catch (err) {}
+
+            clearToken();
+            window.location.href = "/global-logout.html";
+        }
+
+        async function checkExistingLogin() {
+            const token = getToken();
+
+            if (!token) {
+                showLogin();
+                return;
+            }
+
+            try {
+                const response = await apiFetch(`${apiBase}/me`);
+                const data = await response.json();
+                currentUser = data.user;
+                setPermissions(data.permissions || []);
+                if (currentUser.must_change_pin) {
+                    showPinChangeView();
+                } else {
+                    showEmployeeView();
+                }
+                renderUserInfo();
+                applyPermissionUi();
+                if (hasPermission("view_own_time")) {
+                await loadPayPeriodNavigator();
+                await loadMyTimecard();
+            }
+            } catch (err) {
+                showLogin();
+            }
+        }
+
+        function getDateOnly(value) {
+            if (!value) return "";
+            return value.split("T")[0];
+        }
+
+        function buildTimestamp(dateValue, timeValue) {
+            if (!dateValue || !timeValue) return "";
+            return `${dateValue} ${timeValue}:00`;
+        }
+
+        function populateTimeDropdown(selectId) {
+            const select = document.getElementById(selectId);
+            select.innerHTML = "";
+
+            const blank = document.createElement("option");
+            blank.value = "";
+            blank.textContent = "--";
+            select.appendChild(blank);
+
+            for (let hour = 0; hour < 24; hour++) {
+                for (let minute of [0, 15, 30, 45]) {
+                    const value =
+                        String(hour).padStart(2, "0") +
+                        ":" +
+                        String(minute).padStart(2, "0");
+
+                    const displayHour = hour % 12 === 0 ? 12 : hour % 12;
+                    const amPm = hour < 12 ? "AM" : "PM";
+                    const display =
+                        `${displayHour}:${String(minute).padStart(2, "0")} ${amPm}`;
+
+                    const option = document.createElement("option");
+                    option.value = value;
+                    option.textContent = display;
+                    select.appendChild(option);
+                }
+            }
+        }
+
+        function getApprovalStatus(approval) {
+            if (!approval) {
+                return `<span class="status-needed">Not Submitted</span>`;
+            }
+
+            if (approval.status === "supervisor_approved") {
+                return `<span class="status-complete">Approved</span>`;
+            }
+
+            if (approval.status === "employee_submitted") {
+                return `<span class="status-submitted">Submitted / Waiting Supervisor Review</span>`;
+            }
+
+            if (approval.status === "returned_to_employee") {
+                return `<span class="status-needed">Returned to Employee</span>`;
+            }
+
+            return `<span class="status-needed">Not Submitted</span>`;
+        }
+
+        async function loadMyTimecard() {
+            const response = await apiFetch(`${apiBase}/employee/my-timecard`);
+            const data = await response.json();
+
+            let totalHours = 0;
+            data.entries.forEach(entry => {
+                totalHours += Number(entry.hours_worked || 0);
+            });
+
+            let html = `
+                <div class="card">
+                    <h2>Selected Pay Period</h2>
+
+                    <div class="summary-row">
+                        <div class="summary-box">
+                            <strong>Pay Period</strong><br>
+                            ${getDateOnly(data.pay_period_start)}
+                            through
+                            ${getDateOnly(data.pay_period_end)}
+                        </div>
+
+                        <div class="summary-box">
+                            <strong>Total Hours</strong><br>
+                            ${totalHours.toFixed(2)}
+                        </div>
+
+                        <div class="summary-box">
+                            <strong>Status</strong><br>
+                            ${getApprovalStatus(data.approval)}
+                        </div>
+                    </div>
+
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Date</th>
+                                <th>Clock In</th>
+                                <th>Clock Out</th>
+                                <th>Hours</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+            `;
+
+            let previousDate = null;
+            let dayColorIndex = -1;
+
+            data.entries.forEach(entry => {
+                const isNewDay = entry.entry_date !== previousDate;
+
+                if (isNewDay) {
+                    dayColorIndex++;
+                    previousDate = entry.entry_date;
+                }
+
+                const dayClass =
+                    dayColorIndex % 2 === 0
+                        ? "day-color-a"
+                        : "day-color-b";
+
+                const startClass =
+                    isNewDay
+                        ? "day-start"
+                        : "";
+
+                html += `
+                    <tr class="${dayClass} ${startClass}">
+                        <td>${entry.entry_date}</td>
+                        <td>${entry.clock_in_display}</td>
+                        <td>
+    ${
+                    entry.clock_out_display
+                    || '<span style="color:red;font-weight:bold;">MISSED CLOCK OUT</span>'
+    }
+</td>
+                        <td>${entry.hours_worked}</td>
+                        <td>
+                            ${hasPermission("request_punch_correction") ? `
+                            <button
+                                class="btn-request"
+                                onclick="openRequestModal(
+                                    ${entry.id},
+                                    '${entry.entry_date_iso}',
+                                    '${entry.clock_in_24}',
+                                    '${entry.entry_date_iso}',
+                                    '${entry.clock_out_24 || ""}',
+                                    '${data.can_edit_entries ? "edit" : "request"}'
+                                )">
+                                ${data.can_edit_entries ? "Edit Time" : "Request Change"}
+                            </button>` : "-"}
+                        </td>
+                    </tr>
+                `;
+            });
+
+            html += `
+                        </tbody>
+                    </table>
+                </div>
+            `;
+
+            document.getElementById("timecardBox").innerHTML = html;
+
+            renderRequests(data.requests || []);
+        }
+
+        function renderRequests(requests) {
+            let html = `
+                <div class="card">
+                    <h2>My Change Requests</h2>
+            `;
+
+            if (requests.length === 0) {
+                html += `<p>No change requests submitted.</p>`;
+            } else {
+                html += `
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Requested</th>
+                                <th>Status</th>
+                                <th>Reason</th>
+                                <th>Supervisor Note</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                `;
+
+                requests.forEach(request => {
+                    const statusClass =
+                        request.status === "approved"
+                            ? "status-approved"
+                            : request.status === "denied"
+                                ? "status-denied"
+                                : "status-pending";
+
+                    html += `
+                        <tr>
+                            <td>${request.created_at_display}</td>
+                            <td>
+                                <span class="status-pill ${statusClass}">
+                                    ${request.status}
+                                </span>
+                            </td>
+                            <td>${request.employee_reason}</td>
+                            <td>${request.supervisor_note || "-"}</td>
+                        </tr>
+                    `;
+                });
+
+                html += `
+                        </tbody>
+                    </table>
+                `;
+            }
+
+            html += `</div>`;
+
+            document.getElementById("requestsBox").innerHTML = html;
+        }
+
+        async function runPunch(endpoint) {
+            try {
+                const response = await apiFetch(`${apiBase}/${endpoint}`, { method: "POST" });
+                const data = await response.json();
+                showMessage(data.message || data.error, !!data.error);
+                if (response.ok && hasPermission("view_own_time")) await loadMyTimecard();
+            } catch (err) {
+                if (err.message !== "Login required") console.error(err);
+            }
+        }
+
+        async function clockIn() {
+            return runPunch("clock-in");
+        }
+
+        async function clockOut() {
+            return runPunch("clock-out");
+        }
+
+        async function submitTimecard() {
+            const confirmed = confirm(
+                "I certify this timecard is accurate and ready for supervisor review."
+            );
+            if (!confirmed) return;
+
+            try {
+                const response = await apiFetch(`${apiBase}/submit-timecard`, { method: "POST" });
+                const data = await response.json();
+                showMessage(data.message || data.error, !!data.error);
+                if (response.ok && hasPermission("view_own_time")) await loadMyTimecard();
+            } catch (err) {
+                if (err.message !== "Login required") console.error(err);
+            }
+        }
+
+        function updateRequestFieldVisibility() {
+            const changeType = document.getElementById("requestChangeType").value;
+
+            document.getElementById("requestClockInFields").style.display =
+                changeType === "clock_out" ? "none" : "block";
+
+            document.getElementById("requestClockOutFields").style.display =
+                changeType === "clock_in" ? "none" : "block";
+        }
+
+        function openRequestModal(
+            entryId,
+            clockInDate,
+            clockInTime,
+            clockOutDate,
+            clockOutTime,
+            editMode = "request"
+        ) {
+            currentEntryId = entryId;
+            currentEditMode = editMode;
+
+            document.getElementById("requestClockInDate").value = clockInDate || "";
+            document.getElementById("requestClockInTime").value = clockInTime || "";
+            document.getElementById("requestClockOutDate").value = clockOutDate || clockInDate || "";
+            document.getElementById("requestClockOutTime").value = clockOutTime || "";
+            document.getElementById("requestReason").value = "";
+
+            let defaultChangeType = "both";
+
+            if (!clockInTime && clockOutTime) {
+                defaultChangeType = "clock_in";
+            } else if (clockInTime && !clockOutTime) {
+                defaultChangeType = "clock_out";
+            }
+
+            document.getElementById("requestChangeType").value = defaultChangeType;
+            updateRequestFieldVisibility();
+
+            document.getElementById("requestModal").style.display = "flex";
+        }
+
+        function closeRequestModal() {
+            document.getElementById("requestModal").style.display = "none";
+        }
+
+        async function submitChangeRequest() {
+            const changeType = document.getElementById("requestChangeType").value;
+            const clockInDate = document.getElementById("requestClockInDate").value;
+            const clockInTime = document.getElementById("requestClockInTime").value;
+            const clockOutDate = document.getElementById("requestClockOutDate").value;
+            const clockOutTime = document.getElementById("requestClockOutTime").value;
+            const reason = document.getElementById("requestReason").value;
+
+            if (
+                changeType !== "clock_out"
+                && (!clockInDate || !clockInTime)
+            ) {
+                showMessage("Requested clock in date and time are required", true);
+                return;
+            }
+
+            if (
+                changeType !== "clock_in"
+                && (!clockOutDate || !clockOutTime)
+            ) {
+                showMessage("Requested clock out date and time are required", true);
+                return;
+            }
+
+            if (!reason.trim()) {
+                showMessage("Reason is required", true);
+                return;
+            }
+
+            const requestedClockIn =
+                changeType === "clock_out"
+                    ? null
+                    : buildTimestamp(clockInDate, clockInTime);
+
+            const requestedClockOut =
+                changeType === "clock_in"
+                    ? null
+                    : buildTimestamp(clockOutDate, clockOutTime);
+
+            const directEdit = currentEditMode === "edit";
+            const response = await apiFetch(
+                directEdit
+                    ? `${apiBase}/employee/edit-time-entry`
+                    : `${apiBase}/employee/request-time-change`,
+                {
+                    method: "POST",
+                    body: JSON.stringify(
+                        directEdit
+                            ? {
+                                time_entry_id: currentEntryId,
+                                new_clock_in: buildTimestamp(clockInDate, clockInTime),
+                                new_clock_out: clockOutDate && clockOutTime
+                                    ? buildTimestamp(clockOutDate, clockOutTime)
+                                    : null,
+                                reason
+                            }
+                            : {
+                                time_entry_id: currentEntryId,
+                                requested_clock_in: requestedClockIn,
+                                requested_clock_out: requestedClockOut,
+                                employee_reason: reason
+                            }
+                    )
+                }
+            );
+
+            const data = await response.json();
+
+            if (data.error) {
+                showMessage(data.error, true);
+                return;
+            }
+
+            closeRequestModal();
+            showMessage(currentEditMode === "edit" ? "Time entry updated" : "Time change request submitted");
+            loadMyTimecard();
+        }
+
+        populateTimeDropdown("requestClockInTime");
+        populateTimeDropdown("requestClockOutTime");
+
+            function showPinChangeView() {
+
+                document.getElementById("loginView")
+                    .classList.add("hidden");
+
+                document.getElementById("employeeView")
+                    .classList.add("hidden");
+
+                document.getElementById("pinChangeView")
+                    .classList.remove("hidden");
+            }
+
+            async function changePin() {
+
+                const pin1 =
+                    document.getElementById("newPin1").value;
+
+                const pin2 =
+                    document.getElementById("newPin2").value;
+
+                if (pin1.length < 4) {
+
+                    showMessage(
+                        "PIN must be at least 4 digits",
+                        true
+                    );
+
+                    return;
+                }
+
+                if (pin1 !== pin2) {
+
+                    showMessage(
+                        "PINs do not match",
+                        true
+                    );
+
+                    return;
+                }
+
+                const response =
+                    await apiFetch(
+                        `${apiBase}/employee/change-pin`,
+                        {
+                            method: "POST",
+                            body: JSON.stringify({
+                                new_pin: pin1
+                            })
+                        }
+                    );
+
+                const data =
+                    await response.json();
+
+                if (data.error) {
+
+                    showMessage(data.error, true);
+
+                    return;
+                }
+
+                currentUser.must_change_pin = false;
+
+                showMessage("PIN changed successfully");
+
+                showEmployeeView();
+
+                loadMyTimecard();
+            }
+
+        checkExistingLogin();
+    </script>
+
+</body>
+
+</html>

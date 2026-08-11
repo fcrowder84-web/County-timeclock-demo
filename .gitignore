@@ -1,0 +1,35 @@
+# Runtime secrets
+.env
+.env.*
+!.env.example
+
+# Database/runtime state
+postgres/data/
+*.pid
+*.log
+
+# Dependencies/build artifacts
+node_modules/
+backend/node_modules/
+frontend/node_modules/
+dist/
+build/
+coverage/
+
+# Local/editor files
+.vscode/
+.DS_Store
+
+# Historical handoff/backup material
+handoff/
+*backup*
+*.bak
+*.old
+
+# Runtime/generated executables or artifacts
+node
+county-timeclock-backend@*
+
+# Uploaded/runtime data
+uploads/
+tmp/

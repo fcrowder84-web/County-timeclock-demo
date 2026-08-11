@@ -1,0 +1,1052 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta charset="UTF-8">
+    <title>Payroll Portal</title>
+
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 1300px;
+            margin: 40px auto;
+            padding: 20px;
+            background: #f4f6f9;
+        }
+
+        h1,
+        h2,
+        h3 {
+            margin-top: 0;
+        }
+
+        .card {
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 2px 6px rgba(0, 0, 0, 0.12);
+            margin-bottom: 20px;
+        }
+
+        .topbar {
+            background: white;
+            border-radius: 10px;
+            padding: 15px 20px;
+            box-shadow: 0 2px 6px rgba(0, 0, 0, 0.12);
+            margin-bottom: 20px;
+            overflow: auto;
+        }
+
+        .btn-logout {
+            background: #2c3e50;
+            color: white;
+            float: right;
+        }
+
+        .btn-home {
+            background: #566573;
+            color: white;
+        }
+
+        .btn-primary {
+            background: #1f3c5b;
+            color: white;
+        }
+
+        .btn-export {
+            background: #27ae60;
+            color: white;
+        }
+
+        .btn-print {
+            background: #8e44ad;
+            color: white;
+        }
+
+        button {
+            padding: 8px 14px;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            margin-right: 5px;
+            margin-bottom: 5px;
+        }
+
+        input {
+            width: 100%;
+            padding: 10px;
+            margin-top: 5px;
+            margin-bottom: 15px;
+            box-sizing: border-box;
+            font-size: 15px;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 15px;
+        }
+
+        th,
+        td {
+            padding: 12px;
+            border-bottom: 1px solid #ddd;
+            text-align: left;
+        }
+
+        th {
+            background: #ececec;
+        }
+
+        .login-card {
+            max-width: 420px;
+            margin: 80px auto;
+        }
+
+        .hidden {
+            display: none;
+        }
+
+        #messageBox {
+            margin-bottom: 20px;
+            padding: 12px;
+            border-radius: 6px;
+            display: none;
+        }
+
+        .success {
+            background: #d4edda;
+            color: #155724;
+        }
+
+        .error {
+            background: #f8d7da;
+            color: #721c24;
+        }
+
+        .summary-row {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+
+        .summary-box {
+            background: #f5f5f5;
+            padding: 15px;
+            border-radius: 8px;
+            text-align: center;
+        }
+
+        .summary-number {
+            font-size: 28px;
+            font-weight: bold;
+            margin-top: 8px;
+        }
+
+        .department-header {
+            background: #1f3c5b;
+            color: white;
+            padding: 12px 15px;
+            border-radius: 8px;
+            margin-top: 25px;
+            margin-bottom: 0;
+        }
+
+        .status-good {
+            background: #d4edda;
+            color: #155724;
+            font-weight: bold;
+        }
+
+        .status-bad {
+            background: #f8d7da;
+            color: #721c24;
+            font-weight: bold;
+        }
+
+        .status-waiting {
+            background: #fff3cd;
+            color: #856404;
+            font-weight: bold;
+        }
+
+        .status-pill {
+            display: inline-block;
+            padding: 5px 10px;
+            border-radius: 14px;
+            font-size: 12px;
+            text-transform: uppercase;
+        }
+
+        .role-badge {
+            display: inline-block;
+            background: #2c3e50;
+            color: white;
+            padding: 3px 8px;
+            border-radius: 12px;
+            font-size: 12px;
+            text-transform: uppercase;
+            margin-left: 5px;
+        }
+
+        .muted {
+            color: #666;
+            font-size: 14px;
+        }
+
+        .modal-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.5);
+            display: none;
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+        }
+
+        .modal {
+            background: white;
+            width: 950px;
+            max-width: 98%;
+            max-height: 90vh;
+            overflow-y: auto;
+            padding: 25px;
+            border-radius: 10px;
+        }
+
+        .modal-buttons {
+            text-align: right;
+            margin-top: 18px;
+        }
+
+        .btn-edit {
+            background: #f39c12;
+            color: white;
+        }
+
+        .day-color-a {
+            background: #ffffff;
+        }
+
+        .day-color-b {
+            background: #f1f6fb;
+        }
+
+        .day-start td {
+            border-top: 3px solid #b8c7d9;
+        }
+
+        @media print {
+
+            .topbar,
+            .actions,
+            #loginView,
+            #messageBox {
+                display: none !important;
+            }
+
+            body {
+                background: white;
+                margin: 0;
+                padding: 10px;
+            }
+
+            .card {
+                box-shadow: none;
+                border: 1px solid #ddd;
+            }
+        }
+    </style>
+</head>
+
+<body>
+
+    <div id="messageBox"></div>
+
+    <div id="loginView" class="card login-card">
+        <h1>Payroll Login</h1>
+
+        <label>Employee Number</label>
+        <input type="text" id="loginEmployeeNumber" placeholder="Employee Number">
+
+        <label>PIN</label>
+        <input type="password" id="loginPin" placeholder="PIN">
+
+        <button class="btn-primary" onclick="login()">Legacy PIN Login</button>
+        <button class="btn-export" onclick="portalLogin()">Sign In Through Employee Portal</button>
+        <button class="btn-home" onclick="goHome()">Home</button>
+    </div>
+
+    <div id="payrollView" class="hidden">
+
+        <div class="topbar">
+            <button class="btn-logout" onclick="logout()">Sign Out</button>
+            <div id="userInfo"></div>
+        </div>
+
+        <h1>Payroll Portal</h1>
+
+        <div class="card actions">
+            <h2>Payroll Actions</h2>
+
+            <button class="btn-primary" onclick="loadPayrollSummary()">
+                Refresh Summary
+            </button>
+
+            <button id="exportButton" class="btn-export" onclick="exportPayrollCsv()">
+                Export CSV
+            </button>
+
+            <button id="printSummaryButton" class="btn-print" onclick="window.print()">
+                Print / Save as PDF
+            </button>
+
+            <button id="printTimecardsButton" class="btn-print" onclick="openPrintableTimecards()">
+                Print Payroll Timecards   </button>
+
+            <button class="btn-home" onclick="goHome()">
+                Home
+            </button>
+        </div>
+
+        <div id="payPeriodNavigator"></div>
+
+        <div id="employeeSelector"></div>
+
+        <div id="summaryCards"></div>
+
+        <div id="departmentSummary"></div>
+
+    </div>
+
+    <div class="modal-overlay" id="payrollTimecardModal">
+        <div class="modal">
+            <h2 id="payrollModalTitle">Employee Timecard</h2>
+            <div id="payrollModalContent"></div>
+            <div class="modal-buttons">
+                <button class="btn-home" onclick="closePayrollTimecard()">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const apiBase = "/api";
+
+        let currentUser = null;
+        let payrollRows = [];
+        let currentPermissions = new Set();
+        let selectedPeriodStart = new URLSearchParams(window.location.search).get("periodStart") || null;
+        let selectedEmployeeId = new URLSearchParams(window.location.search).get("employeeId") || null;
+        let payPeriodOptions = [];
+
+        function withSelectedPeriod(url) {
+            if (!selectedPeriodStart || !url.startsWith(apiBase)) return url;
+            const separator = url.includes("?") ? "&" : "?";
+            return `${url}${separator}period_start=${encodeURIComponent(selectedPeriodStart)}`;
+        }
+
+        function formatPeriodDate(value) {
+            return value ? new Date(`${value.slice(0, 10)}T12:00:00`).toLocaleDateString() : "";
+        }
+
+        function setSelectedPeriod(periodStart) {
+            const url = new URL(window.location.href);
+            url.searchParams.set("periodStart", periodStart);
+            if (selectedEmployeeId) url.searchParams.set("employeeId", selectedEmployeeId);
+            window.location.href = url.toString();
+        }
+
+        function renderPayPeriodNavigator() {
+            const container = document.getElementById("payPeriodNavigator");
+            if (!container || !payPeriodOptions.length || !selectedPeriodStart) return;
+            const index = payPeriodOptions.findIndex(p => p.pay_period_start === selectedPeriodStart);
+            const previous = payPeriodOptions[index + 1];
+            const next = payPeriodOptions[index - 1];
+            container.innerHTML = `
+                <div class="card actions">
+                    <h2>Pay Period</h2>
+                    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+                        <button class="btn-primary" ${previous ? "" : "disabled"} onclick="setSelectedPeriod('${previous?.pay_period_start || selectedPeriodStart}')">Previous</button>
+                        <select onchange="setSelectedPeriod(this.value)" style="max-width:300px;">
+                            ${payPeriodOptions.map(period => `<option value="${period.pay_period_start}" ${period.pay_period_start === selectedPeriodStart ? "selected" : ""}>${formatPeriodDate(period.pay_period_start)} through ${formatPeriodDate(period.pay_period_end)}${period.is_current ? " (Current)" : ""}</option>`).join("")}
+                        </select>
+                        <button class="btn-primary" ${next ? "" : "disabled"} onclick="setSelectedPeriod('${next?.pay_period_start || selectedPeriodStart}')">Next</button>
+                    </div>
+                </div>`;
+        }
+
+        async function loadPayPeriodNavigator() {
+            const response = await apiFetch(`${apiBase}/pay-periods`);
+            const data = await response.json();
+            payPeriodOptions = data.periods || [];
+            if (!selectedPeriodStart) selectedPeriodStart = data.current.pay_period_start;
+            renderPayPeriodNavigator();
+        }
+
+        async function openEmployeeTimecard(employeeId) {
+            if (!employeeId) {
+                closePayrollTimecard();
+                return;
+            }
+
+            selectedEmployeeId = String(employeeId);
+            const selector = document.getElementById("payrollEmployeeSelect");
+            if (selector) selector.value = selectedEmployeeId;
+
+            const url = new URL(window.location.href);
+            url.searchParams.set("employeeId", selectedEmployeeId);
+            if (selectedPeriodStart) url.searchParams.set("periodStart", selectedPeriodStart);
+            window.history.replaceState({}, "", url);
+
+            await viewPayrollTimecard(selectedEmployeeId);
+        }
+
+        function renderEmployeeSelector(rows) {
+            const container = document.getElementById("employeeSelector");
+            const employees = [...rows].sort((a, b) => `${a.last_name} ${a.first_name}`.localeCompare(`${b.last_name} ${b.first_name}`));
+            container.innerHTML = `
+                <div class="card actions">
+                    <h2>Individual Employee Timecard</h2>
+                    <p class="muted">Select one employee to view or edit that employee's timecard, then use the pay-period controls to move through history.</p>
+                    <select id="payrollEmployeeSelect" onchange="openEmployeeTimecard(this.value)" style="max-width:420px;">
+                        <option value="">Select an employee...</option>
+                        ${employees.map(row => `<option value="${row.id}" ${String(row.id) === String(selectedEmployeeId || "") ? "selected" : ""}>${row.last_name}, ${row.first_name} - ${row.department || "Unassigned"}</option>`).join("")}
+                    </select>
+                </div>`;
+        }
+
+        const payrollPermissionKeys = [
+            "view_payroll_records", "review_approved_timecards", "edit_payroll_time",
+            "return_to_supervisor", "reopen_timecard", "finalize_timecard",
+            "finalize_pay_period", "export_payroll", "view_payroll_reports",
+            "view_all_timeclock_records"
+        ];
+
+        function portalLogin() {
+            window.location.href = "https://employee.edgefieldcountysc.org/apps/timeclock/launch?return_to=payroll";
+        }
+
+        function setPermissions(permissions) {
+            currentPermissions = new Set(permissions || []);
+        }
+
+        function hasPermission(permission) {
+            return currentPermissions.has("app_admin") || currentPermissions.has(permission);
+        }
+
+        function hasPayrollAccess() {
+            return payrollPermissionKeys.some(hasPermission);
+        }
+
+        function applyPermissionUi() {
+            document.getElementById("exportButton").style.display = hasPermission("export_payroll") ? "inline-block" : "none";
+            const canPrint = hasPermission("view_payroll_records") || hasPermission("view_payroll_reports") || hasPermission("export_payroll");
+            document.getElementById("printSummaryButton").style.display = canPrint ? "inline-block" : "none";
+            document.getElementById("printTimecardsButton").style.display = canPrint ? "inline-block" : "none";
+        }
+
+        function getToken() {
+            return localStorage.getItem("timeclock_token");
+        }
+
+        function setToken(token) {
+            localStorage.setItem("timeclock_token", token);
+        }
+
+        function clearToken() {
+            localStorage.removeItem("timeclock_token");
+        }
+
+        function goHome() {
+            window.location.href = "/index.html";
+        }
+
+        function showMessage(message, isError = false) {
+            const box = document.getElementById("messageBox");
+            box.style.display = "block";
+            box.className = isError ? "error" : "success";
+            box.innerText = message;
+
+            setTimeout(() => {
+                box.style.display = "none";
+            }, 5000);
+        }
+
+        async function apiFetch(url, options = {}) {
+            const token = getToken();
+
+            const headers = {
+                ...(options.headers || {})
+            };
+
+            if (token) {
+                headers["Authorization"] = `Bearer ${token}`;
+            }
+
+            if (!headers["Content-Type"] && options.body) {
+                headers["Content-Type"] = "application/json";
+            }
+
+            url = withSelectedPeriod(url);
+
+            const response = await fetch(url, {
+                ...options,
+                headers
+            });
+
+            if (response.status === 401) {
+                clearToken();
+                showLogin();
+                throw new Error("Login required");
+            }
+
+            if (response.status === 403) {
+                let message = "You do not have permission for this action";
+                try {
+                    const errorData = await response.clone().json();
+                    message = errorData.error || message;
+                } catch (_) {}
+                showMessage(message, true);
+                throw new Error(message);
+            }
+
+            return response;
+        }
+
+        function showLogin() {
+            document.getElementById("loginView").classList.remove("hidden");
+            document.getElementById("payrollView").classList.add("hidden");
+        }
+
+        function showPayrollView() {
+            document.getElementById("loginView").classList.add("hidden");
+            document.getElementById("payrollView").classList.remove("hidden");
+        }
+
+        function renderUserInfo() {
+            document.getElementById("userInfo").innerHTML = `
+                Logged in as:
+                <strong>${currentUser.first_name} ${currentUser.last_name}</strong>
+                <span class="role-badge">${currentUser.role}</span>
+                <br>
+                Department:
+                ${currentUser.department_name || currentUser.department || "-"}
+            `;
+        }
+
+        async function login() {
+            const employeeNumber =
+                document.getElementById("loginEmployeeNumber").value;
+
+            const pin =
+                document.getElementById("loginPin").value;
+
+            const response = await fetch(`${apiBase}/login`, {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json"
+                },
+                body: JSON.stringify({
+                    employee_number: employeeNumber,
+                    pin: pin
+                })
+            });
+
+            const data = await response.json();
+
+            if (data.error) {
+                showMessage(data.error, true);
+                return;
+            }
+
+            setPermissions(data.permissions || []);
+
+            if (!hasPayrollAccess()) {
+                showMessage("Payroll permission required", true);
+                return;
+            }
+
+            setToken(data.token);
+            currentUser = data.user;
+
+            document.getElementById("loginPin").value = "";
+
+            showPayrollView();
+            renderUserInfo();
+            applyPermissionUi();
+            loadPayrollSummary();
+        }
+
+        async function logout() {
+            try {
+                await apiFetch(`${apiBase}/logout`, {
+                    method: "POST"
+                });
+            } catch (err) {}
+
+            clearToken();
+            window.location.href = "/global-logout.html";
+        }
+
+        async function checkExistingLogin() {
+            const token = getToken();
+
+            if (!token) {
+                showLogin();
+                return;
+            }
+
+            try {
+                const response = await apiFetch(`${apiBase}/me`);
+                const data = await response.json();
+
+                currentUser = data.user;
+                setPermissions(data.permissions || []);
+
+                if (!hasPayrollAccess()) {
+                    showMessage("Payroll permission required", true);
+                    window.location.href = "/index.html";
+                    return;
+                }
+
+                showPayrollView();
+                renderUserInfo();
+                applyPermissionUi();
+                loadPayrollSummary();
+            } catch (err) {
+                showLogin();
+            }
+        }
+
+        function getStatusInfo(row) {
+            if (row.supervisor_approved_at || row.status === "supervisor_approved") {
+                return {
+                    text: "Approved",
+                    className: "status-good"
+                };
+            }
+
+            if (row.employee_signed_at || row.status === "employee_submitted") {
+                return {
+                    text: "Submitted",
+                    className: "status-waiting"
+                };
+            }
+
+            return {
+                text: "Not Submitted",
+                className: "status-bad"
+            };
+        }
+
+        async function loadPayrollSummary() {
+            if (!payPeriodOptions.length) await loadPayPeriodNavigator();
+
+            const response =
+                await apiFetch(`${apiBase}/payroll/department-summary`);
+
+            const rows =
+                await response.json();
+
+            payrollRows = rows;
+
+            renderEmployeeSelector(rows);
+            renderSummaryCards(rows);
+            renderDepartmentSummary(rows);
+        }
+
+        function renderSummaryCards(rows) {
+            let submitted = 0;
+            let notSubmitted = 0;
+            let approved = 0;
+            let waitingSupervisor = 0;
+
+            rows.forEach(row => {
+                const info = getStatusInfo(row);
+
+                if (info.text === "Approved") {
+                    approved++;
+                    submitted++;
+                } else if (info.text === "Submitted") {
+                    submitted++;
+                    waitingSupervisor++;
+                } else {
+                    notSubmitted++;
+                }
+            });
+
+            document.getElementById("summaryCards").innerHTML = `
+                <div class="card">
+                    <h2>Pay Period Status</h2>
+
+                    <div class="summary-row">
+                        <div class="summary-box">
+                            <strong>Total Employees</strong>
+                            <div class="summary-number">${rows.length}</div>
+                        </div>
+
+                        <div class="summary-box status-good">
+                            <strong>Approved</strong>
+                            <div class="summary-number">${approved}</div>
+                        </div>
+
+                        <div class="summary-box status-waiting">
+                            <strong>Waiting Supervisor</strong>
+                            <div class="summary-number">${waitingSupervisor}</div>
+                        </div>
+
+                        <div class="summary-box status-bad">
+                            <strong>Not Submitted</strong>
+                            <div class="summary-number">${notSubmitted}</div>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        function renderDepartmentSummary(rows) {
+            const grouped = {};
+
+            rows.forEach(row => {
+                const department =
+                    row.department || "Unassigned";
+
+                if (!grouped[department]) {
+                    grouped[department] = [];
+                }
+
+                grouped[department].push(row);
+            });
+
+            let html = `
+                <div class="card">
+                    <h2>Employees by Department</h2>
+                    <p class="muted">
+                        Green means approved, yellow means submitted but waiting on supervisor,
+                        red means the employee has not submitted their timecard.
+                    </p>
+            `;
+
+            Object.keys(grouped).sort().forEach(department => {
+                html += `
+                    <h3 class="department-header">${department}</h3>
+
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Employee</th>
+                                <th>Role</th>
+                                <th>Status</th>
+                                <th>Employee Submitted</th>
+                                <th>Supervisor Approved</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                `;
+
+                grouped[department].forEach(row => {
+                    const status = getStatusInfo(row);
+
+                    html += `
+                        <tr>
+                            <td>
+                                ${row.first_name} ${row.last_name}
+                            </td>
+
+                            <td>
+                                ${row.role || "employee"}
+                            </td>
+
+                            <td>
+                                <span class="status-pill ${status.className}">
+                                    ${status.text}
+                                </span>
+                            </td>
+
+                            <td>
+                                ${row.employee_signed_at ? "Yes" : "No"}
+                            </td>
+
+                            <td>
+                                ${row.supervisor_approved_at ? "Yes" : "No"}
+                            </td>
+
+                            <td>
+                                <button class="btn-primary" onclick="openEmployeeTimecard(${row.id})">View / Edit Timecard</button>
+                            </td>
+                        </tr>
+                    `;
+                });
+
+                html += `
+                        </tbody>
+                    </table>
+                `;
+            });
+
+            html += `</div>`;
+
+            document.getElementById("departmentSummary").innerHTML = html;
+        }
+
+        async function viewPayrollTimecard(employeeId) {
+            const response = await apiFetch(
+                `${apiBase}/supervisor/employee-timecard/${employeeId}`
+            );
+            const data = await response.json();
+
+            if (!response.ok || data.error) {
+                showMessage(data.error || "Unable to load employee timecard", true);
+                return;
+            }
+
+            document.getElementById("payrollModalTitle").innerText =
+                `${data.employee.first_name} ${data.employee.last_name} - Payroll Timecard`;
+
+            let html = `
+                <div class="summary-row">
+                    <div class="summary-box">
+                        <strong>Department</strong><br>
+                        ${data.employee.department || "-"}
+                    </div>
+                    <div class="summary-box">
+                        <strong>Pay Period</strong><br>
+                        ${formatPeriodDate(data.pay_period_start)} through ${formatPeriodDate(data.pay_period_end)}
+                    </div>
+                    <div class="summary-box">
+                        <strong>Status</strong><br>
+                        ${data.approval?.status || "Not Submitted"}
+                    </div>
+                    <div class="summary-box">
+                        <strong>Edit Access</strong><br>
+                        ${data.can_edit_entries && hasPermission("edit_payroll_time") ? "Payroll override" : "View only"}
+                    </div>
+                </div>
+
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Date</th>
+                            <th>Clock In</th>
+                            <th>Clock Out</th>
+                            <th>Hours</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+            `;
+
+            if (!data.entries || data.entries.length === 0) {
+                html += `<tr><td colspan="5">No time entries for this pay period.</td></tr>`;
+            } else {
+                let previousDate = null;
+                let dayColorIndex = -1;
+
+                data.entries.forEach(entry => {
+                    const isNewDay = entry.entry_date !== previousDate;
+                    if (isNewDay) {
+                        dayColorIndex += 1;
+                        previousDate = entry.entry_date;
+                    }
+
+                    const dayClass = dayColorIndex % 2 === 0 ? "day-color-a" : "day-color-b";
+                    const startClass = isNewDay ? "day-start" : "";
+                    const editButton = data.can_edit_entries && hasPermission("edit_payroll_time")
+                        ? `<button class="btn-edit" onclick="editPayrollEntry(
+                                ${entry.id},
+                                '${entry.entry_date_iso}',
+                                '${entry.clock_in_time_24}',
+                                '${entry.clock_out_date_iso || entry.entry_date_iso}',
+                                '${entry.clock_out_time_24 || ""}'
+                            )">Edit</button>`
+                        : "View only";
+
+                    html += `
+                        <tr class="${dayClass} ${startClass}">
+                            <td>${entry.entry_date}</td>
+                            <td>${entry.clock_in_time}</td>
+                            <td>${entry.clock_out_time || "Open"}</td>
+                            <td>${entry.hours_worked || 0}</td>
+                            <td>${editButton}</td>
+                        </tr>
+                    `;
+                });
+            }
+
+            html += `</tbody></table>`;
+
+            if (data.change_requests && data.change_requests.length) {
+                html += `
+                    <div class="card" style="margin-top:20px;box-shadow:none;border:1px solid #ddd;">
+                        <h3>Change Requests</h3>
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Status</th>
+                                    <th>Requested</th>
+                                    <th>Reason</th>
+                                    <th>Response</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${data.change_requests.map(request => `
+                                    <tr>
+                                        <td>${request.status}</td>
+                                        <td>${request.created_at_display}</td>
+                                        <td>${request.employee_reason}</td>
+                                        <td>${request.supervisor_note || "-"}</td>
+                                    </tr>
+                                `).join("")}
+                            </tbody>
+                        </table>
+                    </div>
+                `;
+            }
+
+            document.getElementById("payrollModalContent").innerHTML = html;
+            document.getElementById("payrollTimecardModal").style.display = "flex";
+        }
+
+        async function editPayrollEntry(
+            entryId,
+            clockInDate,
+            clockInTime,
+            clockOutDate,
+            clockOutTime
+        ) {
+            const newClockInDate = prompt("Clock In Date", clockInDate);
+            if (!newClockInDate) return;
+
+            const newClockInTime = prompt("Clock In Time (24hr)", clockInTime);
+            if (!newClockInTime) return;
+
+            const newClockOutDate = prompt("Clock Out Date", clockOutDate || "");
+            const newClockOutTime = prompt("Clock Out Time (24hr)", clockOutTime || "");
+            const reason = prompt("Reason for payroll edit:");
+            if (!reason) return;
+
+            const newClockOut = newClockOutDate && newClockOutTime
+                ? `${newClockOutDate} ${newClockOutTime}:00`
+                : null;
+
+            const response = await apiFetch(
+                `${apiBase}/supervisor/edit-time-entry`,
+                {
+                    method: "POST",
+                    body: JSON.stringify({
+                        time_entry_id: entryId,
+                        new_clock_in: `${newClockInDate} ${newClockInTime}:00`,
+                        new_clock_out: newClockOut,
+                        reason
+                    })
+                }
+            );
+            const data = await response.json();
+
+            showMessage(data.message || data.error, !!data.error);
+            if (response.ok) {
+                await loadPayrollSummary();
+                if (selectedEmployeeId) await viewPayrollTimecard(selectedEmployeeId);
+            }
+        }
+
+        function closePayrollTimecard() {
+            document.getElementById("payrollTimecardModal").style.display = "none";
+            selectedEmployeeId = null;
+
+            const selector = document.getElementById("payrollEmployeeSelect");
+            if (selector) selector.value = "";
+
+            const url = new URL(window.location.href);
+            url.searchParams.delete("employeeId");
+            window.history.replaceState({}, "", url);
+        }
+
+        async function exportPayrollCsv() {
+            const response =
+                await apiFetch(`${apiBase}/payroll/export-current-period`);
+
+            const rows =
+                await response.json();
+
+            if (!rows || rows.length === 0) {
+                showMessage("No payroll data to export", true);
+                return;
+            }
+
+            const headers = [
+                "Employee Number",
+                "First Name",
+                "Last Name",
+                "Department",
+                "Date",
+                "Clock In",
+                "Clock Out",
+                "Hours",
+                "Timecard Status"
+            ];
+
+            const csvRows = [
+                headers.join(",")
+            ];
+
+            rows.forEach(row => {
+                csvRows.push([
+                    csvValue(row.employee_number),
+                    csvValue(row.first_name),
+                    csvValue(row.last_name),
+                    csvValue(row.department),
+                    csvValue(row.work_date),
+                    csvValue(row.clock_in),
+                    csvValue(row.clock_out),
+                    csvValue(row.hours_worked),
+                    csvValue(row.timecard_status)
+                ].join(","));
+            });
+
+            const blob = new Blob([csvRows.join("\n")], {
+                type: "text/csv"
+            });
+
+            const url = URL.createObjectURL(blob);
+
+            const a = document.createElement("a");
+            a.href = url;
+            a.download = "current-pay-period-export.csv";
+            a.click();
+
+            URL.revokeObjectURL(url);
+
+            showMessage("Payroll CSV exported");
+        }
+
+        function csvValue(value) {
+            if (value === null || value === undefined) {
+                return "";
+            }
+
+            const str = String(value);
+
+            if (
+                str.includes(",") ||
+                str.includes('"') ||
+                str.includes("\n")
+            ) {
+                return `"${str.replace(/"/g, '""')}"`;
+            }
+
+            return str;
+        }
+
+            function openPrintableTimecards() {
+                window.location.href = `/payroll-timecards.html?periodStart=${encodeURIComponent(selectedPeriodStart || "")}`;
+            }
+
+        checkExistingLogin();
+    </script>
+
+</body>
+
+</html>

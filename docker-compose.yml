@@ -1,0 +1,61 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: county_timeclock_postgres
+    restart: unless-stopped
+    environment:
+      TZ: America/New_York
+      PGTZ: America/New_York
+      POSTGRES_DB: county_timeclock
+      POSTGRES_USER: timeclock_user
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change_this_password}
+    volumes:
+      - ./postgres/data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U timeclock_user -d county_timeclock"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build: ./backend
+    container_name: county_timeclock_backend
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PGOPTIONS: "-c timezone=America/New_York"
+      TZ: America/New_York
+      PGHOST: postgres
+      PGPORT: 5432
+      PGDATABASE: county_timeclock
+      PGUSER: timeclock_user
+      PGPASSWORD: ${POSTGRES_PASSWORD:-change_this_password}
+      TIMECLOCK_SSO_SECRET: ${TIMECLOCK_SSO_SECRET}
+      TIMECLOCK_SSO_ISSUER: edgefield-employee-portal
+      TIMECLOCK_SSO_AUDIENCE: edgefield-timeclock
+      SESSION_TTL_HOURS: ${SESSION_TTL_HOURS:-8}
+      PORTAL_DIRECTORY_URL: ${PORTAL_DIRECTORY_URL}
+      PORTAL_DIRECTORY_API_KEY: ${PORTAL_DIRECTORY_API_KEY}
+      PORTAL_SYNC_INTERVAL_MINUTES: ${PORTAL_SYNC_INTERVAL_MINUTES:-5}
+    ports:
+      - "3000:3000"
+
+  frontend:
+    build: ./frontend
+    container_name: county_timeclock_frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "8080:80"
+
+  adminer:
+    image: adminer
+    container_name: county_timeclock_adminer
+    restart: unless-stopped
+    ports:
+      - "8081:8080"

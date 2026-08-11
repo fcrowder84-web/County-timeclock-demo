@@ -1,0 +1,510 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>Printable Payroll Timecards</title>
+
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background: #f4f6f9;
+            margin: 0;
+            padding: 20px;
+        }
+
+        .topbar {
+            background: white;
+            padding: 15px 20px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 6px rgba(0, 0, 0, 0.12);
+        }
+
+        button {
+            padding: 10px 16px;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            margin-right: 10px;
+        }
+
+        .btn-primary {
+            background: #1f3c5b;
+            color: white;
+        }
+
+        .btn-print {
+            background: #27ae60;
+            color: white;
+        }
+
+        .btn-home {
+            background: #566573;
+            color: white;
+        }
+
+        .timecard {
+            background: white;
+            padding: 8px;
+            margin-bottom: 30px;
+            border-radius: 10px;
+            box-shadow: 0 2px 6px rgba(0, 0, 0, 0.12);
+            page-break-after: always;
+        }
+
+        .header {
+            border-bottom: 2px solid #1f3c5b;
+            margin-bottom: 20px;
+            padding-bottom: 10px;
+        }
+
+        .header h1 {
+            margin: 0;
+            color: #1f3c5b;
+        }
+
+        .employee-info {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+
+        .info-box {
+            background: #f5f5f5;
+            padding: 12px;
+            border-radius: 8px;
+        }
+
+        .week-box {
+            border: 2px solid #1f3c5b;
+            border-radius: 8px;
+            margin-top: 20px;
+            overflow: hidden;
+        }
+
+        .week-header {
+            background: #1f3c5b;
+            color: white;
+            padding: 10px 14px;
+            font-weight: bold;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        th,
+        td {
+            padding: 5px;
+            border: 1px solid #ccc;
+            text-align: left;
+        }
+
+        th {
+            background: #ececec;
+        }
+
+        .day-a {
+            background: #ffffff;
+        }
+
+        .day-b {
+            background: #f1f6fb;
+        }
+
+        .week-total {
+            background: #eaf3ea;
+            font-weight: bold;
+        }
+
+        .period-total {
+            margin-top: 20px;
+            background: #eef2f7;
+            border: 2px solid #333;
+            padding: 15px;
+            border-radius: 8px;
+            font-size: 17px;
+            font-weight: bold;
+        }
+
+        .signatures {
+            margin-top: 20px;
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 50px;
+        }
+
+        .signature-box {
+            border-top: 1px solid #333;
+            padding-top: 8px;
+            min-height: 50px;
+        }
+
+        .status-approved {
+            color: #155724;
+            font-weight: bold;
+        }
+
+        .status-submitted {
+            color: #856404;
+            font-weight: bold;
+        }
+
+        .status-pending {
+            color: #721c24;
+            font-weight: bold;
+        }
+
+        @media print {
+            @page {
+                size: letter portrait;
+                margin: 0.3in;
+            }
+
+            body {
+               zoom: 0.68;
+            }           
+            
+            body {
+                background: white;
+                padding: 0;
+            }
+
+            .topbar {
+                display: none;
+            }
+
+            .timecard {
+                box-shadow: none;
+                border: none;
+                margin: 0;
+                padding: 10px;
+            }
+        }
+    </style>
+</head>
+
+<body>
+
+    <div class="topbar">
+        <button class="btn-primary" onclick="loadTimecards()">Refresh</button>
+        <button class="btn-print" onclick="window.print()">Print / Save PDF</button>
+        <button class="btn-home" onclick="goHome()">Home</button>
+    </div>
+
+    <div id="timecardsContainer"></div>
+
+    <script>
+        const apiBase = "/api";
+        const selectedPeriodStart = new URLSearchParams(window.location.search).get("periodStart") || null;
+        let loadedPeriodStart = selectedPeriodStart;
+
+        function withSelectedPeriod(url) {
+            if (!selectedPeriodStart || !url.startsWith(apiBase)) return url;
+            const separator = url.includes("?") ? "&" : "?";
+            return `${url}${separator}period_start=${encodeURIComponent(selectedPeriodStart)}`;
+        }
+
+        function getToken() {
+            return localStorage.getItem("timeclock_token");
+        }
+
+        async function apiFetch(url, options = {}) {
+            const token = getToken();
+
+            const headers = {
+                ...(options.headers || {})
+            };
+
+            if (token) {
+                headers["Authorization"] = `Bearer ${token}`;
+            }
+
+            url = withSelectedPeriod(url);
+
+            const response = await fetch(url, {
+                ...options,
+                headers
+            });
+
+            if (response.status === 401) {
+                alert("Login required");
+                window.location.href = "/payroll.html";
+                throw new Error("Login required");
+            }
+
+            if (response.status === 403) {
+                alert("You do not have permission to print payroll timecards");
+                window.location.href = "/index.html";
+                throw new Error("Permission denied");
+            }
+
+            return response;
+        }
+
+        function goHome() {
+            window.location.href = "/index.html";
+        }
+
+        function getStatusClass(status) {
+            if (status === "supervisor_approved") return "status-approved";
+            if (status === "employee_submitted") return "status-submitted";
+            return "status-pending";
+        }
+
+        function groupByEmployee(rows) {
+            const grouped = {};
+
+            rows.forEach(row => {
+                if (!grouped[row.employee_id]) {
+                    grouped[row.employee_id] = {
+                        employee: row,
+                        entries: []
+                    };
+                }
+
+                if (row.time_entry_id) {
+                    grouped[row.employee_id].entries.push(row);
+                }
+            });
+
+            return grouped;
+        }
+
+        function getWeekNumber(dateString) {
+            const date = new Date(dateString);
+            const start = new Date(`${loadedPeriodStart}T00:00:00`);
+
+            const diffDays =
+                Math.floor((date - start) / (1000 * 60 * 60 * 24));
+
+            return diffDays < 7 ? 1 : 2;
+        }
+
+        function calculateRegularAndOt(totalHours) {
+            const regular = Math.min(totalHours, 40);
+            const overtime = Math.max(totalHours - 40, 0);
+
+            return {
+                regular,
+                overtime
+            };
+        }
+
+        function renderWeekTable(title, entries, colorOffset) {
+            let totalHours = 0;
+            let rowsHtml = "";
+            let previousDate = null;
+            let dayIndex = colorOffset;
+
+            entries.forEach(entry => {
+                const hours = Number(entry.hours_worked || 0);
+                totalHours += hours;
+
+                if (entry.work_date !== previousDate) {
+                    dayIndex++;
+                    previousDate = entry.work_date;
+                }
+
+                const dayClass =
+                    dayIndex % 2 === 0
+                        ? "day-a"
+                        : "day-b";
+
+                rowsHtml += `
+                    <tr class="${dayClass}">
+                        <td>${entry.work_date || ""}</td>
+                        <td>${entry.clock_in || ""}</td>
+                        <td>${entry.clock_out || ""}</td>
+                        <td>${hours.toFixed(2)}</td>
+                    </tr>
+                `;
+            });
+
+            const totals = calculateRegularAndOt(totalHours);
+
+            rowsHtml += `
+                <tr class="week-total">
+                    <td colspan="3">${title} Totals</td>
+                    <td>
+                        Total: ${totalHours.toFixed(2)}
+                        <br>
+                        Regular: ${totals.regular.toFixed(2)}
+                        <br>
+                        OT: ${totals.overtime.toFixed(2)}
+                    </td>
+                </tr>
+            `;
+
+            return {
+                html: `
+                    <div class="week-box">
+                        <div class="week-header">${title}</div>
+
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Date</th>
+                                    <th>Clock In</th>
+                                    <th>Clock Out</th>
+                                    <th>Hours</th>
+                                </tr>
+                            </thead>
+
+                            <tbody>
+                                ${rowsHtml}
+                            </tbody>
+                        </table>
+                    </div>
+                `,
+                totalHours,
+                regular: totals.regular,
+                overtime: totals.overtime
+            };
+        }
+
+        async function loadTimecards() {
+            const response =
+                await apiFetch(`${apiBase}/payroll/print-timecards`);
+
+            const data =
+                await response.json();
+
+            loadedPeriodStart = data.pay_period_start;
+
+            const grouped =
+                groupByEmployee(data.rows);
+
+            let html = "";
+
+            Object.values(grouped).forEach(group => {
+                const employee = group.employee;
+
+                const week1Entries = [];
+                const week2Entries = [];
+
+                group.entries.forEach(entry => {
+                    const week = getWeekNumber(entry.work_date);
+
+                    if (week === 1) {
+                        week1Entries.push(entry);
+                    } else {
+                        week2Entries.push(entry);
+                    }
+                });
+
+                const week1 = renderWeekTable(
+                    "Week 1",
+                    week1Entries,
+                    0
+                );
+
+                const week2 = renderWeekTable(
+                    "Week 2",
+                    week2Entries,
+                    1
+                );
+
+                const payPeriodRegular =
+                    week1.regular + week2.regular;
+
+                const payPeriodOt =
+                    week1.overtime + week2.overtime;
+
+                const payPeriodTotal =
+                    week1.totalHours + week2.totalHours;
+
+                html += `
+                    <div class="timecard">
+
+                        <div class="header">
+                            <h1>Edgefield County Timecard</h1>
+
+                            <div>
+                                Pay Period:
+                                ${data.pay_period_start}
+                                through
+                                ${data.pay_period_end}
+                            </div>
+                        </div>
+
+                        <div class="employee-info">
+
+                            <div class="info-box">
+                                <strong>Employee</strong><br>
+                                ${employee.first_name}
+                                ${employee.last_name}
+                            </div>
+
+                            <div class="info-box">
+                                <strong>Employee Number</strong><br>
+                                ${employee.employee_number}
+                            </div>
+
+                            <div class="info-box">
+                                <strong>Department</strong><br>
+                                ${employee.department || "-"}
+                            </div>
+
+                            <div class="info-box">
+                                <strong>Status</strong><br>
+                                <span class="${getStatusClass(employee.approval_status)}">
+                                    ${employee.approval_status || "pending"}
+                                </span>
+                            </div>
+
+                        </div>
+
+                        ${week1.html}
+
+                        ${week2.html}
+
+                        <div class="period-total">
+                            Pay Period Total Hours:
+                            ${payPeriodTotal.toFixed(2)}
+                            <br>
+                            Pay Period Regular Hours:
+                            ${payPeriodRegular.toFixed(2)}
+                            <br>
+                            Pay Period OT Hours:
+                            ${payPeriodOt.toFixed(2)}
+                        </div>
+
+                        <div class="signatures">
+
+                            <div class="signature-box">
+                                Employee Signature
+
+                                <br><br>
+
+                                Submitted:
+                                ${employee.employee_signed_at || "Not Submitted"}
+                            </div>
+
+                            <div class="signature-box">
+                                Supervisor Approval
+
+                                <br><br>
+
+                                Approved:
+                                ${employee.supervisor_approved_at || "Not Approved"}
+                            </div>
+
+                        </div>
+
+                    </div>
+                `;
+            });
+
+            document.getElementById("timecardsContainer")
+                .innerHTML = html;
+        }
+
+        loadTimecards();
+    </script>
+
+</body>
+
+</html>
