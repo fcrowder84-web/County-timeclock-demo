@@ -4,7 +4,7 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "test": "node test/permissions.test.js && node test/auth-primitives.test.js"
+    "test": "node test/permissions.test.js && node test/auth-primitives.test.js && node test/pay-period.test.js"
   },
   "dependencies": {
     "express": "^4.19.2",
