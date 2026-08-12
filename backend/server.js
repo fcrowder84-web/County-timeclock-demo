@@ -12,6 +12,7 @@ const { verifyPortalToken } = require("./lib/portal-token");
 const { createSessionStore, getBearerToken } = require("./lib/session-store");
 const { formatDateOnly, resolvePayPeriod, shiftDate } = require("./lib/pay-period");
 const { createAuthRouter } = require("./routes/auth");
+const { createQuickPunchRouter } = require("./routes/quick-punch");
 
 const app = express();
 
@@ -545,6 +546,13 @@ app.use(createAuthRouter({
   audit,
 }));
 
+app.use(createQuickPunchRouter({
+  requireUser,
+  requireAnyPermission,
+  pool,
+  audit,
+}));
+
 app.get("/pay-periods", requireUser, async (req, res) => {
   try {
     const current = await getCurrentPayPeriod();
@@ -571,96 +579,6 @@ app.get("/pay-periods", requireUser, async (req, res) => {
     res.status(err.statusCode || 500).json({ error: err.message || "Pay period lookup failed" });
   }
 });
-
-app.get(
-  "/quick-status",
-  requireUser,
-  requireAnyPermission("clock_in_out"),
-  async (req, res) => {
-    try {
-      const result = await pool.query(
-        `SELECT id, clock_in, clock_out
-           FROM time_entries
-          WHERE employee_id=$1
-          ORDER BY clock_in DESC
-          LIMIT 1`,
-        [req.user.id],
-      );
-
-      const latest = result.rows[0] || null;
-      const clockedIn = Boolean(latest && !latest.clock_out);
-      const lastPunchType = latest ? (latest.clock_out ? "clock_out" : "clock_in") : null;
-      const lastPunchAt = latest ? (latest.clock_out || latest.clock_in) : null;
-
-      return res.json({
-        clocked_in: clockedIn,
-        next_action: clockedIn ? "clock_out" : "clock_in",
-        last_punch_type: lastPunchType,
-        last_punch_at: lastPunchAt,
-      });
-    } catch (err) {
-      console.error(err);
-      return res.status(500).json({ error: "Quick punch status error" });
-    }
-  },
-);
-
-app.post(
-  "/clock-in",
-  requireUser,
-  requireAnyPermission("clock_in_out"),
-  async (req, res) => {
-    try {
-      const openEntry = await pool.query(
-        `SELECT id FROM time_entries WHERE employee_id=$1 AND clock_out IS NULL LIMIT 1`,
-        [req.user.id],
-      );
-      if (openEntry.rows.length) {
-        return res.status(400).json({ error: "You are already clocked in" });
-      }
-
-      const result = await pool.query(
-        `INSERT INTO time_entries(employee_id,clock_in,status)
-         VALUES($1,NOW(),'open') RETURNING *`,
-        [req.user.id],
-      );
-      await audit(req.user.id, "clock_in", "time_entry", result.rows[0].id);
-      return res.json({ message: `${req.user.first_name} clocked in successfully`, entry: result.rows[0] });
-    } catch (err) {
-      console.error(err);
-      return res.status(500).json({ error: "Clock-in error" });
-    }
-  },
-);
-
-app.post(
-  "/clock-out",
-  requireUser,
-  requireAnyPermission("clock_in_out"),
-  async (req, res) => {
-    try {
-      const result = await pool.query(
-        `UPDATE time_entries
-            SET clock_out=NOW(),status='closed'
-          WHERE id=(
-            SELECT id FROM time_entries
-             WHERE employee_id=$1 AND clock_out IS NULL
-             ORDER BY clock_in DESC LIMIT 1
-          )
-          RETURNING *`,
-        [req.user.id],
-      );
-      if (!result.rows.length) {
-        return res.status(400).json({ error: "You are not currently clocked in" });
-      }
-      await audit(req.user.id, "clock_out", "time_entry", result.rows[0].id);
-      return res.json({ message: `${req.user.first_name} clocked out successfully`, entry: result.rows[0] });
-    } catch (err) {
-      console.error(err);
-      return res.status(500).json({ error: "Clock-out error" });
-    }
-  },
-);
 
 app.post(
   "/submit-timecard",
