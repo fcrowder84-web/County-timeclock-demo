@@ -573,6 +573,35 @@
             }
         }
 
+        function setTimeDropdownValue(selectId, value) {
+            const select = document.getElementById(selectId);
+            const normalized = (value || "").slice(0, 5);
+
+            if (!normalized) {
+                select.value = "";
+                return;
+            }
+
+            const existingOption = Array.from(select.options)
+                .find(option => option.value === normalized);
+
+            if (!existingOption) {
+                const [hourText, minuteText] = normalized.split(":");
+                const hour = Number(hourText);
+                const minute = Number(minuteText);
+                const displayHour = hour % 12 === 0 ? 12 : hour % 12;
+                const amPm = hour < 12 ? "AM" : "PM";
+
+                const option = document.createElement("option");
+                option.value = normalized;
+                option.textContent =
+                    `${displayHour}:${String(minute).padStart(2, "0")} ${amPm}`;
+                select.appendChild(option);
+            }
+
+            select.value = normalized;
+        }
+
         function getApprovalStatus(approval) {
             if (!approval) {
                 return `<span class="status-needed">Not Submitted</span>`;
@@ -812,9 +841,9 @@
             currentEditMode = editMode;
 
             document.getElementById("requestClockInDate").value = clockInDate || "";
-            document.getElementById("requestClockInTime").value = clockInTime || "";
+            setTimeDropdownValue("requestClockInTime", clockInTime);
             document.getElementById("requestClockOutDate").value = clockOutDate || clockInDate || "";
-            document.getElementById("requestClockOutTime").value = clockOutTime || "";
+            setTimeDropdownValue("requestClockOutTime", clockOutTime);
             document.getElementById("requestReason").value = "";
 
             let defaultChangeType = "both";
