@@ -10,6 +10,7 @@ const {
 } = require("./lib/permissions");
 const { verifyPortalToken } = require("./lib/portal-token");
 const { createSessionStore, getBearerToken } = require("./lib/session-store");
+const { formatDateOnly, resolvePayPeriod, shiftDate } = require("./lib/pay-period");
 
 const app = express();
 
@@ -68,45 +69,14 @@ async function getPayPeriodConfig() {
   return config;
 }
 
-function formatDateOnly(value) {
-  if (!value) return null;
-  const date = value instanceof Date ? value : new Date(`${String(value).slice(0, 10)}T12:00:00Z`);
-  if (Number.isNaN(date.getTime())) return null;
-  return date.toISOString().slice(0, 10);
-}
-
 async function getPayPeriod(requestedStart = null) {
   const config = await getPayPeriodConfig();
-  const anchor = new Date(`${formatDateOnly(config.anchor_date)}T12:00:00Z`);
-  const periodDays = Number(config.period_days);
-  const targetDate = requestedStart
-    ? String(requestedStart).slice(0, 10)
-    : formatDateOnly(config.current_date);
-  const target = new Date(`${targetDate}T12:00:00Z`);
-
-  if (Number.isNaN(target.getTime())) {
-    const error = new Error("Invalid pay period start date");
-    error.statusCode = 400;
-    throw error;
-  }
-
-  const dayMs = 24 * 60 * 60 * 1000;
-  const daysFromAnchor = Math.floor((target.getTime() - anchor.getTime()) / dayMs);
-  const periodIndex = Math.floor(daysFromAnchor / periodDays);
-  const start = new Date(anchor.getTime() + periodIndex * periodDays * dayMs);
-  const end = new Date(start.getTime() + (periodDays - 1) * dayMs);
-
-  if (requestedStart && formatDateOnly(start) !== String(requestedStart).slice(0, 10)) {
-    const error = new Error("Pay period start does not match the configured schedule");
-    error.statusCode = 400;
-    throw error;
-  }
-
-  return {
-    pay_period_start: formatDateOnly(start),
-    pay_period_end: formatDateOnly(end),
-    period_days: periodDays,
-  };
+  return resolvePayPeriod({
+    anchorDate: config.anchor_date,
+    periodDays: config.period_days,
+    targetDate: config.current_date,
+    requestedStart,
+  });
 }
 
 async function getCurrentPayPeriod() {
@@ -116,12 +86,6 @@ async function getCurrentPayPeriod() {
 async function getRequestedPayPeriod(req) {
   const requestedStart = req.query?.period_start || req.body?.period_start || null;
   return getPayPeriod(requestedStart);
-}
-
-function shiftDate(dateString, days) {
-  const date = new Date(`${dateString}T12:00:00Z`);
-  date.setUTCDate(date.getUTCDate() + days);
-  return formatDateOnly(date);
 }
 
 async function getUserById(id) {
