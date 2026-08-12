@@ -1,5 +1,4 @@
 const express = require("express");
-const crypto = require("crypto");
 const { Pool } = require("pg");
 const {
   PERMISSION_GROUPS,
@@ -9,6 +8,8 @@ const {
   userHasPermission,
   userHasAnyPermission,
 } = require("./lib/permissions");
+const { verifyPortalToken } = require("./lib/portal-token");
+const { createSessionStore, getBearerToken } = require("./lib/session-store");
 
 const app = express();
 
@@ -32,62 +33,10 @@ pool.on("connect", async (client) => {
 });
 
 
-const sessions = new Map();
 const SESSION_TTL_MS = Number(process.env.SESSION_TTL_HOURS || 8) * 60 * 60 * 1000;
 const PORTAL_ISSUER = process.env.TIMECLOCK_SSO_ISSUER || "edgefield-employee-portal";
 const PORTAL_AUDIENCE = process.env.TIMECLOCK_SSO_AUDIENCE || "edgefield-timeclock";
-
-function decodeBase64UrlJson(value) {
-  return JSON.parse(Buffer.from(value, "base64url").toString("utf8"));
-}
-
-function verifyPortalToken(token, secret) {
-  const parts = String(token || "").split(".");
-  if (parts.length !== 3) throw new Error("Invalid portal token");
-  const [encodedHeader, encodedPayload, encodedSignature] = parts;
-  const header = decodeBase64UrlJson(encodedHeader);
-  if (header.alg !== "HS256") throw new Error("Unsupported portal token algorithm");
-
-  const signingInput = `${encodedHeader}.${encodedPayload}`;
-  const expected = crypto.createHmac("sha256", secret).update(signingInput).digest();
-  const actual = Buffer.from(encodedSignature, "base64url");
-  if (actual.length !== expected.length || !crypto.timingSafeEqual(actual, expected)) {
-    throw new Error("Invalid portal token signature");
-  }
-
-  const payload = decodeBase64UrlJson(encodedPayload);
-  const now = Math.floor(Date.now() / 1000);
-  if (payload.iss !== PORTAL_ISSUER) throw new Error("Invalid portal token issuer");
-  if (payload.aud !== PORTAL_AUDIENCE) throw new Error("Invalid portal token audience");
-  if (!payload.exp || payload.exp < now - 5) {
-    const err = new Error("Portal token expired");
-    err.name = "TokenExpiredError";
-    throw err;
-  }
-  if (payload.nbf && payload.nbf > now + 5) throw new Error("Portal token is not active");
-  return payload;
-}
-
-function generateToken() {
-  return crypto.randomBytes(32).toString("hex");
-}
-
-function getBearerToken(req) {
-  const authHeader = req.headers.authorization || "";
-  return authHeader.startsWith("Bearer ") ? authHeader.substring(7) : null;
-}
-
-function createSession(employeeId, permissions, options = {}) {
-  const token = generateToken();
-  sessions.set(token, {
-    employee_id: employeeId,
-    permissions: unique(permissions),
-    app_admin_scope: options.app_admin_scope === "all" ? "all" : "own",
-    auth_source: options.auth_source || "legacy",
-    expires_at: Date.now() + SESSION_TTL_MS,
-  });
-  return token;
-}
+const sessionStore = createSessionStore({ ttlMs: SESSION_TTL_MS });
 
 async function audit(actorEmployeeId, action, targetType = null, targetId = null, details = null) {
   try {
@@ -195,16 +144,16 @@ async function getUserById(id) {
 async function requireUser(req, res, next) {
   try {
     const token = getBearerToken(req);
-    const session = token ? sessions.get(token) : null;
+    const session = sessionStore.getActive(token);
 
     if (!session || session.expires_at <= Date.now()) {
-      if (token) sessions.delete(token);
+      if (token) sessionStore.destroy(token);
       return res.status(401).json({ error: "Login required" });
     }
 
     const user = await getUserById(session.employee_id);
     if (!user || !user.active || user.is_active === false) {
-      sessions.delete(token);
+      sessionStore.destroy(token);
       return res.status(401).json({ error: "Invalid session" });
     }
 
@@ -623,7 +572,7 @@ app.post("/logout", requireUser, async (req, res) => {
   const token = getBearerToken(req);
 
   if (token) {
-    sessions.delete(token);
+    sessionStore.destroy(token);
   }
 
   res.json({
@@ -682,14 +631,14 @@ app.post("/auth/portal", async (req, res) => {
       return res.status(400).json({ error: "Portal token is required" });
     }
 
-    const payload = verifyPortalToken(portalToken, secret);
+    const payload = verifyPortalToken(portalToken, secret, { issuer: PORTAL_ISSUER, audience: PORTAL_AUDIENCE });
 
     const synced = await syncPortalUser(payload);
     if (!synced.permissions.includes("access") && !synced.permissions.includes("app_admin")) {
       return res.status(403).json({ error: "TimeClock access has not been granted" });
     }
 
-    const token = createSession(synced.user.id, synced.permissions, {
+    const token = sessionStore.create(synced.user.id, synced.permissions, {
       app_admin_scope: synced.appAdminScope,
       auth_source: "portal",
     });
