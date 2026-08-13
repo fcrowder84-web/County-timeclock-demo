@@ -1014,6 +1014,13 @@
             loadDashboard();
         }
 
+        function formatExactDuration(hours) {
+            const minutes = Math.max(0, Math.round(Number(hours || 0) * 60));
+            const wholeHours = Math.floor(minutes / 60);
+            const remainingMinutes = minutes % 60;
+            return `${wholeHours}h ${String(remainingMinutes).padStart(2, "0")}m`;
+        }
+
         async function viewTimecard(employeeId) {
             selectedEmployeeId = String(employeeId);
             const url = new URL(window.location.href);
@@ -1112,7 +1119,7 @@
                         </td>
 
                         <td>
-                            ${entry.hours_worked || 0}
+                            ${formatExactDuration(entry.hours_worked)}
                         </td>
 
                         <td>
