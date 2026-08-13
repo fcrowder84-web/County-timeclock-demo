@@ -46,6 +46,23 @@ function datesBetween(start, end, weekdaysOnly = false) {
   return result;
 }
 
+function assessDailyPaidHours({ workedQuarterHours = 0, existingLeaveQuarterHours = 0, proposedQuarterHours = 0, standardQuarterHours = 32 }) {
+  const totalQuarterHours = workedQuarterHours + existingLeaveQuarterHours + proposedQuarterHours;
+  return {
+    worked_quarter_hours: workedQuarterHours,
+    existing_leave_quarter_hours: existingLeaveQuarterHours,
+    proposed_quarter_hours: proposedQuarterHours,
+    total_quarter_hours: totalQuarterHours,
+    worked_hours: workedQuarterHours / 4,
+    existing_leave_hours: existingLeaveQuarterHours / 4,
+    proposed_hours: proposedQuarterHours / 4,
+    total_hours: totalQuarterHours / 4,
+    exceeds_standard_day: totalQuarterHours > standardQuarterHours,
+    recommended_leave_quarter_hours: Math.max(0, standardQuarterHours - workedQuarterHours - existingLeaveQuarterHours),
+    recommended_leave_hours: Math.max(0, standardQuarterHours - workedQuarterHours - existingLeaveQuarterHours) / 4,
+  };
+}
+
 function createLeaveRouter({ requireUser, pool, audit, canAccessEmployee, getRequestedPayPeriod, userHasAnyPermission }) {
   const router = express.Router();
 
@@ -105,7 +122,46 @@ function createLeaveRouter({ requireUser, pool, audit, canAccessEmployee, getReq
       const onBehalf = employeeId !== Number(req.user.id);
       const status = onBehalf ? 'approved' : 'pending';
       const note = String(req.body.note || '').trim() || null;
+      const overrideConfirmed = req.body.override_daily_hours === true;
+      const overrideReason = String(req.body.override_reason || '').trim();
       await client.query('BEGIN');
+
+      const dailyChecks = [];
+      for (const date of dates) {
+        const totals = await client.query(
+          `SELECT
+             COALESCE(ROUND(SUM(EXTRACT(EPOCH FROM (COALESCE(clock_out,NOW()) - clock_in)) / 900)),0)::int AS worked_quarters,
+             COALESCE((SELECT SUM(quarter_hours) FROM leave_entries
+                        WHERE employee_id=$1 AND leave_date=$2::date AND status <> 'denied'),0)::int AS leave_quarters
+             FROM time_entries
+            WHERE employee_id=$1 AND clock_in >= $2::date AND clock_in < ($2::date + INTERVAL '1 day')`,
+          [employeeId, date],
+        );
+        const check = assessDailyPaidHours({
+          workedQuarterHours: Number(totals.rows[0].worked_quarters || 0),
+          existingLeaveQuarterHours: Number(totals.rows[0].leave_quarters || 0),
+          proposedQuarterHours: quarterHours,
+        });
+        if (check.exceeds_standard_day) dailyChecks.push({ date, ...check });
+      }
+
+      if (dailyChecks.length && !overrideConfirmed) {
+        await client.query('ROLLBACK');
+        return res.status(409).json({
+          error: 'Worked time plus leave exceeds 8 hours on one or more days',
+          code: 'DAILY_PAID_HOURS_WARNING',
+          requires_confirmation: true,
+          daily_checks: dailyChecks,
+        });
+      }
+      if (dailyChecks.length && !overrideReason) {
+        await client.query('ROLLBACK');
+        return res.status(400).json({
+          error: 'An override reason is required when total paid time exceeds 8 hours',
+          code: 'OVERRIDE_REASON_REQUIRED',
+          daily_checks: dailyChecks,
+        });
+      }
       const inserted = [];
       for (const date of dates) {
         const result = await client.query(
@@ -120,7 +176,7 @@ function createLeaveRouter({ requireUser, pool, audit, canAccessEmployee, getReq
       }
       await client.query('COMMIT');
       await audit(req.user.id, onBehalf ? 'add_leave_on_behalf' : 'request_leave', 'employee', employeeId, {
-        leave_type: type, dates, hours: quarterHours / 4, status, note,
+        leave_type: type, dates, hours: quarterHours / 4, status, note, daily_hours_override: dailyChecks.length > 0, override_reason: overrideReason || null, daily_checks: dailyChecks,
       });
       res.status(201).json({ message: onBehalf ? 'Leave added and approved' : 'Leave submitted for approval', leave_entries: inserted });
     } catch (err) {
@@ -200,4 +256,4 @@ function createLeaveRouter({ requireUser, pool, audit, canAccessEmployee, getReq
   return router;
 }
 
-module.exports = { LEAVE_TYPES, parseQuarterHours, datesBetween, createLeaveRouter };
+module.exports = { LEAVE_TYPES, parseQuarterHours, datesBetween, assessDailyPaidHours, createLeaveRouter };
