@@ -273,6 +273,27 @@
             return grouped;
         }
 
+        function durationMinutes(hours) {
+            return Math.max(0, Math.round(Number(hours || 0) * 60));
+        }
+
+        function formatExactDuration(hours) {
+            const minutes = durationMinutes(hours);
+            return `${Math.floor(minutes / 60)}h ${String(minutes % 60).padStart(2, "0")}m`;
+        }
+
+        function roundedDailyHours(entries, dateField) {
+            const minutesByDay = {};
+            entries.forEach(entry => {
+                const day = entry[dateField] || "";
+                minutesByDay[day] = (minutesByDay[day] || 0) + durationMinutes(entry.hours_worked);
+            });
+            return Object.values(minutesByDay).reduce((total, minutes) => {
+                const completedQuarters = Math.floor(minutes / 15) * 15;
+                return total + completedQuarters + (minutes % 15 > 5 ? 15 : 0);
+            }, 0) / 60;
+        }
+
         function getWeekNumber(dateString) {
             const date = new Date(dateString);
             const start = new Date(`${loadedPeriodStart}T00:00:00`);
@@ -294,14 +315,13 @@
         }
 
         function renderWeekTable(title, entries, colorOffset) {
-            let totalHours = 0;
+            const totalHours = roundedDailyHours(entries, "work_date");
             let rowsHtml = "";
             let previousDate = null;
             let dayIndex = colorOffset;
 
             entries.forEach(entry => {
                 const hours = Number(entry.hours_worked || 0);
-                totalHours += hours;
 
                 if (entry.work_date !== previousDate) {
                     dayIndex++;
@@ -318,7 +338,7 @@
                         <td>${entry.work_date || ""}</td>
                         <td>${entry.clock_in || ""}</td>
                         <td>${entry.clock_out || ""}</td>
-                        <td>${hours.toFixed(2)}</td>
+                        <td>${formatExactDuration(hours)}</td>
                     </tr>
                 `;
             });
