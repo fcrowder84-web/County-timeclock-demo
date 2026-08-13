@@ -1717,11 +1717,25 @@
                 card.dataset.collapsibleReady = "true";
                 card.classList.add("collapsible");
 
+                const sectionName = heading.textContent.trim();
+                const expandedByDefault = new Set([
+                    "Clock Actions", "Selected Pay Period",
+                    "Pending Change Requests", "Leave", "Change Requests"
+                ]);
+                const collapsedByDefault =
+                    sectionName === "Pay Period"
+                    || sectionName === "My Change Requests"
+                    || sectionName === "Audit History"
+                    || sectionName === "Team Structure"
+                    || (heading.tagName === "H3" && !expandedByDefault.has(sectionName));
+
+                card.classList.toggle("collapsed", collapsedByDefault);
+
                 const button = document.createElement("button");
                 button.type = "button";
                 button.className = "collapse-toggle";
-                button.textContent = "Collapse";
-                button.setAttribute("aria-expanded", "true");
+                button.textContent = collapsedByDefault ? "Expand" : "Collapse";
+                button.setAttribute("aria-expanded", String(!collapsedByDefault));
                 button.addEventListener("click", event => {
                     event.stopPropagation();
                     const collapsed = card.classList.toggle("collapsed");
