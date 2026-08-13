@@ -85,6 +85,23 @@
             color: white;
         }
 
+        .leave-row {
+            background: #fff4cc !important;
+        }
+
+        .leave-row td:first-child {
+            border-left: 4px solid #d97706;
+        }
+
+        .leave-badge {
+            display: inline-block;
+            padding: 3px 8px;
+            border-radius: 999px;
+            background: #f59e0b;
+            color: #422006;
+            font-weight: 700;
+        }
+
         .btn-approve {
             background: #27ae60;
             color: white;
@@ -625,6 +642,7 @@
                                 <th>Employee</th>
                                 <th>Department</th>
                                 <th>Status</th>
+                                <th>Pending Leave</th>
                                 <th>Total Hours</th>
                                 <th>Actions</th>
                             </tr>
@@ -654,6 +672,12 @@
                             <span class="status-pill ${status.className}">
                                 ${status.text}
                             </span>
+                        </td>
+
+                        <td>
+                            ${Number(row.pending_leave_count || 0) > 0
+                                ? `<span class="leave-badge">${row.pending_leave_count} pending</span>`
+                                : "-"}
                         </td>
 
                         <td>
@@ -864,6 +888,27 @@
             loadDashboard();
         }
 
+        async function reviewLeave(leaveId, status) {
+            const action = status === "approved" ? "approve" : "deny";
+            if (!confirm(`${action.charAt(0).toUpperCase() + action.slice(1)} this leave entry?`)) return;
+
+            try {
+                const response = await apiFetch(`${apiBase}/leave/${leaveId}/review`, {
+                    method: "POST",
+                    body: JSON.stringify({ status })
+                });
+                const data = await response.json().catch(() => ({}));
+                if (!response.ok || data.error) {
+                    throw new Error(data.error || `Unable to ${action} leave`);
+                }
+                showMessage(data.message || `Leave ${status}`);
+                await viewTimecard(selectedEmployeeId);
+                await loadSummary();
+            } catch (err) {
+                if (err.message !== "Login required") showMessage(err.message, true);
+            }
+        }
+
         async function approveTimecard(employeeId) {
 
             const confirmed =
@@ -1070,7 +1115,57 @@
             html += `
                     </tbody>
                 </table>
+
+                <div class="card" style="margin-top:20px;">
+                    <h3>Leave</h3>
             `;
+
+            const leaveEntries = data.leave_entries || [];
+            if (leaveEntries.length === 0) {
+                html += `<p>No leave recorded for this pay period.</p>`;
+            } else {
+                html += `
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Date</th>
+                                <th>Leave Type</th>
+                                <th>Hours</th>
+                                <th>Status</th>
+                                <th>Note</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                `;
+                leaveEntries.forEach(entry => {
+                    const leaveType = String(entry.leave_type || "")
+                        .replaceAll("_", " ")
+                        .replace(/\b\w/g, letter => letter.toUpperCase());
+                    const canReviewLeave = hasAnyPermission([
+                        "view_assigned_employees", "view_department_time",
+                        "edit_employee_time", "approve_timecard",
+                        "edit_payroll_time", "view_all_timeclock_records", "app_admin"
+                    ]);
+                    html += `
+                        <tr class="leave-row">
+                            <td>${entry.leave_date_display}</td>
+                            <td><span class="leave-badge">Leave · ${leaveType}</span></td>
+                            <td>${Number(entry.hours || 0).toFixed(2)}</td>
+                            <td>${entry.status}</td>
+                            <td>${entry.note || "-"}</td>
+                            <td>
+                                ${entry.status === "pending" && canReviewLeave
+                                    ? `<button class="btn-approve" onclick="reviewLeave(${entry.id}, 'approved')">Approve</button>
+                                       <button class="btn-return" onclick="reviewLeave(${entry.id}, 'denied')">Deny</button>`
+                                    : "-"}
+                            </td>
+                        </tr>
+                    `;
+                });
+                html += `</tbody></table>`;
+            }
+            html += `</div>`;
 
             if (
                 data.change_requests &&
