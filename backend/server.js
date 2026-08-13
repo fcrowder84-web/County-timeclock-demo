@@ -705,6 +705,25 @@ app.get("/employee/my-timecard", requireUser, requireAnyPermission("view_own_tim
       [req.user.id, period.pay_period_start, period.pay_period_end],
     );
 
+    const leaveResult = await pool.query(
+      `
+            SELECT
+                id,
+                to_char(leave_date, 'YYYY-MM-DD') AS leave_date_iso,
+                to_char(leave_date, 'MM/DD/YYYY') AS leave_date_display,
+                leave_type,
+                ROUND(quarter_hours / 4.0, 2) AS hours,
+                status,
+                note,
+                review_note
+            FROM leave_entries
+            WHERE employee_id = $1
+            AND leave_date BETWEEN $2::date AND $3::date
+            ORDER BY leave_date, id
+        `,
+      [req.user.id, period.pay_period_start, period.pay_period_end],
+    );
+
     const requestsResult = await pool.query(
       `
             SELECT
@@ -730,6 +749,7 @@ app.get("/employee/my-timecard", requireUser, requireAnyPermission("view_own_tim
       approval,
       can_edit_entries: canEditEntries,
       entries: entriesResult.rows,
+      leave_entries: leaveResult.rows,
       requests: requestsResult.rows,
     });
   } catch (err) {
