@@ -741,88 +741,10 @@ app.get("/employee/my-timecard", requireUser, requireAnyPermission("view_own_tim
 app.post(
   "/employee/edit-time-entry",
   requireUser,
-  requireAnyPermission("request_punch_correction", "submit_timecard"),
-  async (req, res) => {
-    const { time_entry_id, new_clock_in, new_clock_out, reason } = req.body;
-
-    if (!time_entry_id || !new_clock_in || !reason?.trim()) {
-      return res.status(400).json({ error: "Time entry, clock in, and reason are required" });
-    }
-
-    try {
-      const entryResult = await pool.query(`SELECT * FROM time_entries WHERE id=$1`, [time_entry_id]);
-      if (!entryResult.rows.length) {
-        return res.status(404).json({ error: "Time entry not found" });
-      }
-
-      const existing = entryResult.rows[0];
-      if (Number(existing.employee_id) !== Number(req.user.id)) {
-        return res.status(403).json({ error: "Cannot modify another employee" });
-      }
-
-      const approvalResult = await pool.query(
-        `SELECT * FROM pay_period_approvals
-          WHERE employee_id=$1
-            AND $2::timestamp >= pay_period_start
-            AND $2::timestamp < (pay_period_end + interval '1 day')
-          ORDER BY id DESC LIMIT 1`,
-        [req.user.id, existing.clock_in],
-      );
-      const approval = approvalResult.rows[0] || null;
-
-      if (approval?.employee_signed_at && approval.status !== "returned_to_employee") {
-        return res.status(409).json({
-          error: "This timecard is signed. It must be returned to you before you can edit it.",
-        });
-      }
-
-      const finalClockOut = new_clock_out && new_clock_out.trim() !== "" ? new_clock_out : null;
-      if (finalClockOut && new Date(finalClockOut) <= new Date(new_clock_in)) {
-        return res.status(400).json({ error: "Clock out must be after clock in" });
-      }
-
-      await pool.query(
-        `INSERT INTO time_entry_audit(
-           time_entry_id,changed_by_employee_id,old_clock_in,old_clock_out,
-           new_clock_in,new_clock_out,reason
-         ) VALUES($1,$2,$3,$4,$5,$6,$7)`,
-        [existing.id, req.user.id, existing.clock_in, existing.clock_out, new_clock_in, finalClockOut, reason.trim()],
-      );
-
-      const updated = await pool.query(
-        `UPDATE time_entries
-            SET clock_in=$1,
-                clock_out=$2,
-                status=CASE WHEN $2::timestamp IS NULL THEN 'open' ELSE 'closed' END
-          WHERE id=$3
-          RETURNING *`,
-        [new_clock_in, finalClockOut, existing.id],
-      );
-
-      if (approval) {
-        await pool.query(
-          `UPDATE pay_period_approvals
-              SET employee_signed_at=NULL,
-                  supervisor_approved_at=NULL,
-                  supervisor_employee_id=NULL,
-                  payroll_finalized_at=NULL,
-                  payroll_finalized_by=NULL,
-                  status='open'
-            WHERE id=$1`,
-          [approval.id],
-        );
-      }
-
-      await audit(req.user.id, "employee_edit_time_entry", "time_entry", existing.id, {
-        reason: reason.trim(),
-      });
-
-      return res.json({ message: "Time entry updated", entry: updated.rows[0] });
-    } catch (err) {
-      console.error(err);
-      return res.status(500).json({ error: "Edit time entry error" });
-    }
-  },
+  requireAnyPermission("request_punch_correction"),
+  (_req, res) => res.status(403).json({
+    error: "Employee time changes must be submitted for supervisor approval",
+  }),
 );
 
 app.post("/employee/request-time-change", requireUser, requireAnyPermission("request_punch_correction"), async (req, res) => {
