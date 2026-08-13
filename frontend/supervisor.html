@@ -232,7 +232,33 @@
         .modal-buttons {
             text-align: right;
         }
-    </style>
+            .collapse-toolbar {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+            margin: 10px 0 18px;
+        }
+
+        .collapse-toolbar button,
+        .collapse-toggle {
+            width: auto;
+            padding: 6px 10px;
+            font-size: 0.85rem;
+        }
+
+        .card.collapsible > h2:first-of-type,
+        .card.collapsible > h3:first-of-type {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+        }
+
+        .card.collapsed > :not(h2):not(h3) {
+            display: none !important;
+        }
+
+</style>
 
 </head>
 
@@ -281,6 +307,10 @@
         </div>
 
         <h1>Supervisor / Payroll Timecards</h1>
+        <div class="collapse-toolbar" aria-label="Section display controls">
+            <button type="button" onclick="setAllSections(false)">Expand All</button>
+            <button type="button" onclick="setAllSections(true)">Collapse All</button>
+        </div>
 
         <div id="payPeriodNavigator"></div>
 
@@ -1676,7 +1706,48 @@
 
         checkExistingLogin();
 
-    </script>
+    
+        function applyCollapsibleCards(root = document) {
+            root.querySelectorAll(".card").forEach(card => {
+                if (card.dataset.collapsibleReady === "true") return;
+                const heading = Array.from(card.children)
+                    .find(element => element.tagName === "H2" || element.tagName === "H3");
+                if (!heading) return;
+
+                card.dataset.collapsibleReady = "true";
+                card.classList.add("collapsible");
+
+                const button = document.createElement("button");
+                button.type = "button";
+                button.className = "collapse-toggle";
+                button.textContent = "Collapse";
+                button.setAttribute("aria-expanded", "true");
+                button.addEventListener("click", event => {
+                    event.stopPropagation();
+                    const collapsed = card.classList.toggle("collapsed");
+                    button.textContent = collapsed ? "Expand" : "Collapse";
+                    button.setAttribute("aria-expanded", String(!collapsed));
+                });
+                heading.appendChild(button);
+            });
+        }
+
+        function setAllSections(collapsed) {
+            applyCollapsibleCards();
+            document.querySelectorAll(".card.collapsible").forEach(card => {
+                card.classList.toggle("collapsed", collapsed);
+                const button = card.querySelector(".collapse-toggle");
+                if (button) {
+                    button.textContent = collapsed ? "Expand" : "Collapse";
+                    button.setAttribute("aria-expanded", String(!collapsed));
+                }
+            });
+        }
+
+        const collapsibleObserver = new MutationObserver(() => applyCollapsibleCards());
+        applyCollapsibleCards();
+        collapsibleObserver.observe(document.body, { childList: true, subtree: true });
+</script>
 
 </body>
 
