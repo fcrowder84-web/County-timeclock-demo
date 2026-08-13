@@ -93,6 +93,23 @@
             color: white;
         }
 
+        .leave-row {
+            background: #fff4cc !important;
+        }
+
+        .leave-row td:first-child {
+            border-left: 4px solid #d97706;
+        }
+
+        .leave-badge {
+            display: inline-block;
+            padding: 3px 8px;
+            border-radius: 999px;
+            background: #f59e0b;
+            color: #422006;
+            font-weight: 700;
+        }
+
         .btn-request {
             background: #f39c12;
             color: white;
@@ -768,9 +785,9 @@
                         .replaceAll("_", " ")
                         .replace(/\b\w/g, letter => letter.toUpperCase());
                     html += `
-                        <tr>
+                        <tr class="leave-row">
                             <td>${entry.leave_date_display}</td>
-                            <td>${leaveType}</td>
+                            <td><span class="leave-badge">Leave · ${leaveType}</span></td>
                             <td>${Number(entry.hours || 0).toFixed(2)}</td>
                             <td><span class="status-pill ${statusClass}">${entry.status}</span></td>
                             <td>${entry.note || "-"}</td>
