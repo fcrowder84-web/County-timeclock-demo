@@ -748,6 +748,20 @@
             document.getElementById("departmentSummary").innerHTML = html;
         }
 
+        function durationMinutes(hours) {
+            return Math.max(0, Math.round(Number(hours || 0) * 60));
+        }
+
+        function formatExactDuration(hours) {
+            const minutes = durationMinutes(hours);
+            return `${Math.floor(minutes / 60)}h ${String(minutes % 60).padStart(2, "0")}m`;
+        }
+
+        function roundDailyMinutes(minutes) {
+            const completedQuarters = Math.floor(minutes / 15) * 15;
+            return completedQuarters + (minutes % 15 > 5 ? 15 : 0);
+        }
+
         async function viewPayrollTimecard(employeeId) {
             const response = await apiFetch(
                 `${apiBase}/supervisor/employee-timecard/${employeeId}`
@@ -825,7 +839,7 @@
                             <td>${entry.entry_date}</td>
                             <td>${entry.clock_in_time}</td>
                             <td>${entry.clock_out_time || "Open"}</td>
-                            <td>${entry.hours_worked || 0}</td>
+                            <td>${formatExactDuration(entry.hours_worked)}</td>
                             <td>${editButton}</td>
                         </tr>
                     `;
@@ -941,7 +955,8 @@
                 "Date",
                 "Clock In",
                 "Clock Out",
-                "Hours",
+                "Exact Duration",
+                "Rounded Daily Hours",
                 "Timecard Status"
             ];
 
@@ -949,7 +964,18 @@
                 headers.join(",")
             ];
 
-            rows.forEach(row => {
+            const dailyGroups = {};
+            rows.forEach((row, index) => {
+                const key = `${row.employee_number || row.employee_id}|${row.work_date}`;
+                if (!dailyGroups[key]) dailyGroups[key] = { minutes: 0, firstIndex: index };
+                dailyGroups[key].minutes += durationMinutes(row.hours_worked);
+            });
+            const roundedHoursByFirstRow = {};
+            Object.values(dailyGroups).forEach(group => {
+                roundedHoursByFirstRow[group.firstIndex] = (roundDailyMinutes(group.minutes) / 60).toFixed(2);
+            });
+
+            rows.forEach((row, index) => {
                 csvRows.push([
                     csvValue(row.employee_number),
                     csvValue(row.first_name),
@@ -958,7 +984,8 @@
                     csvValue(row.work_date),
                     csvValue(row.clock_in),
                     csvValue(row.clock_out),
-                    csvValue(row.hours_worked),
+                    csvValue(formatExactDuration(row.hours_worked)),
+                    csvValue(roundedHoursByFirstRow[index] || ""),
                     csvValue(row.timecard_status)
                 ].join(","));
             });
