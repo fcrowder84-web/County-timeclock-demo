@@ -130,7 +130,14 @@ function createLeaveRouter({ requireUser, pool, audit, canAccessEmployee, getReq
       for (const date of dates) {
         const totals = await client.query(
           `SELECT
-             COALESCE(ROUND(SUM(EXTRACT(EPOCH FROM (COALESCE(clock_out,NOW()) - clock_in)) / 900)),0)::int AS worked_quarters,
+             COALESCE(
+               FLOOR(SUM(EXTRACT(EPOCH FROM (COALESCE(clock_out,NOW()) - clock_in)) / 900)
+               + CASE
+                   WHEN MOD(ROUND(SUM(EXTRACT(EPOCH FROM (COALESCE(clock_out,NOW()) - clock_in)) / 60)::int, 15) > 5
+                   THEN 1 ELSE 0
+                 END,
+               0
+             )::int AS worked_quarters,
              COALESCE((SELECT SUM(quarter_hours) FROM leave_entries
                         WHERE employee_id=$1 AND leave_date=$2::date AND status <> 'denied'),0)::int AS leave_quarters
              FROM time_entries
