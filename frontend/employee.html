@@ -670,15 +670,37 @@
             return `<span class="status-needed">Not Submitted</span>`;
         }
 
+        function durationMinutes(hours) {
+            return Math.max(0, Math.round(Number(hours || 0) * 60));
+        }
+
+        function formatExactDuration(hours) {
+            const minutes = durationMinutes(hours);
+            const wholeHours = Math.floor(minutes / 60);
+            const remainingMinutes = minutes % 60;
+            return `${wholeHours}h ${String(remainingMinutes).padStart(2, "0")}m`;
+        }
+
+        function roundedDailyHours(entries, dateField) {
+            const minutesByDay = {};
+            entries.forEach(entry => {
+                const day = entry[dateField] || entry.entry_date || "";
+                minutesByDay[day] = (minutesByDay[day] || 0) + durationMinutes(entry.hours_worked);
+            });
+            const roundedMinutes = Object.values(minutesByDay).reduce((total, minutes) => {
+                const completedQuarters = Math.floor(minutes / 15) * 15;
+                const remainder = minutes % 15;
+                return total + completedQuarters + (remainder > 5 ? 15 : 0);
+            }, 0);
+            return roundedMinutes / 60;
+        }
+
         async function loadMyTimecard() {
             const response = await apiFetch(`${apiBase}/employee/my-timecard`);
             const data = await response.json();
 
             const leaveEntries = data.leave_entries || [];
-            let workedHours = 0;
-            data.entries.forEach(entry => {
-                workedHours += Number(entry.hours_worked || 0);
-            });
+            const workedHours = roundedDailyHours(data.entries, "entry_date_iso");
             const approvedLeaveHours = leaveEntries
                 .filter(entry => entry.status === "approved")
                 .reduce((total, entry) => total + Number(entry.hours || 0), 0);
@@ -761,7 +783,7 @@
                     || '<span style="color:red;font-weight:bold;">MISSED CLOCK OUT</span>'
     }
 </td>
-                        <td>${entry.hours_worked}</td>
+                        <td>${formatExactDuration(entry.hours_worked)}</td>
                         <td>
                             ${hasPermission("request_punch_correction") ? `
                             <button
