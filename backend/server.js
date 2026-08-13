@@ -861,15 +861,25 @@ app.get(
                     ppa.employee_signed_at,
                     ppa.supervisor_approved_at,
                     ROUND(
-                        COALESCE(
-                            SUM(
-                                EXTRACT(EPOCH FROM (
-                                    COALESCE(te.clock_out, now())
-                                    - te.clock_in
-                                )) / 3600
-                            ),
-                            0
-                        )::numeric,
+                        COALESCE((
+                            SELECT SUM(
+                                FLOOR(daily.day_minutes / 15.0) * 15
+                                + CASE WHEN MOD(daily.day_minutes, 15) > 5 THEN 15 ELSE 0 END
+                            ) / 60.0
+                            FROM (
+                                SELECT ROUND(SUM(
+                                    EXTRACT(EPOCH FROM (
+                                        COALESCE(day_entry.clock_out, now())
+                                        - day_entry.clock_in
+                                    )) / 60
+                                ))::int AS day_minutes
+                                FROM time_entries day_entry
+                                WHERE day_entry.employee_id = e.id
+                                  AND day_entry.clock_in >= $1::date
+                                  AND day_entry.clock_in < ($2::date + interval '1 day')
+                                GROUP BY day_entry.clock_in::date
+                            ) daily
+                        ), 0)::numeric,
                         2
                     ) AS total_hours,
                     COALESCE((
@@ -888,11 +898,6 @@ app.get(
                     ON ppa.employee_id = e.id
                     AND ppa.pay_period_start = $1::date
                     AND ppa.pay_period_end = $2::date
-
-                LEFT JOIN time_entries te
-                    ON te.employee_id = e.id
-                    AND te.clock_in >= $1::date
-                    AND te.clock_in < ($2::date + interval '1 day')
 
                 WHERE (
                     e.active = true
