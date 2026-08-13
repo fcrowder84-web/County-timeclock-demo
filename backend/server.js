@@ -871,7 +871,14 @@ app.get(
                             0
                         )::numeric,
                         2
-                    ) AS total_hours
+                    ) AS total_hours,
+                    COALESCE((
+                        SELECT COUNT(*)
+                        FROM leave_entries pending_leave
+                        WHERE pending_leave.employee_id = e.id
+                          AND pending_leave.leave_date BETWEEN $1::date AND $2::date
+                          AND pending_leave.status = 'pending'
+                    ), 0)::int AS pending_leave_count
                 FROM employees e
 
                 LEFT JOIN departments d
@@ -1399,6 +1406,25 @@ app.get(
         [employeeId, period.pay_period_start, period.pay_period_end],
       );
 
+      const leaveResult = await pool.query(
+        `
+              SELECT
+                  id,
+                  to_char(leave_date, 'YYYY-MM-DD') AS leave_date_iso,
+                  to_char(leave_date, 'MM/DD/YYYY') AS leave_date_display,
+                  leave_type,
+                  ROUND(quarter_hours / 4.0, 2) AS hours,
+                  status,
+                  note,
+                  review_note
+              FROM leave_entries
+              WHERE employee_id = $1
+                AND leave_date BETWEEN $2::date AND $3::date
+              ORDER BY leave_date, id
+          `,
+        [employeeId, period.pay_period_start, period.pay_period_end],
+      );
+
       const requestsResult = await pool.query(
         `
               SELECT
@@ -1441,6 +1467,7 @@ app.get(
         edit_mode: payrollCanEdit ? "payroll" : (supervisorCanEdit ? "supervisor" : "locked"),
         correction_requests: correctionResult.rows,
         change_requests: requestsResult.rows,
+        leave_entries: leaveResult.rows,
         pay_period_start: period.pay_period_start,
         pay_period_end: period.pay_period_end,
         entries: entriesResult.rows,
