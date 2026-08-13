@@ -1,0 +1,203 @@
+'use strict';
+
+const express = require('express');
+
+const LEAVE_TYPES = ['vacation', 'sick', 'bereavement', 'jury_duty', 'administrative', 'other'];
+const SUPERVISOR_PERMISSIONS = [
+  'view_assigned_employees', 'view_department_time', 'edit_employee_time',
+  'approve_timecard', 'manage_employee_timeclock_settings', 'edit_payroll_time',
+  'view_all_timeclock_records', 'app_admin',
+];
+
+function parseQuarterHours(hours) {
+  const value = Number(hours);
+  if (!Number.isFinite(value) || value <= 0 || value > 24 || Math.round(value * 4) !== value * 4) {
+    const error = new Error('Leave hours must be between 0.25 and 24 in 15-minute increments');
+    error.statusCode = 400;
+    throw error;
+  }
+  return Math.round(value * 4);
+}
+
+function datesBetween(start, end, weekdaysOnly = false) {
+  const first = new Date(`${start}T12:00:00Z`);
+  const last = new Date(`${end || start}T12:00:00Z`);
+  if (Number.isNaN(first.valueOf()) || Number.isNaN(last.valueOf()) || last < first) {
+    const error = new Error('A valid start and end date are required');
+    error.statusCode = 400;
+    throw error;
+  }
+  const result = [];
+  for (const day = new Date(first); day <= last; day.setUTCDate(day.getUTCDate() + 1)) {
+    if (!weekdaysOnly || (day.getUTCDay() !== 0 && day.getUTCDay() !== 6)) {
+      result.push(day.toISOString().slice(0, 10));
+    }
+    if (result.length > 366) {
+      const error = new Error('Leave range cannot exceed one year');
+      error.statusCode = 400;
+      throw error;
+    }
+  }
+  if (!result.length) {
+    const error = new Error('The selected range contains no applicable dates');
+    error.statusCode = 400;
+    throw error;
+  }
+  return result;
+}
+
+function createLeaveRouter({ requireUser, pool, audit, canAccessEmployee, getRequestedPayPeriod, userHasAnyPermission }) {
+  const router = express.Router();
+
+  function isSupervisor(user) {
+    return userHasAnyPermission(user, SUPERVISOR_PERMISSIONS) || ['supervisor', 'payroll', 'admin'].includes(user.role);
+  }
+
+  async function assertAccess(user, employeeId) {
+    if (Number(user.id) === Number(employeeId)) return true;
+    if (!isSupervisor(user) || !(await canAccessEmployee(user, employeeId, SUPERVISOR_PERMISSIONS))) {
+      const error = new Error('You cannot manage leave for this employee');
+      error.statusCode = 403;
+      throw error;
+    }
+    return true;
+  }
+
+  router.get('/leave/types', requireUser, (_req, res) => res.json({ leave_types: LEAVE_TYPES }));
+
+  router.get('/leave', requireUser, async (req, res) => {
+    try {
+      const employeeId = Number(req.query.employee_id || req.user.id);
+      await assertAccess(req.user, employeeId);
+      const period = await getRequestedPayPeriod(req);
+      const result = await pool.query(
+        `SELECT le.*, ROUND(le.quarter_hours / 4.0, 2) AS hours,
+                e.first_name, e.last_name,
+                creator.first_name AS created_by_first_name, creator.last_name AS created_by_last_name,
+                reviewer.first_name AS reviewed_by_first_name, reviewer.last_name AS reviewed_by_last_name
+           FROM leave_entries le
+           JOIN employees e ON e.id=le.employee_id
+           JOIN employees creator ON creator.id=le.created_by_employee_id
+           LEFT JOIN employees reviewer ON reviewer.id=le.reviewed_by_employee_id
+          WHERE le.employee_id=$1 AND le.leave_date BETWEEN $2::date AND $3::date
+          ORDER BY le.leave_date, le.id`,
+        [employeeId, period.pay_period_start, period.pay_period_end],
+      );
+      res.json({ employee_id: employeeId, ...period, leave_entries: result.rows, can_manage_others: isSupervisor(req.user) });
+    } catch (err) {
+      res.status(err.statusCode || 500).json({ error: err.message || 'Leave lookup failed' });
+    }
+  });
+
+  router.post('/leave', requireUser, async (req, res) => {
+    const client = await pool.connect();
+    try {
+      const employeeId = Number(req.body.employee_id || req.user.id);
+      await assertAccess(req.user, employeeId);
+      const type = String(req.body.leave_type || '').toLowerCase();
+      if (!LEAVE_TYPES.includes(type)) {
+        const error = new Error('Select a valid leave type');
+        error.statusCode = 400;
+        throw error;
+      }
+      const quarterHours = parseQuarterHours(req.body.hours);
+      const dates = datesBetween(req.body.start_date, req.body.end_date, req.body.weekdays_only === true);
+      const onBehalf = employeeId !== Number(req.user.id);
+      const status = onBehalf ? 'approved' : 'pending';
+      const note = String(req.body.note || '').trim() || null;
+      await client.query('BEGIN');
+      const inserted = [];
+      for (const date of dates) {
+        const result = await client.query(
+          `INSERT INTO leave_entries(
+             employee_id,leave_date,leave_type,quarter_hours,note,status,
+             created_by_employee_id,reviewed_by_employee_id,reviewed_at
+           ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,CASE WHEN $8::int IS NULL THEN NULL ELSE NOW() END)
+           RETURNING *, ROUND(quarter_hours / 4.0, 2) AS hours`,
+          [employeeId, date, type, quarterHours, note, status, req.user.id, onBehalf ? req.user.id : null],
+        );
+        inserted.push(result.rows[0]);
+      }
+      await client.query('COMMIT');
+      await audit(req.user.id, onBehalf ? 'add_leave_on_behalf' : 'request_leave', 'employee', employeeId, {
+        leave_type: type, dates, hours: quarterHours / 4, status, note,
+      });
+      res.status(201).json({ message: onBehalf ? 'Leave added and approved' : 'Leave submitted for approval', leave_entries: inserted });
+    } catch (err) {
+      await client.query('ROLLBACK').catch(() => {});
+      res.status(err.statusCode || 500).json({ error: err.message || 'Leave entry failed' });
+    } finally {
+      client.release();
+    }
+  });
+
+  router.post('/leave/:id/review', requireUser, async (req, res) => {
+    try {
+      if (!isSupervisor(req.user)) return res.status(403).json({ error: 'Supervisor access required' });
+      const existing = await pool.query('SELECT * FROM leave_entries WHERE id=$1', [req.params.id]);
+      if (!existing.rows.length) return res.status(404).json({ error: 'Leave entry not found' });
+      await assertAccess(req.user, existing.rows[0].employee_id);
+      const status = String(req.body.status || '').toLowerCase();
+      if (!['approved', 'denied'].includes(status)) return res.status(400).json({ error: 'Status must be approved or denied' });
+      const note = String(req.body.review_note || '').trim() || null;
+      const result = await pool.query(
+        `UPDATE leave_entries SET status=$1,review_note=$2,reviewed_by_employee_id=$3,reviewed_at=NOW(),updated_at=NOW()
+          WHERE id=$4 RETURNING *, ROUND(quarter_hours / 4.0, 2) AS hours`,
+        [status, note, req.user.id, req.params.id],
+      );
+      await audit(req.user.id, `leave_${status}`, 'leave_entry', req.params.id, { employee_id: existing.rows[0].employee_id, review_note: note });
+      res.json({ message: `Leave ${status}`, leave_entry: result.rows[0] });
+    } catch (err) {
+      res.status(err.statusCode || 500).json({ error: err.message || 'Leave review failed' });
+    }
+  });
+
+  router.delete('/leave/:id', requireUser, async (req, res) => {
+    try {
+      const existing = await pool.query('SELECT * FROM leave_entries WHERE id=$1', [req.params.id]);
+      if (!existing.rows.length) return res.status(404).json({ error: 'Leave entry not found' });
+      await assertAccess(req.user, existing.rows[0].employee_id);
+      if (Number(existing.rows[0].employee_id) === Number(req.user.id) && existing.rows[0].status === 'approved') {
+        return res.status(409).json({ error: 'Approved leave must be removed by a supervisor or payroll' });
+      }
+      await pool.query('DELETE FROM leave_entries WHERE id=$1', [req.params.id]);
+      await audit(req.user.id, 'delete_leave', 'leave_entry', req.params.id, existing.rows[0]);
+      res.json({ message: 'Leave entry removed' });
+    } catch (err) {
+      res.status(err.statusCode || 500).json({ error: err.message || 'Leave removal failed' });
+    }
+  });
+
+  router.post('/leave/submit-timecard-on-behalf', requireUser, async (req, res) => {
+    try {
+      const employeeId = Number(req.body.employee_id);
+      if (!employeeId || employeeId === Number(req.user.id) || !isSupervisor(req.user)) {
+        return res.status(403).json({ error: 'Supervisor entry on behalf of an employee is required' });
+      }
+      await assertAccess(req.user, employeeId);
+      const period = await getRequestedPayPeriod(req);
+      const open = await pool.query(
+        `SELECT id FROM time_entries WHERE employee_id=$1 AND clock_in >= $2::date
+          AND clock_in < ($3::date + INTERVAL '1 day') AND clock_out IS NULL`,
+        [employeeId, period.pay_period_start, period.pay_period_end],
+      );
+      if (open.rows.length) return res.status(400).json({ error: 'Clock out the employee before completing the timecard' });
+      const result = await pool.query(
+        `INSERT INTO pay_period_approvals(employee_id,pay_period_start,pay_period_end,employee_signed_at,status)
+         VALUES($1,$2,$3,NOW(),'employee_submitted')
+         ON CONFLICT(employee_id,pay_period_start,pay_period_end)
+         DO UPDATE SET employee_signed_at=NOW(),supervisor_approved_at=NULL,payroll_finalized_at=NULL,status='employee_submitted'
+         RETURNING *`,
+        [employeeId, period.pay_period_start, period.pay_period_end],
+      );
+      await audit(req.user.id, 'submit_timecard_on_behalf', 'employee', employeeId, { ...period, reason: String(req.body.reason || '').trim() || null });
+      res.json({ message: 'Timecard completed on behalf of employee and sent for supervisor review', approval: result.rows[0] });
+    } catch (err) {
+      res.status(err.statusCode || 500).json({ error: err.message || 'Timecard completion failed' });
+    }
+  });
+
+  return router;
+}
+
+module.exports = { LEAVE_TYPES, parseQuarterHours, datesBetween, createLeaveRouter };

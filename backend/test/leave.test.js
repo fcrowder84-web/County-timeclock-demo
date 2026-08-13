@@ -1,0 +1,12 @@
+'use strict';
+const assert = require('assert');
+const { parseQuarterHours, datesBetween, LEAVE_TYPES } = require('../routes/leave');
+assert.strictEqual(parseQuarterHours(0.25), 1);
+assert.strictEqual(parseQuarterHours(4), 16);
+assert.strictEqual(parseQuarterHours(7.75), 31);
+assert.throws(() => parseQuarterHours(1.1), /15-minute/);
+assert.throws(() => parseQuarterHours(0), /15-minute/);
+assert.deepStrictEqual(datesBetween('2026-08-13','2026-08-13'), ['2026-08-13']);
+assert.deepStrictEqual(datesBetween('2026-08-14','2026-08-17',true), ['2026-08-14','2026-08-17']);
+assert(LEAVE_TYPES.includes('sick') && LEAVE_TYPES.includes('vacation'));
+console.log('leave tests passed');

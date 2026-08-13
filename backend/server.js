@@ -14,6 +14,7 @@ const { createSessionStore, getBearerToken } = require("./lib/session-store");
 const { formatDateOnly, resolvePayPeriod, shiftDate } = require("./lib/pay-period");
 const { createAuthRouter } = require("./routes/auth");
 const { createQuickPunchRouter } = require("./routes/quick-punch");
+const { createLeaveRouter } = require("./routes/leave");
 
 const app = express();
 
@@ -552,6 +553,16 @@ app.use(createQuickPunchRouter({
   requireAnyPermission,
   pool,
   audit,
+}));
+
+app.use(createLeaveRouter({
+  requireUser,
+  requireAnyPermission,
+  pool,
+  audit,
+  canAccessEmployee,
+  getRequestedPayPeriod,
+  userHasAnyPermission,
 }));
 
 app.get("/pay-periods", requireUser, async (req, res) => {

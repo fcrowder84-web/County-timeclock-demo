@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Leave · Edgefield County TimeClock</title>
+<style>body{font-family:Segoe UI,Arial;max-width:1100px;margin:30px auto;padding:0 18px;background:#f4f7fb;color:#1f2937}.card{background:#fff;border:1px solid #dbe3ee;border-radius:14px;padding:20px;margin:18px 0;box-shadow:0 6px 18px #16263c18}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px}label{font-weight:600}input,select,textarea,button{width:100%;box-sizing:border-box;padding:10px;margin-top:6px}button,.button{background:#1f5f8b;color:white;border:0;border-radius:8px;font-weight:700;cursor:pointer;text-decoration:none;display:inline-block;width:auto}.secondary{background:#e8eef5;color:#17324d}.danger{background:#a83232}.success{color:#155724}.error{color:#8b1e1e}table{width:100%;border-collapse:collapse}th,td{padding:9px;border-bottom:1px solid #ddd;text-align:left}.actions button{margin:2px}.hidden{display:none}</style></head>
+<body><a class="button secondary" href="/">← TimeClock Home</a><h1>Leave</h1>
+<p>Record vacation, sick, and other paid leave in 15-minute increments. Leave may be entered for a partial day.</p>
+<div id="message"></div>
+<section class="card"><h2>Add Leave</h2><div id="employeeWrap" class="hidden"><label>Employee<select id="employee"></select></label></div>
+<div class="grid"><label>Leave type<select id="type"><option value="vacation">Vacation</option><option value="sick">Sick</option><option value="bereavement">Bereavement</option><option value="jury_duty">Jury duty</option><option value="administrative">Administrative leave</option><option value="other">Other</option></select></label>
+<label>Start date<input id="start" type="date" required></label><label>End date<input id="end" type="date"></label>
+<label>Hours per day<input id="hours" type="number" min=".25" max="24" step=".25" value="8" required></label></div>
+<label><input id="weekdays" type="checkbox" checked style="width:auto"> Skip Saturdays and Sundays in a range</label>
+<label>Note (optional)<textarea id="note"></textarea></label><button onclick="addLeave()">Add Leave</button></section>
+<section id="supervisorActions" class="card hidden"><h2>Supervisor Actions</h2>
+<p>Use this when an employee is unavailable and you are completing the timecard for them.</p>
+<label>Reason (optional)<input id="submitReason" placeholder="Employee unavailable"></label>
+<button onclick="submitOnBehalf()">Complete and submit selected employee's timecard</button></section>
+<section class="card"><h2>Leave for Selected Pay Period</h2><div class="grid"><label>Pay period start<input id="period" type="date"></label><div><button onclick="loadLeave()" style="margin-top:25px">Load</button></div></div>
+<div style="overflow:auto"><table><thead><tr><th>Date</th><th>Type</th><th>Hours</th><th>Status</th><th>Entered by</th><th>Note</th><th>Actions</th></tr></thead><tbody id="rows"></tbody></table></div></section>
+<script>
+const api='\/api', token=()=>localStorage.getItem('timeclock_token');
+const headers=()=>({Authorization:'Bearer '+token(),'Content-Type':'application/json'});
+let me=null,canManage=false;
+function msg(t,ok=false){const e=document.getElementById('message');e.className=ok?'success':'error';e.textContent=t}
+function selectedEmployee(){return Number(document.getElementById('employee').value||me.id)}
+async function request(url,options={}){const r=await fetch(api+url,{...options,headers:{...headers(),...(options.headers||{})}});const d=await r.json().catch(()=>({}));if(!r.ok)throw Error(d.error||'Request failed');return d}
+async function init(){if(!token())return location.href='/';me=(await request('/me')).user;
+const perms=new Set((await request('/me')).permissions||[]);canManage=['view_assigned_employees','view_department_time','edit_employee_time','approve_timecard','manage_employee_timeclock_settings','edit_payroll_time','view_all_timeclock_records','app_admin'].some(x=>perms.has(x));
+const today=new Date().toISOString().slice(0,10);start.value=end.value=today;
+if(canManage){employeeWrap.classList.remove('hidden');supervisorActions.classList.remove('hidden');const staff=await request('/supervisor/staff');employee.innerHTML='<option value="'+me.id+'">'+me.first_name+' '+me.last_name+' (myself)</option>'+staff.filter(x=>x.id!=me.id).map(x=>'<option value="'+x.id+'">'+x.last_name+', '+x.first_name+' · '+(x.department_name||x.department||'')+'</option>').join('');employee.onchange=loadLeave}
+await loadLeave()}
+async function loadLeave(){try{const p=period.value?'&period_start='+period.value:'';const d=await request('/leave?employee_id='+selectedEmployee()+p);period.value=d.pay_period_start.slice(0,10);rows.innerHTML=d.leave_entries.map(x=>'<tr><td>'+x.leave_date.slice(0,10)+'</td><td>'+x.leave_type.replaceAll('_',' ')+'</td><td>'+x.hours+'</td><td>'+x.status+'</td><td>'+x.created_by_first_name+' '+x.created_by_last_name+'</td><td>'+(x.note||'')+'</td><td class="actions">'+(canManage&&x.status==='pending'?'<button onclick="review('+x.id+',\'approved\')">Approve</button><button class="danger" onclick="review('+x.id+',\'denied\')">Deny</button>':'')+'<button class="secondary" onclick="removeLeave('+x.id+')">Remove</button></td></tr>').join('')||'<tr><td colspan="7">No leave recorded for this pay period.</td></tr>'}catch(e){msg(e.message)}}
+async function addLeave(){try{await request('/leave',{method:'POST',body:JSON.stringify({employee_id:selectedEmployee(),leave_type:type.value,start_date:start.value,end_date:end.value||start.value,hours:Number(hours.value),weekdays_only:weekdays.checked,note:note.value})});msg('Leave saved.',true);note.value='';await loadLeave()}catch(e){msg(e.message)}}
+async function review(id,status){try{await request('/leave/'+id+'/review',{method:'POST',body:JSON.stringify({status})});msg('Leave '+status+'.',true);await loadLeave()}catch(e){msg(e.message)}}
+async function removeLeave(id){if(!confirm('Remove this leave entry?'))return;try{await request('/leave/'+id,{method:'DELETE'});msg('Leave removed.',true);await loadLeave()}catch(e){msg(e.message)}}
+async function submitOnBehalf(){if(selectedEmployee()===Number(me.id))return msg('Select another employee.');if(!confirm('Complete and submit this employee timecard for supervisor review?'))return;try{await request('/leave/submit-timecard-on-behalf',{method:'POST',body:JSON.stringify({employee_id:selectedEmployee(),period_start:period.value,reason:submitReason.value})});msg('Timecard submitted on behalf of employee.',true)}catch(e){msg(e.message)}}
+init().catch(e=>msg(e.message));
+</script></body></html>
