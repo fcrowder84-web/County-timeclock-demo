@@ -320,10 +320,11 @@
 
             <label>Reason for Request</label>
             <textarea id="requestReason" rows="4"></textarea>
+            <div id="requestModalMessage" role="status" aria-live="polite"></div>
 
             <div class="modal-buttons">
-                <button onclick="closeRequestModal()">Cancel</button>
-                <button class="btn-request" onclick="submitChangeRequest()">Submit Request</button>
+                <button type="button" onclick="closeRequestModal()">Cancel</button>
+                <button type="button" id="requestSubmitButton" class="btn-request" onclick="submitChangeRequest()">Submit Request</button>
             </div>
         </div>
     </div>
@@ -845,6 +846,7 @@
             document.getElementById("requestClockOutDate").value = clockOutDate || clockInDate || "";
             setTimeDropdownValue("requestClockOutTime", clockOutTime);
             document.getElementById("requestReason").value = "";
+            showRequestMessage("", false);
 
             let defaultChangeType = "both";
 
@@ -864,6 +866,14 @@
             document.getElementById("requestModal").style.display = "none";
         }
 
+        function showRequestMessage(message, isError = true) {
+            const box = document.getElementById("requestModalMessage");
+            box.textContent = message || "";
+            box.style.marginTop = message ? "10px" : "0";
+            box.style.color = isError ? "#b91c1c" : "#166534";
+            box.style.fontWeight = message ? "600" : "normal";
+        }
+
         async function submitChangeRequest() {
             const changeType = document.getElementById("requestChangeType").value;
             const clockInDate = document.getElementById("requestClockInDate").value;
@@ -871,75 +881,76 @@
             const clockOutDate = document.getElementById("requestClockOutDate").value;
             const clockOutTime = document.getElementById("requestClockOutTime").value;
             const reason = document.getElementById("requestReason").value;
+            const submitButton = document.getElementById("requestSubmitButton");
 
-            if (
-                changeType !== "clock_out"
-                && (!clockInDate || !clockInTime)
-            ) {
-                showMessage("Requested clock in date and time are required", true);
+            showRequestMessage("", false);
+
+            if (changeType !== "clock_out" && (!clockInDate || !clockInTime)) {
+                showRequestMessage("Requested clock in date and time are required");
                 return;
             }
-
-            if (
-                changeType !== "clock_in"
-                && (!clockOutDate || !clockOutTime)
-            ) {
-                showMessage("Requested clock out date and time are required", true);
+            if (changeType !== "clock_in" && (!clockOutDate || !clockOutTime)) {
+                showRequestMessage("Requested clock out date and time are required");
                 return;
             }
-
             if (!reason.trim()) {
-                showMessage("Reason is required", true);
+                showRequestMessage("Reason is required");
+                document.getElementById("requestReason").focus();
                 return;
             }
 
-            const requestedClockIn =
-                changeType === "clock_out"
-                    ? null
-                    : buildTimestamp(clockInDate, clockInTime);
-
-            const requestedClockOut =
-                changeType === "clock_in"
-                    ? null
-                    : buildTimestamp(clockOutDate, clockOutTime);
-
+            const requestedClockIn = changeType === "clock_out" ? null : buildTimestamp(clockInDate, clockInTime);
+            const requestedClockOut = changeType === "clock_in" ? null : buildTimestamp(clockOutDate, clockOutTime);
             const directEdit = currentEditMode === "edit";
-            const response = await apiFetch(
-                directEdit
-                    ? `${apiBase}/employee/edit-time-entry`
-                    : `${apiBase}/employee/request-time-change`,
-                {
-                    method: "POST",
-                    body: JSON.stringify(
-                        directEdit
-                            ? {
-                                time_entry_id: currentEntryId,
-                                new_clock_in: buildTimestamp(clockInDate, clockInTime),
-                                new_clock_out: clockOutDate && clockOutTime
-                                    ? buildTimestamp(clockOutDate, clockOutTime)
-                                    : null,
-                                reason
-                            }
-                            : {
-                                time_entry_id: currentEntryId,
-                                requested_clock_in: requestedClockIn,
-                                requested_clock_out: requestedClockOut,
-                                employee_reason: reason
-                            }
-                    )
+
+            submitButton.disabled = true;
+            submitButton.textContent = directEdit ? "Saving..." : "Submitting...";
+
+            try {
+                const response = await apiFetch(
+                    directEdit ? `${apiBase}/employee/edit-time-entry` : `${apiBase}/employee/request-time-change`,
+                    {
+                        method: "POST",
+                        body: JSON.stringify(
+                            directEdit
+                                ? {
+                                    time_entry_id: currentEntryId,
+                                    new_clock_in: buildTimestamp(clockInDate, clockInTime),
+                                    new_clock_out: clockOutDate && clockOutTime ? buildTimestamp(clockOutDate, clockOutTime) : null,
+                                    reason
+                                }
+                                : {
+                                    time_entry_id: currentEntryId,
+                                    requested_clock_in: requestedClockIn,
+                                    requested_clock_out: requestedClockOut,
+                                    employee_reason: reason
+                                }
+                        )
+                    }
+                );
+
+                const responseText = await response.text();
+                let data = {};
+                try {
+                    data = responseText ? JSON.parse(responseText) : {};
+                } catch (_) {
+                    data = { error: responseText };
                 }
-            );
+                if (!response.ok || data.error) {
+                    throw new Error(data.error || `Request failed (HTTP ${response.status})`);
+                }
 
-            const data = await response.json();
-
-            if (data.error) {
-                showMessage(data.error, true);
-                return;
+                closeRequestModal();
+                showMessage(directEdit ? "Time entry updated" : "Time change request submitted");
+                await loadMyTimecard();
+            } catch (err) {
+                if (err.message !== "Login required") {
+                    showRequestMessage(err.message || "Unable to submit the time change request");
+                }
+            } finally {
+                submitButton.disabled = false;
+                submitButton.textContent = "Submit Request";
             }
-
-            closeRequestModal();
-            showMessage(currentEditMode === "edit" ? "Time entry updated" : "Time change request submitted");
-            loadMyTimecard();
         }
 
         populateTimeDropdown("requestClockInTime");
