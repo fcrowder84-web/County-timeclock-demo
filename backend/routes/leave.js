@@ -213,9 +213,6 @@ function createLeaveRouter({ requireUser, pool, audit, canAccessEmployee, getReq
       const existing = await pool.query('SELECT * FROM leave_entries WHERE id=$1', [req.params.id]);
       if (!existing.rows.length) return res.status(404).json({ error: 'Leave entry not found' });
       await assertAccess(req.user, existing.rows[0].employee_id);
-      if (Number(existing.rows[0].employee_id) === Number(req.user.id) && existing.rows[0].status === 'approved') {
-        return res.status(409).json({ error: 'Approved leave must be removed by a supervisor or payroll' });
-      }
       await pool.query('DELETE FROM leave_entries WHERE id=$1', [req.params.id]);
       await audit(req.user.id, 'delete_leave', 'leave_entry', req.params.id, existing.rows[0]);
       res.json({ message: 'Leave entry removed' });
