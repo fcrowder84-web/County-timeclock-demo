@@ -5,6 +5,7 @@ const {
   unique,
   legacyPermissionsForRole,
   deriveLegacyRole,
+  userPermissionSet,
   userHasPermission,
   userHasAnyPermission,
 } = require("./lib/permissions");
