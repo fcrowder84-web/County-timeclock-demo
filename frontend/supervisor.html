@@ -1707,6 +1707,24 @@
         checkExistingLogin();
 
     
+        const collapseStorageKey = "timeclock:collapsed:supervisor";
+
+        function loadCollapsedSections() {
+            try {
+                return JSON.parse(localStorage.getItem(collapseStorageKey) || "{}");
+            } catch (_) {
+                return {};
+            }
+        }
+
+        function saveSectionState(sectionKey, collapsed) {
+            try {
+                const saved = loadCollapsedSections();
+                saved[sectionKey] = collapsed;
+                localStorage.setItem(collapseStorageKey, JSON.stringify(saved));
+            } catch (_) {}
+        }
+
         function applyCollapsibleCards(root = document) {
             root.querySelectorAll(".card").forEach(card => {
                 if (card.dataset.collapsibleReady === "true") return;
@@ -1728,19 +1746,27 @@
                     || sectionName === "Audit History"
                     || sectionName === "Team Structure"
                     || (heading.tagName === "H3" && !expandedByDefault.has(sectionName));
+                const sectionKey = sectionName.toLowerCase().replace(/[^a-z0-9]+/g, "-");
+                card.dataset.collapseKey = sectionKey;
+                const savedSections = loadCollapsedSections();
+                const initiallyCollapsed =
+                    typeof savedSections[sectionKey] === "boolean"
+                        ? savedSections[sectionKey]
+                        : collapsedByDefault;
 
-                card.classList.toggle("collapsed", collapsedByDefault);
+                card.classList.toggle("collapsed", initiallyCollapsed);
 
                 const button = document.createElement("button");
                 button.type = "button";
                 button.className = "collapse-toggle";
-                button.textContent = collapsedByDefault ? "Expand" : "Collapse";
-                button.setAttribute("aria-expanded", String(!collapsedByDefault));
+                button.textContent = initiallyCollapsed ? "Expand" : "Collapse";
+                button.setAttribute("aria-expanded", String(!initiallyCollapsed));
                 button.addEventListener("click", event => {
                     event.stopPropagation();
                     const collapsed = card.classList.toggle("collapsed");
                     button.textContent = collapsed ? "Expand" : "Collapse";
                     button.setAttribute("aria-expanded", String(!collapsed));
+                    saveSectionState(sectionKey, collapsed);
                 });
                 heading.appendChild(button);
             });
@@ -1754,6 +1780,9 @@
                 if (button) {
                     button.textContent = collapsed ? "Expand" : "Collapse";
                     button.setAttribute("aria-expanded", String(!collapsed));
+                }
+                if (card.dataset.collapseKey) {
+                    saveSectionState(card.dataset.collapseKey, collapsed);
                 }
             });
         }
