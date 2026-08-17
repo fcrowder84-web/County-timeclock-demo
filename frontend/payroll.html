@@ -330,6 +330,7 @@
         </div>
     </div>
 
+    <script src="/timecard-summary-ui.js"></script>
     <script>
         const apiBase = "/api";
 
@@ -795,6 +796,8 @@
                         ${data.can_edit_entries && hasPermission("edit_payroll_time") ? "Payroll override" : "View only"}
                     </div>
                 </div>
+
+                ${TimecardSummaryUi.render(data.timecard_summary)}
 
                 <table>
                     <thead>
