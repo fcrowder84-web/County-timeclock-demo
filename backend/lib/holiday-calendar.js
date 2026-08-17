@@ -19,7 +19,7 @@ const FIXED_HOLIDAYS = {
 
 const FLOATING_HOLIDAY_POLICY = {
   days_per_year: 1,
-  hours_per_day: 8,
+  hours_flexible: true,
   prior_supervisor_approval_required: true,
   any_workday: true,
 };
