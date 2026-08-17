@@ -162,6 +162,7 @@ function createLeaveRouter({ requireUser, pool, audit, canAccessEmployee, getReq
       let note = String(req.body.note || '').trim() || null;
       const overrideConfirmed = req.body.override_daily_hours === true;
       const overrideReason = String(req.body.override_reason || '').trim();
+      const supervisorReviewedHours = type === 'holiday' || type === 'floating_holiday';
 
       if (type === 'holiday') {
         validateFixedHolidayDates(dates);
@@ -216,7 +217,7 @@ function createLeaveRouter({ requireUser, pool, audit, canAccessEmployee, getReq
         if (check.exceeds_standard_day) dailyChecks.push({ date, ...check });
       }
 
-      if (dailyChecks.length && !overrideConfirmed) {
+      if (dailyChecks.length && !supervisorReviewedHours && !overrideConfirmed) {
         await client.query('ROLLBACK');
         return res.status(409).json({
           error: 'Worked time plus leave exceeds 8 hours on one or more days',
@@ -225,7 +226,7 @@ function createLeaveRouter({ requireUser, pool, audit, canAccessEmployee, getReq
           daily_checks: dailyChecks,
         });
       }
-      if (dailyChecks.length && !overrideReason) {
+      if (dailyChecks.length && !supervisorReviewedHours && !overrideReason) {
         await client.query('ROLLBACK');
         return res.status(400).json({
           error: 'An override reason is required when total paid time exceeds 8 hours',
