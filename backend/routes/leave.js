@@ -79,7 +79,7 @@ function validateFixedHolidayDates(dates) {
   }
 }
 
-function validateFloatingHolidayRequest(dates, quarterHours) {
+function validateFloatingHolidayRequest(dates) {
   if (dates.length !== 1) {
     const error = new Error('Floating Holiday must be requested for one workday');
     error.statusCode = 400;
@@ -87,11 +87,6 @@ function validateFloatingHolidayRequest(dates, quarterHours) {
   }
   if (!isWorkday(dates[0])) {
     const error = new Error('Floating Holiday must be used on a workday');
-    error.statusCode = 400;
-    throw error;
-  }
-  if (quarterHours !== FLOATING_HOLIDAY_POLICY.hours_per_day * 4) {
-    const error = new Error(`Floating Holiday is one ${FLOATING_HOLIDAY_POLICY.hours_per_day}-hour personal leave day`);
     error.statusCode = 400;
     throw error;
   }
@@ -174,7 +169,7 @@ function createLeaveRouter({ requireUser, pool, audit, canAccessEmployee, getReq
       }
 
       if (type === 'floating_holiday') {
-        validateFloatingHolidayRequest(dates, quarterHours);
+        validateFloatingHolidayRequest(dates);
         const year = holidayYear(dates[0]);
         const existingFloating = await client.query(
           `SELECT id,status,leave_date FROM leave_entries
