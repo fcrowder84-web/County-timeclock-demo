@@ -9,5 +9,6 @@ COPY supervisor.html /usr/share/nginx/html/supervisor.html
 COPY payroll.html /usr/share/nginx/html/payroll.html
 COPY payroll-timecards.html /usr/share/nginx/html/payroll-timecards.html
 COPY leave.html /usr/share/nginx/html/leave.html
+COPY timecard-summary-ui.js /usr/share/nginx/html/timecard-summary-ui.js
 
 COPY global-logout.html /usr/share/nginx/html/global-logout.html

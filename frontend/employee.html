@@ -376,6 +376,7 @@
         </div>
     </div>
 
+    <script src="/timecard-summary-ui.js"></script>
     <script>
         const apiBase = "/api";
 
@@ -700,11 +701,6 @@
             const data = await response.json();
 
             const leaveEntries = data.leave_entries || [];
-            const workedHours = roundedDailyHours(data.entries, "entry_date_iso");
-            const approvedLeaveHours = leaveEntries
-                .filter(entry => entry.status === "approved")
-                .reduce((total, entry) => total + Number(entry.hours || 0), 0);
-            const paidHours = workedHours + approvedLeaveHours;
 
             let html = `
                 <div class="card">
@@ -713,31 +709,14 @@
                     <div class="summary-row">
                         <div class="summary-box">
                             <strong>Pay Period</strong><br>
-                            ${getDateOnly(data.pay_period_start)}
-                            through
-                            ${getDateOnly(data.pay_period_end)}
+                            ${getDateOnly(data.pay_period_start)} through ${getDateOnly(data.pay_period_end)}
                         </div>
-
-                        <div class="summary-box">
-                            <strong>Worked Hours</strong><br>
-                            ${workedHours.toFixed(2)}
-                        </div>
-
-                        <div class="summary-box">
-                            <strong>Approved Leave</strong><br>
-                            ${approvedLeaveHours.toFixed(2)}
-                        </div>
-
-                        <div class="summary-box">
-                            <strong>Total Paid Hours</strong><br>
-                            ${paidHours.toFixed(2)}
-                        </div>
-
                         <div class="summary-box">
                             <strong>Status</strong><br>
                             ${getApprovalStatus(data.approval)}
                         </div>
                     </div>
+                    ${TimecardSummaryUi.render(data.timecard_summary)}
 
                     <table>
                         <thead>

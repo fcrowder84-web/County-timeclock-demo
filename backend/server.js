@@ -12,6 +12,7 @@ const {
 const { verifyPortalToken } = require("./lib/portal-token");
 const { createSessionStore, getBearerToken } = require("./lib/session-store");
 const { formatDateOnly, resolvePayPeriod, shiftDate } = require("./lib/pay-period");
+const { summarizeTimecard } = require("./lib/timecard-summary");
 const { createAuthRouter } = require("./routes/auth");
 const { createQuickPunchRouter } = require("./routes/quick-punch");
 const { createLeaveRouter } = require("./routes/leave");
@@ -750,6 +751,11 @@ app.get("/employee/my-timecard", requireUser, requireAnyPermission("view_own_tim
       can_edit_entries: canEditEntries,
       entries: entriesResult.rows,
       leave_entries: leaveResult.rows,
+      timecard_summary: summarizeTimecard({
+        entries: entriesResult.rows,
+        leaveEntries: leaveResult.rows,
+        payPeriodStart: period.pay_period_start,
+      }),
       requests: requestsResult.rows,
     });
   } catch (err) {
@@ -1476,6 +1482,11 @@ app.get(
         pay_period_start: period.pay_period_start,
         pay_period_end: period.pay_period_end,
         entries: entriesResult.rows,
+        timecard_summary: summarizeTimecard({
+          entries: entriesResult.rows,
+          leaveEntries: leaveResult.rows,
+          payPeriodStart: period.pay_period_start,
+        }),
       });
     } catch (err) {
       console.error(err);

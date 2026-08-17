@@ -1,8 +1,15 @@
 'use strict';
 
 const express = require('express');
+const {
+  FLOATING_HOLIDAY_POLICY,
+  getHolidayCalendar,
+  findFixedHoliday,
+  holidayYear,
+  isWorkday,
+} = require('../lib/holiday-calendar');
 
-const LEAVE_TYPES = ['vacation', 'sick', 'bereavement', 'jury_duty', 'administrative', 'other'];
+const LEAVE_TYPES = ['vacation', 'sick', 'holiday', 'floating_holiday', 'bereavement', 'jury_duty', 'administrative', 'other'];
 const SUPERVISOR_PERMISSIONS = [
   'view_assigned_employees', 'view_department_time', 'edit_employee_time',
   'approve_timecard', 'manage_employee_timeclock_settings', 'edit_payroll_time',
@@ -63,6 +70,28 @@ function assessDailyPaidHours({ workedQuarterHours = 0, existingLeaveQuarterHour
   };
 }
 
+function validateFixedHolidayDates(dates) {
+  const invalid = dates.filter((date) => !findFixedHoliday(date));
+  if (invalid.length) {
+    const error = new Error(`Holiday leave is limited to the County holiday calendar. Invalid date(s): ${invalid.join(', ')}`);
+    error.statusCode = 400;
+    throw error;
+  }
+}
+
+function validateFloatingHolidayRequest(dates) {
+  if (dates.length !== 1) {
+    const error = new Error('Floating Holiday must be requested for one workday');
+    error.statusCode = 400;
+    throw error;
+  }
+  if (!isWorkday(dates[0])) {
+    const error = new Error('Floating Holiday must be used on a workday');
+    error.statusCode = 400;
+    throw error;
+  }
+}
+
 function createLeaveRouter({ requireUser, pool, audit, canAccessEmployee, getRequestedPayPeriod, userHasAnyPermission }) {
   const router = express.Router();
 
@@ -81,6 +110,15 @@ function createLeaveRouter({ requireUser, pool, audit, canAccessEmployee, getReq
   }
 
   router.get('/leave/types', requireUser, (_req, res) => res.json({ leave_types: LEAVE_TYPES }));
+
+  router.get('/leave/holiday-calendar', requireUser, (req, res) => {
+    const requestedYear = Number(req.query.year || new Date().getFullYear());
+    res.json({
+      year: requestedYear,
+      fixed_holidays: getHolidayCalendar(requestedYear),
+      floating_holiday: FLOATING_HOLIDAY_POLICY,
+    });
+  });
 
   router.get('/leave', requireUser, async (req, res) => {
     try {
@@ -121,9 +159,36 @@ function createLeaveRouter({ requireUser, pool, audit, canAccessEmployee, getReq
       const dates = datesBetween(req.body.start_date, req.body.end_date, req.body.weekdays_only === true);
       const onBehalf = employeeId !== Number(req.user.id);
       const status = onBehalf ? 'approved' : 'pending';
-      const note = String(req.body.note || '').trim() || null;
+      let note = String(req.body.note || '').trim() || null;
       const overrideConfirmed = req.body.override_daily_hours === true;
       const overrideReason = String(req.body.override_reason || '').trim();
+      const supervisorReviewedHours = type === 'holiday' || type === 'floating_holiday';
+
+      if (type === 'holiday') {
+        validateFixedHolidayDates(dates);
+        if (!note && dates.length === 1) note = findFixedHoliday(dates[0])?.name || null;
+      }
+
+      if (type === 'floating_holiday') {
+        validateFloatingHolidayRequest(dates);
+        const year = holidayYear(dates[0]);
+        const existingFloating = await client.query(
+          `SELECT id,status,leave_date FROM leave_entries
+            WHERE employee_id=$1
+              AND leave_type='floating_holiday'
+              AND EXTRACT(YEAR FROM leave_date)=$2
+              AND status IN ('pending','approved')
+            LIMIT 1`,
+          [employeeId, year],
+        );
+        if (existingFloating.rows.length) {
+          const error = new Error(`This employee already has a pending or approved Floating Holiday for ${year}`);
+          error.statusCode = 409;
+          throw error;
+        }
+        if (!note) note = 'Annual Floating Holiday';
+      }
+
       await client.query('BEGIN');
 
       const dailyChecks = [];
@@ -152,7 +217,7 @@ function createLeaveRouter({ requireUser, pool, audit, canAccessEmployee, getReq
         if (check.exceeds_standard_day) dailyChecks.push({ date, ...check });
       }
 
-      if (dailyChecks.length && !overrideConfirmed) {
+      if (dailyChecks.length && !supervisorReviewedHours && !overrideConfirmed) {
         await client.query('ROLLBACK');
         return res.status(409).json({
           error: 'Worked time plus leave exceeds 8 hours on one or more days',
@@ -161,7 +226,7 @@ function createLeaveRouter({ requireUser, pool, audit, canAccessEmployee, getReq
           daily_checks: dailyChecks,
         });
       }
-      if (dailyChecks.length && !overrideReason) {
+      if (dailyChecks.length && !supervisorReviewedHours && !overrideReason) {
         await client.query('ROLLBACK');
         return res.status(400).json({
           error: 'An override reason is required when total paid time exceeds 8 hours',
@@ -171,13 +236,16 @@ function createLeaveRouter({ requireUser, pool, audit, canAccessEmployee, getReq
       }
       const inserted = [];
       for (const date of dates) {
+        const entryNote = type === 'holiday' && !String(req.body.note || '').trim()
+          ? (findFixedHoliday(date)?.name || note)
+          : note;
         const result = await client.query(
           `INSERT INTO leave_entries(
              employee_id,leave_date,leave_type,quarter_hours,note,status,
              created_by_employee_id,reviewed_by_employee_id,reviewed_at
            ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,CASE WHEN $8::int IS NULL THEN NULL ELSE NOW() END)
            RETURNING *, ROUND(quarter_hours / 4.0, 2) AS hours`,
-          [employeeId, date, type, quarterHours, note, status, req.user.id, onBehalf ? req.user.id : null],
+          [employeeId, date, type, quarterHours, entryNote, status, req.user.id, onBehalf ? req.user.id : null],
         );
         inserted.push(result.rows[0]);
       }
@@ -260,4 +328,12 @@ function createLeaveRouter({ requireUser, pool, audit, canAccessEmployee, getReq
   return router;
 }
 
-module.exports = { LEAVE_TYPES, parseQuarterHours, datesBetween, assessDailyPaidHours, createLeaveRouter };
+module.exports = {
+  LEAVE_TYPES,
+  parseQuarterHours,
+  datesBetween,
+  assessDailyPaidHours,
+  validateFixedHolidayDates,
+  validateFloatingHolidayRequest,
+  createLeaveRouter,
+};
