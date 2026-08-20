@@ -9,11 +9,26 @@ const {
   isWorkday,
 } = require('../lib/holiday-calendar');
 
-const LEAVE_TYPES = ['vacation', 'sick', 'holiday', 'floating_holiday', 'bereavement', 'jury_duty', 'administrative', 'other'];
+const LEAVE_TYPES = [
+  'vacation',
+  'sick',
+  'holiday',
+  'floating_holiday',
+  'bereavement',
+  'jury_duty',
+  'administrative',
+  'other',
+];
+
 const SUPERVISOR_PERMISSIONS = [
-  'view_assigned_employees', 'view_department_time', 'edit_employee_time',
-  'approve_timecard', 'manage_employee_timeclock_settings', 'edit_payroll_time',
-  'view_all_timeclock_records', 'app_admin',
+  'view_assigned_employees',
+  'view_department_time',
+  'edit_employee_time',
+  'approve_timecard',
+  'manage_employee_timeclock_settings',
+  'edit_payroll_time',
+  'view_all_timeclock_records',
+  'app_admin',
 ];
 
 function parseQuarterHours(hours) {
@@ -34,6 +49,7 @@ function datesBetween(start, end, weekdaysOnly = false) {
     error.statusCode = 400;
     throw error;
   }
+
   const result = [];
   for (const day = new Date(first); day <= last; day.setUTCDate(day.getUTCDate() + 1)) {
     if (!weekdaysOnly || (day.getUTCDay() !== 0 && day.getUTCDay() !== 6)) {
@@ -45,6 +61,7 @@ function datesBetween(start, end, weekdaysOnly = false) {
       throw error;
     }
   }
+
   if (!result.length) {
     const error = new Error('The selected range contains no applicable dates');
     error.statusCode = 400;
@@ -53,7 +70,12 @@ function datesBetween(start, end, weekdaysOnly = false) {
   return result;
 }
 
-function assessDailyPaidHours({ workedQuarterHours = 0, existingLeaveQuarterHours = 0, proposedQuarterHours = 0, standardQuarterHours = 32 }) {
+function assessDailyPaidHours({
+  workedQuarterHours = 0,
+  existingLeaveQuarterHours = 0,
+  proposedQuarterHours = 0,
+  standardQuarterHours = 32,
+}) {
   const totalQuarterHours = workedQuarterHours + existingLeaveQuarterHours + proposedQuarterHours;
   return {
     worked_quarter_hours: workedQuarterHours,
@@ -96,7 +118,8 @@ function createLeaveRouter({ requireUser, pool, audit, canAccessEmployee, getReq
   const router = express.Router();
 
   function isSupervisor(user) {
-    return userHasAnyPermission(user, SUPERVISOR_PERMISSIONS) || ['supervisor', 'payroll', 'admin'].includes(user.role);
+    return userHasAnyPermission(user, SUPERVISOR_PERMISSIONS)
+      || ['supervisor', 'payroll', 'admin'].includes(user.role);
   }
 
   async function assertAccess(user, employeeId) {
@@ -134,11 +157,17 @@ function createLeaveRouter({ requireUser, pool, audit, canAccessEmployee, getReq
            JOIN employees e ON e.id=le.employee_id
            JOIN employees creator ON creator.id=le.created_by_employee_id
            LEFT JOIN employees reviewer ON reviewer.id=le.reviewed_by_employee_id
-          WHERE le.employee_id=$1 AND le.leave_date BETWEEN $2::date AND $3::date
+          WHERE le.employee_id=$1
+            AND le.leave_date BETWEEN $2::date AND $3::date
           ORDER BY le.leave_date, le.id`,
         [employeeId, period.pay_period_start, period.pay_period_end],
       );
-      res.json({ employee_id: employeeId, ...period, leave_entries: result.rows, can_manage_others: isSupervisor(req.user) });
+      res.json({
+        employee_id: employeeId,
+        ...period,
+        leave_entries: result.rows,
+        can_manage_others: isSupervisor(req.user),
+      });
     } catch (err) {
       res.status(err.statusCode || 500).json({ error: err.message || 'Leave lookup failed' });
     }
@@ -149,12 +178,14 @@ function createLeaveRouter({ requireUser, pool, audit, canAccessEmployee, getReq
     try {
       const employeeId = Number(req.body.employee_id || req.user.id);
       await assertAccess(req.user, employeeId);
+
       const type = String(req.body.leave_type || '').toLowerCase();
       if (!LEAVE_TYPES.includes(type)) {
         const error = new Error('Select a valid leave type');
         error.statusCode = 400;
         throw error;
       }
+
       const quarterHours = parseQuarterHours(req.body.hours);
       const dates = datesBetween(req.body.start_date, req.body.end_date, req.body.weekdays_only === true);
       const onBehalf = employeeId !== Number(req.user.id);
@@ -171,9 +202,15 @@ function createLeaveRouter({ requireUser, pool, audit, canAccessEmployee, getReq
 
       if (type === 'floating_holiday') {
         validateFloatingHolidayRequest(dates);
+      }
+
+      await client.query('BEGIN');
+
+      if (type === 'floating_holiday') {
         const year = holidayYear(dates[0]);
         const existingFloating = await client.query(
-          `SELECT id,status,leave_date FROM leave_entries
+          `SELECT id,status,leave_date
+             FROM leave_entries
             WHERE employee_id=$1
               AND leave_type='floating_holiday'
               AND EXTRACT(YEAR FROM leave_date)=$2
@@ -189,8 +226,6 @@ function createLeaveRouter({ requireUser, pool, audit, canAccessEmployee, getReq
         if (!note) note = 'Annual Floating Holiday';
       }
 
-      await client.query('BEGIN');
-
       const dailyChecks = [];
       for (const date of dates) {
         const totals = await client.query(
@@ -203,12 +238,21 @@ function createLeaveRouter({ requireUser, pool, audit, canAccessEmployee, getReq
                  END,
                0
              )::int AS worked_quarters,
-             COALESCE((SELECT SUM(quarter_hours) FROM leave_entries
-                        WHERE employee_id=$1 AND leave_date=$2::date AND status <> 'denied'),0)::int AS leave_quarters
+             COALESCE((
+               SELECT SUM(quarter_hours)
+                 FROM leave_entries
+                WHERE employee_id=$1
+                  AND leave_date=$2::date
+                  AND status <> 'denied'
+             ),0)::int AS leave_quarters
              FROM time_entries
-            WHERE employee_id=$1 AND clock_in >= $2::date AND clock_in < ($2::date + INTERVAL '1 day')`,
+            WHERE employee_id=$1
+              AND deleted_at IS NULL
+              AND clock_in >= $2::date
+              AND clock_in < ($2::date + INTERVAL '1 day')`,
           [employeeId, date],
         );
+
         const check = assessDailyPaidHours({
           workedQuarterHours: Number(totals.rows[0].worked_quarters || 0),
           existingLeaveQuarterHours: Number(totals.rows[0].leave_quarters || 0),
@@ -226,6 +270,7 @@ function createLeaveRouter({ requireUser, pool, audit, canAccessEmployee, getReq
           daily_checks: dailyChecks,
         });
       }
+
       if (dailyChecks.length && !supervisorReviewedHours && !overrideReason) {
         await client.query('ROLLBACK');
         return res.status(400).json({
@@ -234,6 +279,7 @@ function createLeaveRouter({ requireUser, pool, audit, canAccessEmployee, getReq
           daily_checks: dailyChecks,
         });
       }
+
       const inserted = [];
       for (const date of dates) {
         const entryNote = type === 'holiday' && !String(req.body.note || '').trim()
@@ -245,18 +291,50 @@ function createLeaveRouter({ requireUser, pool, audit, canAccessEmployee, getReq
              created_by_employee_id,reviewed_by_employee_id,reviewed_at
            ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,CASE WHEN $8::int IS NULL THEN NULL ELSE NOW() END)
            RETURNING *, ROUND(quarter_hours / 4.0, 2) AS hours`,
-          [employeeId, date, type, quarterHours, entryNote, status, req.user.id, onBehalf ? req.user.id : null],
+          [
+            employeeId,
+            date,
+            type,
+            quarterHours,
+            entryNote,
+            status,
+            req.user.id,
+            onBehalf ? req.user.id : null,
+          ],
         );
         inserted.push(result.rows[0]);
       }
+
       await client.query('COMMIT');
-      await audit(req.user.id, onBehalf ? 'add_leave_on_behalf' : 'request_leave', 'employee', employeeId, {
-        leave_type: type, dates, hours: quarterHours / 4, status, note, daily_hours_override: dailyChecks.length > 0, override_reason: overrideReason || null, daily_checks: dailyChecks,
+      await audit(
+        req.user.id,
+        onBehalf ? 'add_leave_on_behalf' : 'request_leave',
+        'employee',
+        employeeId,
+        {
+          leave_type: type,
+          dates,
+          hours: quarterHours / 4,
+          status,
+          note,
+          daily_hours_override: dailyChecks.length > 0,
+          override_reason: overrideReason || null,
+          daily_checks: dailyChecks,
+        },
+      );
+
+      res.status(201).json({
+        message: onBehalf ? 'Leave added and approved' : 'Leave submitted for approval',
+        leave_entries: inserted,
       });
-      res.status(201).json({ message: onBehalf ? 'Leave added and approved' : 'Leave submitted for approval', leave_entries: inserted });
     } catch (err) {
       await client.query('ROLLBACK').catch(() => {});
-      res.status(err.statusCode || 500).json({ error: err.message || 'Leave entry failed' });
+      if (err.code === '23505') {
+        return res.status(409).json({
+          error: 'This employee already has a pending or approved Floating Holiday for that year',
+        });
+      }
+      return res.status(err.statusCode || 500).json({ error: err.message || 'Leave entry failed' });
     } finally {
       client.release();
     }
@@ -264,22 +342,39 @@ function createLeaveRouter({ requireUser, pool, audit, canAccessEmployee, getReq
 
   router.post('/leave/:id/review', requireUser, async (req, res) => {
     try {
-      if (!isSupervisor(req.user)) return res.status(403).json({ error: 'Supervisor access required' });
+      if (!isSupervisor(req.user)) {
+        return res.status(403).json({ error: 'Supervisor access required' });
+      }
+
       const existing = await pool.query('SELECT * FROM leave_entries WHERE id=$1', [req.params.id]);
       if (!existing.rows.length) return res.status(404).json({ error: 'Leave entry not found' });
       await assertAccess(req.user, existing.rows[0].employee_id);
+
       const status = String(req.body.status || '').toLowerCase();
-      if (!['approved', 'denied'].includes(status)) return res.status(400).json({ error: 'Status must be approved or denied' });
+      if (!['approved', 'denied'].includes(status)) {
+        return res.status(400).json({ error: 'Status must be approved or denied' });
+      }
+
       const note = String(req.body.review_note || '').trim() || null;
       const result = await pool.query(
-        `UPDATE leave_entries SET status=$1,review_note=$2,reviewed_by_employee_id=$3,reviewed_at=NOW(),updated_at=NOW()
-          WHERE id=$4 RETURNING *, ROUND(quarter_hours / 4.0, 2) AS hours`,
+        `UPDATE leave_entries
+            SET status=$1,
+                review_note=$2,
+                reviewed_by_employee_id=$3,
+                reviewed_at=NOW(),
+                updated_at=NOW()
+          WHERE id=$4
+          RETURNING *, ROUND(quarter_hours / 4.0, 2) AS hours`,
         [status, note, req.user.id, req.params.id],
       );
-      await audit(req.user.id, `leave_${status}`, 'leave_entry', req.params.id, { employee_id: existing.rows[0].employee_id, review_note: note });
-      res.json({ message: `Leave ${status}`, leave_entry: result.rows[0] });
+
+      await audit(req.user.id, `leave_${status}`, 'leave_entry', req.params.id, {
+        employee_id: existing.rows[0].employee_id,
+        review_note: note,
+      });
+      return res.json({ message: `Leave ${status}`, leave_entry: result.rows[0] });
     } catch (err) {
-      res.status(err.statusCode || 500).json({ error: err.message || 'Leave review failed' });
+      return res.status(err.statusCode || 500).json({ error: err.message || 'Leave review failed' });
     }
   });
 
@@ -290,9 +385,9 @@ function createLeaveRouter({ requireUser, pool, audit, canAccessEmployee, getReq
       await assertAccess(req.user, existing.rows[0].employee_id);
       await pool.query('DELETE FROM leave_entries WHERE id=$1', [req.params.id]);
       await audit(req.user.id, 'delete_leave', 'leave_entry', req.params.id, existing.rows[0]);
-      res.json({ message: 'Leave entry removed' });
+      return res.json({ message: 'Leave entry removed' });
     } catch (err) {
-      res.status(err.statusCode || 500).json({ error: err.message || 'Leave removal failed' });
+      return res.status(err.statusCode || 500).json({ error: err.message || 'Leave removal failed' });
     }
   });
 
@@ -302,26 +397,48 @@ function createLeaveRouter({ requireUser, pool, audit, canAccessEmployee, getReq
       if (!employeeId || employeeId === Number(req.user.id) || !isSupervisor(req.user)) {
         return res.status(403).json({ error: 'Supervisor entry on behalf of an employee is required' });
       }
+
       await assertAccess(req.user, employeeId);
       const period = await getRequestedPayPeriod(req);
       const open = await pool.query(
-        `SELECT id FROM time_entries WHERE employee_id=$1 AND clock_in >= $2::date
-          AND clock_in < ($3::date + INTERVAL '1 day') AND clock_out IS NULL`,
+        `SELECT id
+           FROM time_entries
+          WHERE employee_id=$1
+            AND deleted_at IS NULL
+            AND clock_in >= $2::date
+            AND clock_in < ($3::date + INTERVAL '1 day')
+            AND clock_out IS NULL`,
         [employeeId, period.pay_period_start, period.pay_period_end],
       );
-      if (open.rows.length) return res.status(400).json({ error: 'Clock out the employee before completing the timecard' });
+      if (open.rows.length) {
+        return res.status(400).json({ error: 'Clock out the employee before completing the timecard' });
+      }
+
       const result = await pool.query(
-        `INSERT INTO pay_period_approvals(employee_id,pay_period_start,pay_period_end,employee_signed_at,status)
-         VALUES($1,$2,$3,NOW(),'employee_submitted')
+        `INSERT INTO pay_period_approvals(
+           employee_id,pay_period_start,pay_period_end,employee_signed_at,status
+         ) VALUES($1,$2,$3,NOW(),'employee_submitted')
          ON CONFLICT(employee_id,pay_period_start,pay_period_end)
-         DO UPDATE SET employee_signed_at=NOW(),supervisor_approved_at=NULL,payroll_finalized_at=NULL,status='employee_submitted'
+         DO UPDATE SET employee_signed_at=NOW(),
+                       supervisor_approved_at=NULL,
+                       supervisor_employee_id=NULL,
+                       payroll_finalized_at=NULL,
+                       payroll_finalized_by=NULL,
+                       status='employee_submitted'
          RETURNING *`,
         [employeeId, period.pay_period_start, period.pay_period_end],
       );
-      await audit(req.user.id, 'submit_timecard_on_behalf', 'employee', employeeId, { ...period, reason: String(req.body.reason || '').trim() || null });
-      res.json({ message: 'Timecard completed on behalf of employee and sent for supervisor review', approval: result.rows[0] });
+
+      await audit(req.user.id, 'submit_timecard_on_behalf', 'employee', employeeId, {
+        ...period,
+        reason: String(req.body.reason || '').trim() || null,
+      });
+      return res.json({
+        message: 'Timecard completed on behalf of employee and sent for supervisor review',
+        approval: result.rows[0],
+      });
     } catch (err) {
-      res.status(err.statusCode || 500).json({ error: err.message || 'Timecard completion failed' });
+      return res.status(err.statusCode || 500).json({ error: err.message || 'Timecard completion failed' });
     }
   });
 
