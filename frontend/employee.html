@@ -115,6 +115,11 @@
             color: white;
         }
 
+        .btn-delete {
+            background: #c0392b;
+            color: white;
+        }
+
         .btn-submit {
             background: #2980b9;
             color: white;
@@ -776,7 +781,14 @@
                                     'request'
                                 )">
                                 Request Change
-                            </button>` : "-"}
+                            </button>` : ""}
+                            <button
+                                class="btn-delete"
+                                title="Delete this punch"
+                                aria-label="Delete punch"
+                                onclick="deletePunch(${entry.id})">
+                                🗑 Delete
+                            </button>
                         </td>
                     </tr>
                 `;
@@ -888,6 +900,48 @@
             html += `</div>`;
 
             document.getElementById("requestsBox").innerHTML = html;
+        }
+
+        async function deletePunch(entryId) {
+            const reason = window.prompt(
+                "Why are you deleting this punch? This reason will be saved in the audit trail."
+            );
+
+            if (reason === null) return;
+
+            if (reason.trim().length < 3) {
+                showMessage("A deletion reason is required.", true);
+                return;
+            }
+
+            if (!window.confirm(
+                "Delete this punch from your timecard? The original record will remain in the audit trail."
+            )) {
+                return;
+            }
+
+            try {
+                const response = await apiFetch(`${apiBase}/delete-punch`, {
+                    method: "POST",
+                    body: JSON.stringify({
+                        time_entry_id: entryId,
+                        reason: reason.trim()
+                    })
+                });
+
+                const data = await response.json();
+
+                if (!response.ok || data.error) {
+                    throw new Error(data.error || "Unable to delete punch");
+                }
+
+                showMessage(data.message || "Punch deleted.");
+                await loadMyTimecard();
+            } catch (err) {
+                if (err.message !== "Login required") {
+                    showMessage(err.message || "Unable to delete punch", true);
+                }
+            }
         }
 
         async function runPunch(endpoint) {
