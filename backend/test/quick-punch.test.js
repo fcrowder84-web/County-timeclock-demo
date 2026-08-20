@@ -28,39 +28,27 @@ function compact(sql) { return String(sql).replace(/\s+/g, ' ').trim(); }
   async function query(sql, args) {
     const text = compact(sql);
     queries.push({ text, args });
-
     if (text === 'BEGIN' || text === 'COMMIT' || text === 'ROLLBACK') return { rows: [] };
-    if (text.startsWith('SELECT id,clock_in FROM time_entries')) {
-      return { rows: [{ id: 1, clock_in: '2026-08-20T17:44:27Z' }] };
+    if (text.startsWith('SELECT id,clock_in,') && text.includes('requires_correction')) {
+      return { rows: [{ id: 1, clock_in: '2026-08-20T17:44:27Z', requires_correction: false }] };
     }
-    if (text.startsWith('SELECT clock_in,clock_out FROM time_entries')) {
-      return { rows: [{ clock_in: '2026-08-20T17:42:00Z', clock_out: '2026-08-20T17:42:09Z' }] };
-    }
-    if (text.startsWith('SELECT * FROM time_entries') && text.includes('FOR UPDATE')) {
-      return { rows: [{ id: 9, employee_id: 7, clock_in: '2026-08-20T17:44:27Z', clock_out: null, status: 'open' }] };
-    }
+    if (text.startsWith('SELECT clock_in,clock_out FROM time_entries')) return { rows: [{ clock_in: '2026-08-20T17:42:00Z', clock_out: '2026-08-20T17:42:09Z' }] };
+    if (text.startsWith('SELECT * FROM time_entries') && text.includes('FOR UPDATE')) return { rows: [{ id: 9, employee_id: 7, clock_in: '2026-08-20T17:44:27Z', clock_out: null, status: 'open' }] };
     if (text.includes('FROM pay_period_approvals')) return { rows: [] };
     if (text.startsWith('UPDATE time_entries SET deleted_at=NOW()')) return { rows: [{ id: 9 }] };
     if (text.startsWith('UPDATE time_change_requests SET status=')) return { rows: [{ id: 44 }] };
-    if (text.startsWith('SELECT id FROM time_entries')) return { rows: [{ id: 1 }] };
+    if (text.startsWith('INSERT INTO time_entries(employee_id,clock_in,clock_out,status)')) return { rows: [{ id: 55, employee_id: 8, clock_in: args[1], clock_out: args[2], status: args[2] ? 'closed' : 'open' }] };
     if (text.startsWith('UPDATE time_entries SET clock_out=NOW()')) return { rows: [] };
-
     throw new Error(`unexpected query: ${text}`);
   }
 
   const client = { query, release() { released = true; } };
   const pool = { query, connect: async () => client };
-
-  const router = createQuickPunchRouter({
-    requireUser: noop,
-    requireAnyPermission: allow,
-    pool,
-    audit: async (...args) => audits.push(args),
-  });
+  const router = createQuickPunchRouter({ requireUser: noop, requireAnyPermission: allow, pool, audit: async (...args) => audits.push(args) });
 
   assert.deepStrictEqual(
     router.stack.filter((x) => x.route).map((x) => `${Object.keys(x.route.methods)[0]} ${x.route.path}`),
-    ['get /quick-status', 'get /my-punches', 'post /delete-punch', 'post /clock-in', 'post /clock-out'],
+    ['get /quick-status','get /my-punches','post /delete-punch','post /supervisor/add-time-entry','post /clock-in','post /clock-out'],
   );
 
   let res = makeRes();
@@ -68,15 +56,14 @@ function compact(sql) { return String(sql).replace(/\s+/g, ' ').trim(); }
   assert.strictEqual(res.statusCode, 200);
   assert.strictEqual(res.body.clocked_in, true);
   assert.strictEqual(res.body.next_action, 'clock_out');
+  assert.strictEqual(res.body.current_entry_id, 1);
   assert.strictEqual(res.body.current_clock_in, '2026-08-20T17:44:27Z');
+  assert.strictEqual(res.body.requires_correction, false);
   assert.strictEqual(res.body.last_punch_type, 'clock_out');
   assert.strictEqual(res.body.last_punch_at, '2026-08-20T17:42:09Z');
 
   res = makeRes();
-  await handlerFor(router, 'post', '/delete-punch')(
-    { user: { id: 7, permissions: [] }, body: { time_entry_id: 9, reason: 'Accidental punch' } },
-    res,
-  );
+  await handlerFor(router, 'post', '/delete-punch')({ user: { id: 7, permissions: [] }, body: { time_entry_id: 9, reason: 'Accidental punch' } }, res);
   assert.strictEqual(res.statusCode, 200);
   assert.match(res.body.message, /audit trail/i);
   assert.strictEqual(audits.length, 1);
@@ -88,7 +75,13 @@ function compact(sql) { return String(sql).replace(/\s+/g, ' ').trim(); }
   assert(queries.some((item) => item.text === 'BEGIN'));
   assert(queries.some((item) => item.text === 'COMMIT'));
   assert(queries.some((item) => item.text.includes('FOR UPDATE')));
-  assert(queries.some((item) => item.text.startsWith('UPDATE time_change_requests SET status=')));
+
+  res = makeRes();
+  await handlerFor(router, 'post', '/supervisor/add-time-entry')({ user: { id: 99, role: 'payroll', permissions: ['edit_payroll_time'] }, body: { employee_id: 8, clock_in: '2026-08-20 08:00:00', clock_out: '2026-08-20 17:00:00', reason: 'Approved correction' } }, res);
+  assert.strictEqual(res.statusCode, 201);
+  assert.strictEqual(res.body.entry.id, 55);
+  assert.strictEqual(audits.length, 2);
+  assert.strictEqual(audits[1][1], 'payroll_add_time_entry');
 
   res = makeRes();
   await handlerFor(router, 'post', '/clock-in')({ user: { id: 7, first_name: 'Pat' } }, res);
@@ -102,31 +95,37 @@ function compact(sql) { return String(sql).replace(/\s+/g, ' ').trim(); }
   const clockOutSql = queries.find((item) => item.text.startsWith('UPDATE time_entries SET clock_out=NOW()'))?.text || '';
   assert.match(clockOutSql, /AND deleted_at IS NULL AND clock_out IS NULL RETURNING \*/);
 
-  // A simultaneous second clock-in should be handled as a normal user-state
-  // conflict when the database unique index wins the race.
+  const stalePool = {
+    query: async (sql) => {
+      const text = compact(sql);
+      if (text.startsWith('SELECT id,clock_in,') && text.includes('requires_correction')) return { rows: [{ id: 77, clock_in: '2026-08-19T12:00:00Z', requires_correction: true }] };
+      if (text.startsWith('SELECT clock_in,clock_out FROM time_entries')) return { rows: [] };
+      throw new Error(`unexpected stale query: ${text}`);
+    },
+    connect: async () => { throw new Error('connect not expected'); },
+  };
+  const staleRouter = createQuickPunchRouter({ requireUser: noop, requireAnyPermission: allow, pool: stalePool, audit: async () => {} });
+  res = makeRes();
+  await handlerFor(staleRouter, 'post', '/clock-out')({ user: { id: 7, first_name: 'Pat' } }, res);
+  assert.strictEqual(res.statusCode, 409);
+  assert.strictEqual(res.body.code, 'STALE_OPEN_PUNCH');
+  assert.strictEqual(res.body.time_entry_id, 77);
+
   const duplicateError = Object.assign(new Error('duplicate open punch'), { code: '23505' });
   const racePool = {
     query: async (sql) => {
       const text = compact(sql);
-      if (text.startsWith('SELECT id FROM time_entries')) return { rows: [] };
-      if (text.startsWith('INSERT INTO time_entries')) throw duplicateError;
+      if (text.startsWith('SELECT id,clock_in,') && text.includes('requires_correction')) return { rows: [] };
+      if (text.startsWith('INSERT INTO time_entries(employee_id,clock_in,status)')) throw duplicateError;
       throw new Error(`unexpected race query: ${text}`);
     },
     connect: async () => { throw new Error('connect not expected'); },
   };
-  const raceRouter = createQuickPunchRouter({
-    requireUser: noop,
-    requireAnyPermission: allow,
-    pool: racePool,
-    audit: async () => {},
-  });
+  const raceRouter = createQuickPunchRouter({ requireUser: noop, requireAnyPermission: allow, pool: racePool, audit: async () => {} });
   res = makeRes();
   await handlerFor(raceRouter, 'post', '/clock-in')({ user: { id: 7, first_name: 'Pat' } }, res);
   assert.strictEqual(res.statusCode, 400);
   assert.strictEqual(res.body.error, 'You are already clocked in');
 
   console.log('quick-punch tests: PASS');
-})().catch((err) => {
-  console.error(err.stack || err.message);
-  process.exit(1);
-});
+})().catch((err) => { console.error(err.stack || err.message); process.exit(1); });
