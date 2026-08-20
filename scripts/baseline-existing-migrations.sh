@@ -68,8 +68,8 @@ require_true "negative-time constraint exists" \
 require_true "time-change validation trigger exists" \
   "SELECT EXISTS (SELECT 1 FROM pg_trigger WHERE tgrelid='public.time_change_requests'::regclass AND tgname='trg_validate_time_change_request_order' AND NOT tgisinternal);"
 
-# Migration 009 must remain unapplied so the normal runner can apply and record
-# it after this one-time baseline.
+# Migration 009 and later must remain unapplied so the normal runner can apply
+# and record them after this one-time baseline.
 require_true "migration 009 open-punch index is not already present" \
   "SELECT to_regclass('public.idx_time_entries_one_active_open_per_employee') IS NULL;"
 
@@ -89,9 +89,10 @@ migrations=(migrations/*.sql)
 recorded=0
 for migration in "${migrations[@]}"; do
   filename="$(basename "$migration")"
-  if [[ "$filename" == 009_* ]]; then
-    continue
-  fi
+  case "$filename" in
+    001_*|002_*|003_*|004_*|005_*|006_*|007_*|008_*) ;;
+    *) continue ;;
+  esac
 
   checksum="$(sha256sum "$migration" | awk '{print $1}')"
   escaped_filename="${filename//\'/\'\'}"
@@ -107,5 +108,5 @@ for migration in "${migrations[@]}"; do
   recorded=$((recorded + 1))
 done
 
-echo "Baseline recorded for $recorded historical migration file(s)."
-echo "Migration 009 remains pending and must be applied by scripts/apply-migrations.sh."
+echo "Baseline recorded for $recorded historical migration file(s) through 008."
+echo "Migration 009 and later remain pending and must be applied by scripts/apply-migrations.sh."
