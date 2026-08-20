@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <title>Manage My Punches - Edgefield County TimeClock</title>
+  <style>
+    :root{--blue:#17324d;--blue2:#1f5f8b;--bg:#eef3f8;--card:#fff;--text:#1f2937;--muted:#667085;--danger:#a61b1b;--line:#dbe3ee}
+    *{box-sizing:border-box}body{margin:0;font-family:Segoe UI,Arial,sans-serif;background:var(--bg);color:var(--text)}
+    header{background:var(--blue);color:#fff;padding:18px;text-align:center}header strong{font-size:21px}header small{display:block;margin-top:4px;color:#dbe8f3}
+    main{max-width:820px;margin:0 auto;padding:20px 14px 40px}.card{background:var(--card);border-radius:16px;padding:20px;box-shadow:0 8px 24px rgba(22,38,60,.10);margin-bottom:16px}
+    h1{font-size:25px;margin:0 0 8px}.muted{color:var(--muted)}.notice{padding:12px;border-radius:10px;background:#f5f7fa;margin:12px 0}
+    table{width:100%;border-collapse:collapse}th,td{padding:11px 8px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}th{font-size:13px;color:var(--muted)}
+    button,a.btn{border:0;border-radius:9px;padding:10px 13px;font-weight:700;cursor:pointer;text-decoration:none;display:inline-block}.delete{background:var(--danger);color:white}.back{background:#e7edf4;color:var(--blue)}
+    .actions{display:flex;gap:9px;flex-wrap:wrap}.message{display:none;padding:12px;border-radius:10px;margin-bottom:14px}.ok{display:block;background:#eaf7ef;color:#176b3a}.error{display:block;background:#fdecec;color:#8a1515}
+    @media(max-width:650px){table,thead,tbody,tr,th,td{display:block}thead{display:none}tr{padding:10px 0;border-bottom:1px solid var(--line)}td{border:0;padding:4px 0}td::before{content:attr(data-label);font-weight:700;margin-right:6px}.delete{width:100%;margin-top:8px}}
+  </style>
+</head>
+<body>
+<header><strong>Edgefield County TimeClock</strong><small>Manage My Punches</small></header>
+<main>
+  <div id="message" class="message"></div>
+  <section class="card">
+    <h1>My Recent Punches</h1>
+    <p class="muted">You may remove an incorrect punch. A reason is required. Deleted punches are removed from time calculations but the original record, deletion details, and punch audit information are retained.</p>
+    <div class="actions"><a class="btn back" href="/mobile.html">Mobile Quick Punch</a><a class="btn back" href="/employee.html">Full TimeClock</a></div>
+  </section>
+  <section class="card">
+    <div id="loading">Loading punches…</div>
+    <table id="punchTable" style="display:none">
+      <thead><tr><th>Clock In</th><th>Clock Out</th><th>Hours</th><th>Status</th><th>Action</th></tr></thead>
+      <tbody id="rows"></tbody>
+    </table>
+    <div id="empty" class="muted" style="display:none">No punches found in the last 90 days.</div>
+  </section>
+</main>
+<script>
+  const apiBase='/api';
+  const token=()=>localStorage.getItem('timeclock_token');
+  const headers=()=>({Authorization:`Bearer ${token()}`,'Content-Type':'application/json'});
+  function showMessage(text,error=false){const box=document.getElementById('message');box.className=`message ${error?'error':'ok'}`;box.textContent=text;}
+  async function load(){
+    if(!token()){window.location.replace('/mobile.html');return;}
+    try{
+      const response=await fetch(`${apiBase}/my-punches`,{headers:headers()});
+      if(response.status===401){localStorage.removeItem('timeclock_token');window.location.replace('/mobile.html');return;}
+      const data=await response.json();
+      if(!response.ok)throw new Error(data.error||'Unable to load punches');
+      document.getElementById('loading').style.display='none';
+      if(!data.entries?.length){document.getElementById('empty').style.display='block';return;}
+      const rows=document.getElementById('rows');rows.innerHTML='';
+      data.entries.forEach(entry=>{
+        const tr=document.createElement('tr');
+        tr.innerHTML=`<td data-label="Clock In">${entry.clock_in_display||'-'}</td><td data-label="Clock Out">${entry.clock_out_display||'OPEN'}</td><td data-label="Hours">${Number(entry.hours_worked||0).toFixed(2)}</td><td data-label="Status">${entry.status||'-'}</td><td data-label="Action"><button class="delete" data-id="${entry.id}">Delete Punch</button></td>`;
+        rows.appendChild(tr);
+      });
+      rows.querySelectorAll('button.delete').forEach(button=>button.addEventListener('click',()=>deletePunch(Number(button.dataset.id))));
+      document.getElementById('punchTable').style.display='table';
+    }catch(err){document.getElementById('loading').style.display='none';showMessage(err.message||'Unable to load punches',true);}
+  }
+  async function deletePunch(id){
+    const reason=window.prompt('Why are you deleting this punch? This reason will be saved in the audit trail.');
+    if(reason===null)return;
+    if(reason.trim().length<3){showMessage('A deletion reason is required.',true);return;}
+    if(!window.confirm('Delete this punch from your timecard? The original record will remain in the audit trail.'))return;
+    try{
+      const response=await fetch(`${apiBase}/delete-punch`,{method:'POST',headers:headers(),body:JSON.stringify({time_entry_id:id,reason:reason.trim()})});
+      const data=await response.json();
+      if(response.status===401){localStorage.removeItem('timeclock_token');window.location.replace('/mobile.html');return;}
+      if(!response.ok)throw new Error(data.error||'Unable to delete punch');
+      showMessage(data.message||'Punch deleted.');
+      await load();
+    }catch(err){showMessage(err.message||'Unable to delete punch',true);}
+  }
+  load();
+</script>
+</body>
+</html>
