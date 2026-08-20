@@ -56,7 +56,7 @@ function createQuickPunchRouter({ requireUser, requireAnyPermission, pool, audit
         punchType,
       });
     } catch (err) {
-      // Metadata is audit enrichment.  A GPS/network logging problem should
+      // Metadata is audit enrichment. A GPS/network logging problem should
       // never strand an employee in the wrong clock state.
       console.error('Punch metadata capture error', err);
       return null;
@@ -144,10 +144,11 @@ function createQuickPunchRouter({ requireUser, requireAnyPermission, pool, audit
       return res.status(400).json({ error: 'Deletion reason must be 500 characters or less' });
     }
 
-    const client = await pool.connect();
+    let client = null;
     let auditDetails = null;
 
     try {
+      client = await pool.connect();
       await client.query('BEGIN');
 
       const entryResult = await client.query(
@@ -226,15 +227,14 @@ function createQuickPunchRouter({ requireUser, requireAnyPermission, pool, audit
       };
 
       await client.query('COMMIT');
-
       await audit(req.user.id, 'delete_time_entry', 'time_entry', entry.id, auditDetails);
       return res.json({ message: 'Punch deleted. The original record remains in the audit trail.' });
     } catch (err) {
-      await client.query('ROLLBACK').catch(() => {});
+      if (client) await client.query('ROLLBACK').catch(() => {});
       console.error(err);
       return res.status(500).json({ error: 'Delete punch error' });
     } finally {
-      client.release();
+      if (client) client.release();
     }
   });
 
@@ -302,7 +302,7 @@ function createQuickPunchRouter({ requireUser, requireAnyPermission, pool, audit
       );
 
       // The outer predicates above are intentional: if two clock-out requests
-      // race, only the first may modify the row.  The second must not overwrite
+      // race, only the first may modify the row. The second must not overwrite
       // the original clock-out timestamp.
       if (!result.rows.length) {
         return res.status(400).json({ error: 'You are not currently clocked in' });
