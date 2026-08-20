@@ -9,7 +9,15 @@ function handlerFor(router,method,path){const layer=router.stack.find(x=>x.route
 
 (async()=>{
   const queries=[];
-  const pool={query:async(sql,args)=>{queries.push({sql,args});if(sql.startsWith('SELECT id, clock_in'))return {rows:[{id:1,clock_in:'2026-08-12T12:00:00Z',clock_out:null}]};if(sql.startsWith('SELECT id FROM time_entries'))return {rows:[{id:1}]};if(sql.startsWith('UPDATE time_entries'))return {rows:[]};throw new Error('unexpected query');}};
+  const pool={query:async(sql,args)=>{
+    queries.push({sql,args});
+    if(sql.startsWith('SELECT id, clock_in FROM time_entries')) return {rows:[{id:1,clock_in:'2026-08-20T17:44:27Z'}]};
+    if(sql.startsWith('SELECT clock_in, clock_out FROM time_entries')) return {rows:[{clock_in:'2026-08-20T17:42:00Z',clock_out:'2026-08-20T17:42:09Z'}]};
+    if(sql.startsWith('SELECT id FROM time_entries')) return {rows:[{id:1}]};
+    if(sql.startsWith('UPDATE time_entries')) return {rows:[]};
+    throw new Error('unexpected query');
+  }};
+
   const router=createQuickPunchRouter({requireUser:noop,requireAnyPermission:allow,pool,audit:async()=>{}});
   assert.deepStrictEqual(router.stack.filter(x=>x.route).map(x=>`${Object.keys(x.route.methods)[0]} ${x.route.path}`),['get /quick-status','post /clock-in','post /clock-out']);
 
@@ -18,6 +26,9 @@ function handlerFor(router,method,path){const layer=router.stack.find(x=>x.route
   assert.strictEqual(res.statusCode,200);
   assert.strictEqual(res.body.clocked_in,true);
   assert.strictEqual(res.body.next_action,'clock_out');
+  assert.strictEqual(res.body.current_clock_in,'2026-08-20T17:44:27Z');
+  assert.strictEqual(res.body.last_punch_type,'clock_out');
+  assert.strictEqual(res.body.last_punch_at,'2026-08-20T17:42:09Z');
 
   res=makeRes();
   await handlerFor(router,'post','/clock-in')({user:{id:7,first_name:'Pat'}},res);
@@ -28,5 +39,6 @@ function handlerFor(router,method,path){const layer=router.stack.find(x=>x.route
   await handlerFor(router,'post','/clock-out')({user:{id:7,first_name:'Pat'}},res);
   assert.strictEqual(res.statusCode,400);
   assert.strictEqual(res.body.error,'You are not currently clocked in');
+
   console.log('quick-punch tests: PASS');
 })().catch(e=>{console.error(e.stack||e.message);process.exit(1)});
