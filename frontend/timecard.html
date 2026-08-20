@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Edgefield County Timecard</title>
+<link rel="stylesheet" href="/timecard.css">
+
+</head>
+<body>
+<div class="shell">
+  <div class="titlebar">
+    <div><h1>Edgefield County Timecard</h1><div class="subtitle">Two-week employee time record</div></div>
+    <div class="top-actions">
+      <button id="quickPunchBtn" class="btn btn-primary hidden">Loading punch status…</button>
+      <button class="btn" onclick="window.print()">Print</button>
+      <a class="btn" href="/index.html" style="text-decoration:none">Home</a>
+      <button class="btn" id="logoutBtn">Sign Out</button>
+    </div>
+  </div>
+
+  <div id="messageBox" class="notice"></div>
+
+  <div class="nav">
+    <div class="navbox">
+      <label>Employee</label>
+      <div class="picker">
+        <button id="prevEmployeeBtn" class="btn arrow" title="Previous employee">◀</button>
+        <select id="employeeSelect"></select>
+        <button id="nextEmployeeBtn" class="btn arrow" title="Next employee">▶</button>
+      </div>
+    </div>
+    <div class="navbox">
+      <label>Pay Period</label>
+      <div class="picker">
+        <button id="prevPeriodBtn" class="btn arrow" title="Previous pay period">◀</button>
+        <select id="periodSelect"></select>
+        <button id="nextPeriodBtn" class="btn arrow" title="Next pay period">▶</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="meta">
+    <div><span>Employee #</span><strong id="employeeNumber">—</strong></div>
+    <div><span>Department</span><strong id="departmentName">—</strong></div>
+    <div><span>Status</span><strong id="timecardStatus">—</strong></div>
+    <div><span>Worked / OT Rule</span><strong id="workedRule">—</strong></div>
+    <div><span>Pay Period</span><strong id="periodLabel">—</strong></div>
+  </div>
+
+  <div class="statusbar">
+    <div class="legend">
+      <span class="icon-button" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M12 7v5l3 2"/></svg></span> Punch actions
+      <span class="icon-button leave" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="4" y="6" width="16" height="14" rx="1"/><path d="M8 4v4M16 4v4M4 10h16"/><path d="M9 14h6"/></svg></span> Leave
+      <span id="pendingLegend"></span>
+    </div>
+    <div id="modeLabel" class="muted"></div>
+  </div>
+
+  <div class="tablewrap">
+    <table>
+      <thead>
+        <tr>
+          <th class="left">Day / Date</th>
+          <th colspan="4">Punches</th>
+          <th>Regular</th><th>OT</th><th>Holiday</th><th>Vacation</th><th>Sick</th><th>Floating</th><th>Other</th><th>Total</th>
+        </tr>
+      </thead>
+      <tbody id="timeRows"></tbody>
+    </table>
+  </div>
+
+  <div id="pendingPanel" class="pending-panel">
+    <h3>Pending items for this pay period</h3>
+    <div id="pendingList" class="pending-list"></div>
+  </div>
+
+  <div class="signatures">
+    <div class="sig"><div><strong>Employee Approval</strong><small id="employeeSignature">Not signed</small></div><button id="employeeSignBtn" class="btn btn-success hidden">Sign Off</button></div>
+    <div class="sig"><div><strong>Supervisor Approval</strong><small id="supervisorSignature">Not signed</small></div><div><button id="returnBtn" class="btn btn-warn hidden">Return</button><button id="supervisorSignBtn" class="btn btn-success hidden">Sign Off</button></div></div>
+    <div class="sig"><div><strong>Payroll</strong><small id="payrollSignature">Not finalized</small></div><a id="payrollLink" class="btn hidden" href="/payroll.html" style="text-decoration:none">Payroll Portal</a></div>
+  </div>
+  <div class="foot">Regular and overtime totals use the server's weekly worked-hours rule. Approved leave is paid time but does not create overtime.</div>
+</div>
+
+<div id="contextMenu" class="menu"></div>
+
+<div id="entryModal" class="modal-overlay">
+  <div class="modal">
+    <h2 id="entryModalTitle">Punch</h2>
+    <div class="form-grid">
+      <div><label>Clock In Date</label><input type="date" id="entryInDate"></div>
+      <div><label>Clock In Time</label><input type="time" id="entryInTime" step="60"></div>
+      <div><label>Clock Out Date</label><input type="date" id="entryOutDate"></div>
+      <div><label>Clock Out Time</label><input type="time" id="entryOutTime" step="60"></div>
+      <div class="full"><label>Reason</label><textarea id="entryReason" maxlength="500"></textarea></div>
+    </div>
+    <div class="modal-actions"><button class="btn" data-close="entryModal">Cancel</button><button id="entrySubmitBtn" class="btn btn-primary">Save</button></div>
+  </div>
+</div>
+
+<div id="leaveModal" class="modal-overlay">
+  <div class="modal">
+    <h2>Add Leave</h2>
+    <div class="form-grid">
+      <div><label>Date</label><input type="date" id="leaveDate"></div>
+      <div><label>Leave Type</label><select id="leaveType"><option value="vacation">Vacation</option><option value="sick">Sick</option><option value="holiday">Holiday</option><option value="floating_holiday">Floating Holiday</option><option value="bereavement">Bereavement</option><option value="jury_duty">Jury Duty</option><option value="administrative">Administrative</option><option value="other">Other</option></select></div>
+      <div><label>Hours</label><input type="number" id="leaveHours" min=".25" max="24" step=".25" value="8"></div>
+      <div class="full"><label>Note (optional)</label><textarea id="leaveNote" maxlength="1000"></textarea></div>
+    </div>
+    <div class="modal-actions"><button class="btn" data-close="leaveModal">Cancel</button><button id="leaveSubmitBtn" class="btn btn-primary">Submit Leave</button></div>
+  </div>
+</div>
+
+<script src="/safe-html.js"></script>
+<script src="/timecard.js"></script>
+</body>
+</html>
