@@ -603,6 +603,7 @@ app.post(
       const openPunches = await pool.query(
         `SELECT id FROM time_entries
           WHERE employee_id=$1
+            AND deleted_at IS NULL
             AND clock_in >= $2::date
             AND clock_in < ($3::date + INTERVAL '1 day')
             AND clock_out IS NULL`,
@@ -699,6 +700,7 @@ app.get("/employee/my-timecard", requireUser, requireAnyPermission("view_own_tim
                 ) AS hours_worked
             FROM time_entries
             WHERE employee_id = $1
+            AND deleted_at IS NULL
             AND clock_in >= $2::date
             AND clock_in < ($3::date + interval '1 day')
             ORDER BY clock_in
@@ -799,6 +801,7 @@ app.post("/employee/request-time-change", requireUser, requireAnyPermission("req
                 SELECT *
                 FROM time_entries
                 WHERE id = $1
+                  AND deleted_at IS NULL
             `,
       [time_entry_id],
     );
@@ -1063,6 +1066,7 @@ app.post(
                 SELECT *
                 FROM time_entries
                 WHERE id = $1
+                  AND deleted_at IS NULL
             `,
         [request.time_entry_id],
       );
