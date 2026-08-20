@@ -4,7 +4,7 @@ set -euo pipefail
 APP="${APP_DIR:-/opt/county-timeclock}"
 cd "$APP"
 
-if [[ ! -f docker-compose.yml || ! -d backend || ! -d migrations ]]; then
+if [[ ! -f docker-compose.yml || ! -d backend || ! -d migrations || ! -d frontend ]]; then
   echo "$APP does not look like a County TimeClock checkout" >&2
   exit 1
 fi
@@ -49,10 +49,17 @@ wait_healthy() {
   return 1
 }
 
+echo "===== FULL-CHECKOUT SECURITY TEST ====="
+docker run --rm \
+  -v "$APP:/work" \
+  -w /work \
+  node:20 \
+  node backend/test/frontend-security.test.js
+
 echo "===== BUILD ====="
 docker compose build backend frontend
 
-echo "===== TEST ====="
+echo "===== BACKEND TEST ====="
 docker compose run --rm --no-deps backend npm test
 
 echo "===== DATABASE ====="
