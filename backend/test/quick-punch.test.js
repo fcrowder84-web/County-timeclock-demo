@@ -12,12 +12,13 @@ function handlerFor(router,method,path){const layer=router.stack.find(x=>x.route
   const audits=[];
   const pool={query:async(sql,args)=>{
     queries.push({sql,args});
-    if(sql.startsWith('SELECT id, clock_in FROM time_entries')) return {rows:[{id:1,clock_in:'2026-08-20T17:44:27Z'}]};
-    if(sql.startsWith('SELECT clock_in, clock_out FROM time_entries')) return {rows:[{clock_in:'2026-08-20T17:42:00Z',clock_out:'2026-08-20T17:42:09Z'}]};
+    if(sql.startsWith('SELECT id,clock_in FROM time_entries')) return {rows:[{id:1,clock_in:'2026-08-20T17:44:27Z'}]};
+    if(sql.startsWith('SELECT clock_in,clock_out FROM time_entries')) return {rows:[{clock_in:'2026-08-20T17:42:00Z',clock_out:'2026-08-20T17:42:09Z'}]};
     if(sql.startsWith('SELECT id FROM time_entries')) return {rows:[{id:1}]};
     if(sql.startsWith('SELECT * FROM time_entries WHERE id=')) return {rows:[{id:9,employee_id:7,clock_in:'2026-08-20T17:44:27Z',clock_out:null,status:'open'}]};
     if(sql.includes('FROM pay_period_approvals')) return {rows:[]};
-    if(sql.startsWith('UPDATE time_entries')) return {rows:[]};
+    if(sql.startsWith('UPDATE time_entries SET deleted_at=')) return {rows:[{id:9}]};
+    if(sql.startsWith('UPDATE time_entries SET clock_out=')) return {rows:[]};
     throw new Error(`unexpected query: ${sql}`);
   }};
 
