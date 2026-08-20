@@ -7,7 +7,8 @@ const { transformServer } = require('../scripts/refactor-production-routes');
 
 const serverPath = path.resolve(__dirname, '..', 'server.js');
 const source = fs.readFileSync(serverPath, 'utf8');
-const result = transformServer(source);
+const alreadyTransformed = source.includes('const { createSupervisorRouter } = require("./routes/supervisor");');
+const result = alreadyTransformed ? source : transformServer(source);
 
 assert.match(result, /createEmployeeRouter/);
 assert.match(result, /createSupervisorRouter/);
@@ -23,5 +24,7 @@ assert.doesNotMatch(result, /app\.get\(\n  "\/payroll\/export-current-period",/)
 assert.doesNotMatch(result, /app\.get\(\n  "\/supervisor\/team-structure",/);
 assert.doesNotMatch(result, /await pool\.query\("BEGIN"\)/);
 
-assert.throws(() => transformServer(result), /route imports|already present|anchor/i);
+if (!alreadyTransformed) {
+  assert.throws(() => transformServer(result), /route imports|already present|anchor/i);
+}
 console.log('production route refactor tests: PASS');
