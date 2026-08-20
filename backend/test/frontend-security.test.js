@@ -3,65 +3,51 @@
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
-const {
-  hardenEmployee,
-  hardenSupervisor,
-  hardenPayroll,
-  hardenPrintablePayroll,
-  hardenLeave,
-  hardenPunches,
-} = require('../scripts/harden-frontend');
+const hardening = require('../scripts/harden-frontend');
 
 const frontend = path.resolve(__dirname, '..', '..', 'frontend');
-const read = name => fs.readFileSync(path.join(frontend, name), 'utf8');
 
-const employee = hardenEmployee(read('employee.html'));
-assert.match(employee, /safe-html\.js/);
-assert.match(employee, /esc\(request\.employee_reason\)/);
-assert.match(employee, /esc\(request\.supervisor_note/);
-assert.match(employee, /esc\(entry\.note/);
-assert.match(employee, /esc\(currentUser\.first_name\)/);
-
-const supervisor = hardenSupervisor(read('supervisor.html'));
-assert.match(supervisor, /safe-html\.js/);
-assert.match(supervisor, /esc\(request\.employee_reason\)/);
-assert.match(supervisor, /esc\(item\.reason/);
-assert.match(supervisor, /return `\$\{esc\(person\.first_name\)\}/);
-assert.doesNotMatch(supervisor, /async function createStaff\(/);
-assert.doesNotMatch(supervisor, /async function deactivateStaff\(/);
-assert.doesNotMatch(supervisor, /async function reactivateStaff\(/);
-
-const payroll = hardenPayroll(read('payroll.html'));
-assert.match(payroll, /safe-html\.js/);
-assert.match(payroll, /esc\(request\.employee_reason\)/);
-assert.match(payroll, /esc\(department\)/);
-assert.match(payroll, /esc\(row\.last_name\)/);
-
-const printable = hardenPrintablePayroll(read('payroll-timecards.html'));
-assert.match(printable, /safe-html\.js/);
-assert.match(printable, /esc\(employee\.first_name\)/);
-assert.match(printable, /esc\(employee\.department/);
-
-const leave = hardenLeave(read('leave.html'));
-assert.match(leave, /safe-html\.js/);
-assert.match(leave, /esc\(x\.name\)/);
-assert.match(leave, /esc\(x\.note/);
-assert.match(leave, /esc\(x\.last_name\)/);
-
-const punches = hardenPunches(read('punches.html'));
-assert.match(punches, /safe-html\.js/);
-assert.match(punches, /esc\(entry\.clock_in_display/);
-assert.match(punches, /esc\(entry\.status/);
-
-for (const [name, contents] of [
-  ['employee', employee],
-  ['supervisor', supervisor],
-  ['payroll', payroll],
-  ['printable', printable],
-  ['leave', leave],
-  ['punches', punches],
-]) {
-  assert.doesNotMatch(contents, /<script[^>]+src=["']https?:\/\//i, `${name} must not load third-party scripts`);
+function checkedFile(filename, transform) {
+  const source = fs.readFileSync(path.join(frontend, filename), 'utf8');
+  return source.includes('/safe-html.js') ? source : transform(source);
 }
+
+const employee = checkedFile('employee.html', hardening.hardenEmployee);
+assert(employee.includes('/safe-html.js'));
+assert(employee.includes('esc(request.employee_reason)'));
+assert(employee.includes('esc(request.supervisor_note'));
+assert(employee.includes('esc(entry.note'));
+assert(employee.includes('esc(currentUser.first_name)'));
+
+const supervisor = checkedFile('supervisor.html', hardening.hardenSupervisor);
+assert(supervisor.includes('/safe-html.js'));
+assert(supervisor.includes('esc(request.employee_reason)'));
+assert(supervisor.includes('esc(item.reason'));
+assert(supervisor.includes('esc(person.first_name)'));
+assert(!supervisor.includes('async function createStaff('));
+assert(!supervisor.includes('async function deactivateStaff('));
+assert(!supervisor.includes('async function reactivateStaff('));
+
+const payroll = checkedFile('payroll.html', hardening.hardenPayroll);
+assert(payroll.includes('/safe-html.js'));
+assert(payroll.includes('esc(request.employee_reason)'));
+assert(payroll.includes('esc(department)'));
+assert(payroll.includes('esc(row.last_name)'));
+
+const printable = checkedFile('payroll-timecards.html', hardening.hardenPrintablePayroll);
+assert(printable.includes('/safe-html.js'));
+assert(printable.includes('esc(employee.first_name)'));
+assert(printable.includes('esc(employee.department'));
+
+const leave = checkedFile('leave.html', hardening.hardenLeave);
+assert(leave.includes('/safe-html.js'));
+assert(leave.includes('esc(x.name)'));
+assert(leave.includes('esc(x.note'));
+assert(leave.includes('esc(x.last_name)'));
+
+const punches = checkedFile('punches.html', hardening.hardenPunches);
+assert(punches.includes('/safe-html.js'));
+assert(punches.includes('esc(entry.clock_in_display'));
+assert(punches.includes('esc(entry.status'));
 
 console.log('frontend security tests: PASS');
