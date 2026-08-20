@@ -1,0 +1,91 @@
+'use strict';
+
+const net=require('net');
+
+const LOCATION_STATUSES=new Set(['captured','denied','unavailable','timeout','error']);
+
+function firstHeaderValue(value){
+  if(Array.isArray(value)) value=value[0];
+  if(typeof value!=='string') return null;
+  const first=value.split(',')[0].trim();
+  return first||null;
+}
+
+function normalizeIp(value){
+  let ip=firstHeaderValue(value);
+  if(!ip) return null;
+  if(ip.startsWith('::ffff:')) ip=ip.slice(7);
+  return net.isIP(ip)?ip:null;
+}
+
+function getRequestIp(req){
+  return normalizeIp(req.headers?.['cf-connecting-ip'])
+    ||normalizeIp(req.headers?.['x-forwarded-for'])
+    ||normalizeIp(req.socket?.remoteAddress)
+    ||null;
+}
+
+function normalizeLocation(body={}){
+  const rawStatus=String(body.location_status||'unavailable').toLowerCase();
+  const status=LOCATION_STATUSES.has(rawStatus)?rawStatus:'error';
+  const latitude=body.latitude==null?null:Number(body.latitude);
+  const longitude=body.longitude==null?null:Number(body.longitude);
+  const accuracy=body.accuracy_meters==null?null:Number(body.accuracy_meters);
+
+  const validCoordinates=Number.isFinite(latitude)&&latitude>=-90&&latitude<=90
+    &&Number.isFinite(longitude)&&longitude>=-180&&longitude<=180;
+  const validAccuracy=accuracy==null||(Number.isFinite(accuracy)&&accuracy>=0);
+
+  if(status==='captured'&&!validCoordinates){
+    return {location_status:'error',latitude:null,longitude:null,accuracy_meters:null};
+  }
+
+  return {
+    location_status:status,
+    latitude:validCoordinates?latitude:null,
+    longitude:validCoordinates?longitude:null,
+    accuracy_meters:validCoordinates&&validAccuracy?accuracy:null,
+  };
+}
+
+function normalizeClientSource(value){
+  const source=String(value||'web').trim().toLowerCase();
+  return /^[a-z0-9_-]{1,40}$/.test(source)?source:'web';
+}
+
+async function recordPunchMetadata({pool,req,employeeId,timeEntryId,punchType}){
+  const location=normalizeLocation(req.body||{});
+  const sourceIp=getRequestIp(req);
+  const forwardedFor=typeof req.headers?.['x-forwarded-for']==='string'
+    ? req.headers['x-forwarded-for'].slice(0,1000)
+    : null;
+  const clientSource=normalizeClientSource(req.body?.client_source);
+
+  await pool.query(
+    `INSERT INTO time_punch_metadata(
+       time_entry_id,employee_id,punch_type,source_ip,forwarded_for,
+       latitude,longitude,accuracy_meters,location_status,client_source
+     ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+    [
+      timeEntryId,
+      employeeId,
+      punchType,
+      sourceIp,
+      forwardedFor,
+      location.latitude,
+      location.longitude,
+      location.accuracy_meters,
+      location.location_status,
+      clientSource,
+    ],
+  );
+
+  return {source_ip:sourceIp,...location,client_source:clientSource};
+}
+
+module.exports={
+  getRequestIp,
+  normalizeLocation,
+  normalizeClientSource,
+  recordPunchMetadata,
+};
