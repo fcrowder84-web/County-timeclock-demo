@@ -12,6 +12,11 @@ function replaceOnce(source, oldText, newText, label) {
   return source.slice(0, first) + newText + source.slice(first + oldText.length);
 }
 
+function replaceAllExact(source, oldText, newText, label) {
+  if (!source.includes(oldText)) throw new Error(`${label} anchor not found`);
+  return source.split(oldText).join(newText);
+}
+
 function removeBetween(source, startMarker, endMarker, label) {
   const start = source.indexOf(startMarker);
   if (start < 0) throw new Error(`${label} start marker not found`);
@@ -43,7 +48,7 @@ function hardenEmployee(source) {
     ['${request.supervisor_note || "-"}', '${esc(request.supervisor_note || "-")}'],
   ];
   for (const [oldText, newText] of replacements) {
-    out = replaceOnce(out, oldText, newText, `employee ${oldText}`);
+    out = replaceAllExact(out, oldText, newText, `employee ${oldText}`);
   }
   return out;
 }
@@ -72,7 +77,7 @@ function hardenSupervisor(source) {
     ['${item.employee_first_name} ${item.employee_last_name}', '${esc(item.employee_first_name)} ${esc(item.employee_last_name)}'],
   ];
   for (const [oldText, newText] of replacements) {
-    if (out.includes(oldText)) out = replaceOnce(out, oldText, newText, `supervisor ${oldText}`);
+    if (out.includes(oldText)) out = replaceAllExact(out, oldText, newText, `supervisor ${oldText}`);
   }
 
   if (out.includes('            async function createStaff() {')) {
@@ -103,7 +108,7 @@ function hardenPayroll(source) {
     ['<td>${request.supervisor_note || "-"}</td>', '<td>${esc(request.supervisor_note || "-")}</td>'],
   ];
   for (const [oldText, newText] of replacements) {
-    out = replaceOnce(out, oldText, newText, `payroll ${oldText}`);
+    out = replaceAllExact(out, oldText, newText, `payroll ${oldText}`);
   }
   return out;
 }
@@ -118,7 +123,7 @@ function hardenPrintablePayroll(source) {
     ['${employee.approval_status || "pending"}', '${esc(employee.approval_status || "pending")}'],
   ];
   for (const [oldText, newText] of replacements) {
-    out = replaceOnce(out, oldText, newText, `print payroll ${oldText}`);
+    out = replaceAllExact(out, oldText, newText, `print payroll ${oldText}`);
   }
   return out;
 }
@@ -135,7 +140,7 @@ function hardenLeave(source) {
     ["+'<td>'+x.created_by_first_name+' '+x.created_by_last_name+'</td><td>'+(x.note||'')+'</td>'", "+'<td>'+esc(x.created_by_first_name)+' '+esc(x.created_by_last_name)+'</td><td>'+esc(x.note||'')+'</td>'"],
   ];
   for (const [oldText, newText] of replacements) {
-    out = replaceOnce(out, oldText, newText, `leave ${oldText}`);
+    out = replaceAllExact(out, oldText, newText, `leave ${oldText}`);
   }
   return out;
 }
@@ -145,7 +150,7 @@ function hardenPunches(source) {
   if (!out.includes("const esc=SafeHtml.escape;")) {
     out = replaceOnce(out, "  const apiBase='/api';", "  const apiBase='/api';\n  const esc=SafeHtml.escape;", 'punches escape helper');
   }
-  out = replaceOnce(
+  out = replaceAllExact(
     out,
     '${entry.clock_in_display||\'-\'}</td><td data-label="Clock Out">${entry.clock_out_display||\'OPEN\'}</td><td data-label="Hours">${Number(entry.hours_worked||0).toFixed(2)}</td><td data-label="Status">${entry.status||\'-\'}',
     '${esc(entry.clock_in_display||\'-\')}</td><td data-label="Clock Out">${esc(entry.clock_out_display||\'OPEN\')}</td><td data-label="Hours">${Number(entry.hours_worked||0).toFixed(2)}</td><td data-label="Status">${esc(entry.status||\'-\')}',
