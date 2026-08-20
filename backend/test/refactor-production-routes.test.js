@@ -25,6 +25,12 @@ assert.doesNotMatch(result, /app\.get\(\n  "\/supervisor\/team-structure",/);
 assert.doesNotMatch(result, /await pool\.query\("BEGIN"\)/);
 
 if (!alreadyTransformed) {
-  assert.throws(() => transformServer(result), /route imports|already present|anchor/i);
+  // A second transform is expected to refuse to rewrite already-extracted
+  // routes. The exact guard can be an import/anchor check or a missing legacy
+  // route boundary after the first pass.
+  assert.throws(
+    () => transformServer(result),
+    /route imports|already present|anchor|start marker not found/i,
+  );
 }
 console.log('production route refactor tests: PASS');
