@@ -55,6 +55,7 @@
         document.getElementById('signedIn').classList.remove('hidden');
         document.getElementById('sessionUser').innerHTML=`Signed in as <strong>${data.user.first_name} ${data.user.last_name}</strong><br><span>${data.user.department_name||data.user.department||'Unassigned'}</span>`;
         const grid=document.getElementById('appGrid');grid.innerHTML='';
+        if(has('clock_in_out')) addCard('Mobile Quick Punch','Phone-friendly one-button clock in/out with fresh GPS and network audit capture.','/mobile.html?v=20260820-1322');
         if(hasAny(['view_own_time','clock_in_out','submit_timecard','request_punch_correction'])) addCard('My Time','Clock in or out, review your punches, submit your timecard, and request corrections.','/employee.html?v=20260804-1135');
         if(hasAny(['view_assigned_employees','view_department_time','view_live_status','approve_punch_correction','approve_timecard','return_timecard','edit_employee_time','view_timeclock_audit','manage_employee_timeclock_settings','manage_supervisor_assignments'])) addCard('Supervisor','Review employee status, corrections, timecards, and approvals within your assigned scope.','/supervisor.html?v=20260804-1135');
         if(hasAny(['view_payroll_records','review_approved_timecards','edit_payroll_time','return_to_supervisor','reopen_timecard','finalize_timecard','finalize_pay_period','export_payroll','view_payroll_reports','view_all_timeclock_records'])) addCard('Payroll','Review approved timecards, finalize payroll, run reports, and export records.','/payroll.html?v=20260804-1135');
