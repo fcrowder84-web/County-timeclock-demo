@@ -201,6 +201,20 @@ function createQuickPunchRouter({ requireUser, requireAnyPermission, pool, audit
         return res.status(409).json({ error: 'Punch was already deleted or could not be deleted' });
       }
 
+      const cancelledRequests = await client.query(
+        `UPDATE time_change_requests
+            SET status='denied',
+                supervisor_note=CASE
+                  WHEN COALESCE(supervisor_note,'')='' THEN $2
+                  ELSE supervisor_note || E'\n' || $2
+                END,
+                reviewed_at=NOW()
+          WHERE time_entry_id=$1
+            AND status='pending'
+          RETURNING id`,
+        [entry.id, `Punch deleted: ${reason}`],
+      );
+
       if (approval) {
         await client.query(
           `UPDATE pay_period_approvals
@@ -223,6 +237,7 @@ function createQuickPunchRouter({ requireUser, requireAnyPermission, pool, audit
         reason,
         approval_reopened: Boolean(approval),
         previous_approval_status: approval?.status || null,
+        cancelled_change_request_ids: cancelledRequests.rows.map((row) => row.id),
         soft_delete: true,
       };
 
