@@ -41,6 +41,7 @@ function compact(sql) { return String(sql).replace(/\s+/g, ' ').trim(); }
     }
     if (text.includes('FROM pay_period_approvals')) return { rows: [] };
     if (text.startsWith('UPDATE time_entries SET deleted_at=NOW()')) return { rows: [{ id: 9 }] };
+    if (text.startsWith('UPDATE time_change_requests SET status=')) return { rows: [{ id: 44 }] };
     if (text.startsWith('SELECT id FROM time_entries')) return { rows: [{ id: 1 }] };
     if (text.startsWith('UPDATE time_entries SET clock_out=NOW()')) return { rows: [] };
 
@@ -82,10 +83,12 @@ function compact(sql) { return String(sql).replace(/\s+/g, ' ').trim(); }
   assert.strictEqual(audits[0][1], 'delete_time_entry');
   assert.strictEqual(audits[0][3], 9);
   assert.strictEqual(audits[0][4].reason, 'Accidental punch');
+  assert.deepStrictEqual(audits[0][4].cancelled_change_request_ids, [44]);
   assert(released, 'delete transaction client should be released');
   assert(queries.some((item) => item.text === 'BEGIN'));
   assert(queries.some((item) => item.text === 'COMMIT'));
   assert(queries.some((item) => item.text.includes('FOR UPDATE')));
+  assert(queries.some((item) => item.text.startsWith('UPDATE time_change_requests SET status=')));
 
   res = makeRes();
   await handlerFor(router, 'post', '/clock-in')({ user: { id: 7, first_name: 'Pat' } }, res);
