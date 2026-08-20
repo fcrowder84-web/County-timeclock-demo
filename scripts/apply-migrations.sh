@@ -18,18 +18,45 @@ docker inspect "$DB_CONTAINER" >/dev/null 2>&1 || {
   exit 1
 }
 
-# Track exactly which migration file was applied.  A checksum mismatch means a
+tracking_table="$(
+  docker exec "$DB_CONTAINER" \
+    psql -At -v ON_ERROR_STOP=1 -U "$DB_USER" -d "$DB_NAME" \
+    -c "SELECT to_regclass('public.schema_migrations');"
+)"
+
+if [[ -z "$tracking_table" ]]; then
+  core_table="$(
+    docker exec "$DB_CONTAINER" \
+      psql -At -v ON_ERROR_STOP=1 -U "$DB_USER" -d "$DB_NAME" \
+      -c "SELECT to_regclass('public.time_entries');"
+  )"
+
+  if [[ -n "$core_table" ]]; then
+    cat >&2 <<'EOF'
+ERROR: This database already contains County TimeClock tables but has no
+schema_migrations history. Refusing to replay historical migrations blindly.
+
+For an existing installation, first run:
+  bash scripts/baseline-existing-migrations.sh
+
+Then rerun the deployment/migration command.
+EOF
+    exit 1
+  fi
+
+  docker exec "$DB_CONTAINER" \
+    psql -v ON_ERROR_STOP=1 -U "$DB_USER" -d "$DB_NAME" -c "
+      CREATE TABLE schema_migrations (
+        filename TEXT PRIMARY KEY,
+        checksum TEXT NOT NULL,
+        applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+    " >/dev/null
+fi
+
+# Track exactly which migration file was applied. A checksum mismatch means a
 # historical migration was edited after deployment; fail instead of silently
 # applying a different definition under the same filename.
-docker exec "$DB_CONTAINER" \
-  psql -v ON_ERROR_STOP=1 -U "$DB_USER" -d "$DB_NAME" -c "
-    CREATE TABLE IF NOT EXISTS schema_migrations (
-      filename TEXT PRIMARY KEY,
-      checksum TEXT NOT NULL,
-      applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    );
-  " >/dev/null
-
 shopt -s nullglob
 migrations=(migrations/*.sql)
 if (( ${#migrations[@]} == 0 )); then
