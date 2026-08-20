@@ -30,10 +30,8 @@ if (require.main === module) {
   const serverPath = path.resolve(__dirname, '..', 'server.js');
   const source = fs.readFileSync(serverPath, 'utf8');
   const transformed = transformServer(source);
-  const backupPath = `${serverPath}.pre-employee-router`;
-  if (!fs.existsSync(backupPath)) fs.writeFileSync(backupPath, source, 'utf8');
   fs.writeFileSync(serverPath, transformed, 'utf8');
-  console.log(`Employee routes extracted from server.js; backup: ${backupPath}`);
+  console.log('Employee routes extracted into routes/employee.js. Git retains the previous server version.');
 }
 
 module.exports = { transformServer };
