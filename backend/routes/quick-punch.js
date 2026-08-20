@@ -120,12 +120,13 @@ function createQuickPunchRouter({requireUser,requireAnyPermission,pool,audit}){
       );
       const approval=approvalResult.rows[0]||null;
 
-      await pool.query(
-        `UPDATE time_entries
-            SET deleted_at=NOW(),deleted_by_employee_id=$2,deletion_reason=$3
-          WHERE id=$1`,
+      const deleted=await pool.query(
+        `SELECT soft_delete_time_entry($1::bigint,$2::integer,$3::text) AS deleted`,
         [entry.id,req.user.id,reason],
       );
+      if(!deleted.rows[0]?.deleted){
+        return res.status(409).json({error:'Punch was already deleted or could not be deleted'});
+      }
 
       if(approval){
         await pool.query(
