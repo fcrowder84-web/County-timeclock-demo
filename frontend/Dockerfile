@@ -4,6 +4,7 @@ COPY default.conf /etc/nginx/conf.d/default.conf
 
 COPY index.html /usr/share/nginx/html/index.html
 COPY sso.html /usr/share/nginx/html/sso.html
+COPY safe-html.js /usr/share/nginx/html/safe-html.js
 COPY employee.html /usr/share/nginx/html/employee.html
 COPY supervisor.html /usr/share/nginx/html/supervisor.html
 COPY payroll.html /usr/share/nginx/html/payroll.html
