@@ -27,10 +27,11 @@
         index: "/index.html",
         employee: "/employee.html",
         supervisor: "/supervisor.html",
-        payroll: "/payroll.html"
+        payroll: "/payroll.html",
+        mobile: "/mobile.html"
       };
       const destinationBase = destinations[requestedReturn] || destinations.index;
-      const destination = `${destinationBase}?v=20260804-1135`;
+      const destination = `${destinationBase}?v=20260820-1322`;
       history.replaceState({}, document.title, "/sso.html");
 
       if (!portalToken) {
