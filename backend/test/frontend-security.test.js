@@ -50,4 +50,17 @@ assert(punches.includes('/safe-html.js'));
 assert(punches.includes('esc(entry.clock_in_display'));
 assert(punches.includes('esc(entry.status'));
 
+const timecard = fs.readFileSync(path.join(frontend, 'timecard.html'), 'utf8');
+const timecardBase = fs.readFileSync(path.join(frontend, 'timecard-base.js'), 'utf8');
+const timecardActions = fs.readFileSync(path.join(frontend, 'timecard-actions.js'), 'utf8');
+assert(timecard.includes('/safe-html.js'));
+assert(timecard.includes('/timecard-base.js'));
+assert(timecard.includes('/timecard-actions.js'));
+assert(timecardBase.includes('SafeHtml.escape'));
+assert(timecardBase.includes('esc(e.name'));
+assert(timecardBase.includes('esc(p.label'));
+assert(timecardActions.includes('esc(i.text)'));
+assert(!timecardBase.includes('innerHTML=currentUser'));
+assert(!timecardActions.includes('innerHTML=currentUser'));
+
 console.log('frontend security tests: PASS');
