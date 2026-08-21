@@ -59,6 +59,7 @@ function compact(sql) { return String(sql).replace(/\s+/g, ' ').trim(); }
   assert.strictEqual(res.body.current_entry_id, 1);
   assert.strictEqual(res.body.current_clock_in, '2026-08-20T17:44:27Z');
   assert.strictEqual(res.body.requires_correction, false);
+  assert.strictEqual(res.body.timecard_locked, false);
   assert.strictEqual(res.body.last_punch_type, 'clock_out');
   assert.strictEqual(res.body.last_punch_at, '2026-08-20T17:42:09Z');
 
@@ -95,9 +96,45 @@ function compact(sql) { return String(sql).replace(/\s+/g, ' ').trim(); }
   const clockOutSql = queries.find((item) => item.text.startsWith('UPDATE time_entries SET clock_out=NOW()'))?.text || '';
   assert.match(clockOutSql, /AND deleted_at IS NULL AND clock_out IS NULL RETURNING \*/);
 
+  const lockedQueries = [];
+  const lockedPool = {
+    query: async (sql) => {
+      const text = compact(sql);
+      lockedQueries.push(text);
+      if (text.includes('FROM pay_period_approvals')) {
+        return { rows: [{ id: 12, status: 'employee_submitted', employee_signed_at: '2026-08-21T09:00:00-04:00', supervisor_approved_at: null, payroll_finalized_at: null }] };
+      }
+      if (text.startsWith('SELECT id,clock_in,') && text.includes('requires_correction')) return { rows: [] };
+      if (text.startsWith('SELECT clock_in,clock_out FROM time_entries')) return { rows: [{ clock_in: '2026-08-21T08:00:00-04:00', clock_out: '2026-08-21T08:30:00-04:00' }] };
+      throw new Error(`unexpected locked query: ${text}`);
+    },
+    connect: async () => { throw new Error('connect not expected'); },
+  };
+  const lockedRouter = createQuickPunchRouter({ requireUser: noop, requireAnyPermission: allow, pool: lockedPool, audit: async () => {} });
+
+  res = makeRes();
+  await handlerFor(lockedRouter, 'get', '/quick-status')({ user: { id: 7 } }, res);
+  assert.strictEqual(res.statusCode, 200);
+  assert.strictEqual(res.body.timecard_locked, true);
+  assert.strictEqual(res.body.timecard_status, 'employee_submitted');
+  assert.strictEqual(res.body.employee_signed_at, '2026-08-21T09:00:00-04:00');
+
+  res = makeRes();
+  await handlerFor(lockedRouter, 'post', '/clock-in')({ user: { id: 7, first_name: 'Pat' } }, res);
+  assert.strictEqual(res.statusCode, 409);
+  assert.strictEqual(res.body.code, 'TIMECARD_LOCKED');
+
+  res = makeRes();
+  await handlerFor(lockedRouter, 'post', '/clock-out')({ user: { id: 7, first_name: 'Pat' } }, res);
+  assert.strictEqual(res.statusCode, 409);
+  assert.strictEqual(res.body.code, 'TIMECARD_LOCKED');
+  assert(!lockedQueries.some((text) => text.startsWith('INSERT INTO time_entries')), 'locked card must not create a punch');
+  assert(!lockedQueries.some((text) => text.startsWith('UPDATE time_entries SET clock_out=NOW()')), 'locked card must not close a punch');
+
   const stalePool = {
     query: async (sql) => {
       const text = compact(sql);
+      if (text.includes('FROM pay_period_approvals')) return { rows: [] };
       if (text.startsWith('SELECT id,clock_in,') && text.includes('requires_correction')) return { rows: [{ id: 77, clock_in: '2026-08-19T12:00:00Z', requires_correction: true }] };
       if (text.startsWith('SELECT clock_in,clock_out FROM time_entries')) return { rows: [] };
       throw new Error(`unexpected stale query: ${text}`);
@@ -115,6 +152,7 @@ function compact(sql) { return String(sql).replace(/\s+/g, ' ').trim(); }
   const racePool = {
     query: async (sql) => {
       const text = compact(sql);
+      if (text.includes('FROM pay_period_approvals')) return { rows: [] };
       if (text.startsWith('SELECT id,clock_in,') && text.includes('requires_correction')) return { rows: [] };
       if (text.startsWith('INSERT INTO time_entries(employee_id,clock_in,status)')) throw duplicateError;
       throw new Error(`unexpected race query: ${text}`);
