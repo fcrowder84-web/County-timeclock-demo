@@ -92,7 +92,27 @@ document.getElementById("supervisorSignBtn").addEventListener("click",async()=>{
 document.getElementById("returnBtn").addEventListener("click",async()=>{const note=prompt("Reason for returning this timecard:");if(note===null)return;const target=payrollView()&&currentData.approval?.status==="supervisor_approved"&&confirm("Return to supervisor review instead of returning all the way to the employee?\n\nOK = Supervisor, Cancel = Employee")?"supervisor":"employee";try{await jsonOrError(await apiFetch(`${apiBase}/supervisor/return-timecard`,{method:"POST",body:JSON.stringify({employee_id:selectedEmployeeId,supervisor_note:note,target_stage:target})}));showMessage(target==="supervisor"?"Returned to supervisor review":"Returned to employee");await loadTimecard()}catch(err){showMessage(err.message,"error")}});
 
 async function refreshQuickPunch(){
-  const btn=document.getElementById("quickPunchBtn");if(!selectedIsSelf()||!has("clock_in_out")){btn.classList.add("hidden");return}try{const s=await jsonOrError(await apiFetch(`${apiBase}/quick-status`));btn.classList.remove("hidden");btn.dataset.action=s.next_action;btn.dataset.entryId=s.current_entry_id||"";const stale=Boolean(s.requires_correction)||(s.current_clock_in&&(dateOnly(s.current_clock_in)<new Date().toLocaleDateString("en-CA",{timeZone:"America/New_York"})||Date.now()-new Date(s.current_clock_in).getTime()>=23*3600000));btn.dataset.stale=stale?"1":"0";btn.textContent=stale?"Correct Missing Punch":(s.next_action==="clock_out"?"Click Here to Clock Out":"Click Here to Clock In")}catch(_){btn.classList.add("hidden")}
+  const btn=document.getElementById("quickPunchBtn");
+  if(!selectedIsSelf()||!has("clock_in_out")){btn.classList.add("hidden");return}
+  try{
+    const s=await jsonOrError(await apiFetch(`${apiBase}/quick-status`));
+    btn.classList.remove("hidden");
+    btn.dataset.action=s.next_action;
+    btn.dataset.entryId=s.current_entry_id||"";
+    btn.dataset.locked=s.timecard_locked?"1":"0";
+    if(s.timecard_locked){
+      btn.dataset.stale="0";
+      btn.disabled=true;
+      btn.textContent="Timecard Signed — Punching Locked";
+      btn.title="Your supervisor must return the timecard before you can punch again.";
+      return;
+    }
+    btn.disabled=false;
+    btn.title="";
+    const stale=Boolean(s.requires_correction)||(s.current_clock_in&&(dateOnly(s.current_clock_in)<new Date().toLocaleDateString("en-CA",{timeZone:"America/New_York"})||Date.now()-new Date(s.current_clock_in).getTime()>=23*3600000));
+    btn.dataset.stale=stale?"1":"0";
+    btn.textContent=stale?"Correct Missing Punch":(s.next_action==="clock_out"?"Click Here to Clock Out":"Click Here to Clock In")
+  }catch(_){btn.classList.add("hidden")}
 }
 function freshLocation(){
   return new Promise(resolve=>{
@@ -105,7 +125,9 @@ function freshLocation(){
   })
 }
 document.getElementById("quickPunchBtn").addEventListener("click",async()=>{
-  const btn=document.getElementById("quickPunchBtn");if(btn.dataset.stale==="1"){const open=(currentData.entries||[]).find(e=>!e.clock_out);if(open){activeEntry={...open,clickedKind:"out"};openEntryModal("request",activeEntry);showMessage("This older open punch must be corrected and approved before another normal punch.","warning");return}showMessage("Open the missing punch on the timecard and request a correction.","warning");return}
+  const btn=document.getElementById("quickPunchBtn");
+  if(btn.dataset.locked==="1"){showMessage("This timecard is signed and locked. Your supervisor must return it before you can punch again.","warning");return}
+  if(btn.dataset.stale==="1"){const open=(currentData.entries||[]).find(e=>!e.clock_out);if(open){activeEntry={...open,clickedKind:"out"};openEntryModal("request",activeEntry);showMessage("This older open punch must be corrected and approved before another normal punch.","warning");return}showMessage("Open the missing punch on the timecard and request a correction.","warning");return}
   const action=btn.dataset.action;if(!action)return;
   btn.disabled=true;const prior=btn.textContent;btn.textContent="Getting current location…";
   try{
@@ -114,8 +136,12 @@ document.getElementById("quickPunchBtn").addEventListener("click",async()=>{
     showMessage(data.message||"Punch recorded");await loadTimecard()
   }catch(err){
     if(err.data?.code==="STALE_OPEN_PUNCH"){await loadTimecard();showMessage(err.message,"warning")}
+    else if(err.data?.code==="TIMECARD_LOCKED"){await loadTimecard();showMessage(err.message,"warning")}
     else showMessage(err.message,"error")
-  }finally{btn.disabled=false;if(!currentData)btn.textContent=prior}
+  }finally{
+    if(btn.dataset.locked!=="1")btn.disabled=false;
+    if(!currentData)btn.textContent=prior
+  }
 });
 document.getElementById("logoutBtn").addEventListener("click",()=>location.href="/global-logout.html");
 init();
