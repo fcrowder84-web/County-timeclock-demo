@@ -20,6 +20,26 @@ function createQuickPunchRouter({ requireUser, requireAnyPermission, pool, audit
       || user.role === 'admin';
   }
 
+  async function currentTimecardLock(employeeId, db = pool) {
+    const result = await db.query(
+      `SELECT id,status,employee_signed_at,supervisor_approved_at,payroll_finalized_at
+         FROM pay_period_approvals
+        WHERE employee_id=$1
+          AND CURRENT_DATE BETWEEN pay_period_start AND pay_period_end
+        ORDER BY id DESC
+        LIMIT 1`,
+      [employeeId],
+    );
+    const approval = result.rows[0] || null;
+    return {
+      approval,
+      locked: Boolean(
+        approval?.employee_signed_at
+        && approval.status !== 'returned_to_employee'
+      ),
+    };
+  }
+
   async function canDeleteEntry(user, entry, db = pool) {
     if (Number(user.id) === Number(entry.employee_id)) return true;
 
@@ -122,7 +142,7 @@ function createQuickPunchRouter({ requireUser, requireAnyPermission, pool, audit
 
   router.get('/quick-status', requireUser, canPunch, async (req, res) => {
     try {
-      const [openResult, lastResult] = await Promise.all([
+      const [openResult, lastResult, lock] = await Promise.all([
         pool.query(
           `SELECT id,clock_in,
                   (clock_in::date < CURRENT_DATE OR clock_in <= NOW() - INTERVAL '23 hours') AS requires_correction
@@ -143,6 +163,7 @@ function createQuickPunchRouter({ requireUser, requireAnyPermission, pool, audit
             LIMIT 1`,
           [req.user.id],
         ),
+        currentTimecardLock(req.user.id),
       ]);
 
       const openEntry = openResult.rows[0] || null;
@@ -155,6 +176,9 @@ function createQuickPunchRouter({ requireUser, requireAnyPermission, pool, audit
         current_entry_id: openEntry?.id || null,
         current_clock_in: openEntry?.clock_in || null,
         requires_correction: Boolean(openEntry?.requires_correction),
+        timecard_locked: lock.locked,
+        timecard_status: lock.approval?.status || null,
+        employee_signed_at: lock.approval?.employee_signed_at || null,
         last_punch_type: latest ? (latest.clock_out ? 'clock_out' : 'clock_in') : null,
         last_punch_at: latest ? (latest.clock_out || latest.clock_in) : null,
       });
@@ -385,6 +409,16 @@ function createQuickPunchRouter({ requireUser, requireAnyPermission, pool, audit
 
   router.post('/clock-in', requireUser, canPunch, async (req, res) => {
     try {
+      const lock = await currentTimecardLock(req.user.id);
+      if (lock.locked) {
+        return res.status(409).json({
+          error: 'This timecard has been signed and is locked. Your supervisor must return it before you can punch again.',
+          code: 'TIMECARD_LOCKED',
+          timecard_status: lock.approval?.status || null,
+          employee_signed_at: lock.approval?.employee_signed_at || null,
+        });
+      }
+
       const openEntry = await pool.query(
         `SELECT id,clock_in,
                 (clock_in::date < CURRENT_DATE OR clock_in <= NOW() - INTERVAL '23 hours') AS requires_correction
@@ -419,6 +453,16 @@ function createQuickPunchRouter({ requireUser, requireAnyPermission, pool, audit
 
   router.post('/clock-out', requireUser, canPunch, async (req, res) => {
     try {
+      const lock = await currentTimecardLock(req.user.id);
+      if (lock.locked) {
+        return res.status(409).json({
+          error: 'This timecard has been signed and is locked. Your supervisor must return it before you can punch again.',
+          code: 'TIMECARD_LOCKED',
+          timecard_status: lock.approval?.status || null,
+          employee_signed_at: lock.approval?.employee_signed_at || null,
+        });
+      }
+
       const openResult = await pool.query(
         `SELECT id,clock_in,
                 (clock_in::date < CURRENT_DATE OR clock_in <= NOW() - INTERVAL '23 hours') AS requires_correction
