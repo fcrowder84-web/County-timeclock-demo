@@ -3,10 +3,13 @@ const express=require('express');
 
 function effectiveEmployeePermissions(permissions){
   const list=[...(permissions||[])];
+  if((list.includes('access')||list.includes('app_admin'))&&!list.includes('view_own_time')){
+    list.push('view_own_time');
+  }
   if(list.includes('view_own_time')&&!list.includes('request_punch_correction')){
     list.push('request_punch_correction');
   }
-  return list;
+  return [...new Set(list)];
 }
 
 function createAuthRouter({
