@@ -1,14 +1,18 @@
 function renderTimecard(){
   const data=currentData,employee=data.employee||currentUser,entries=data.entries||[],start=dateOnly(data.pay_period_start||selectedPeriodStart),summary=data.timecard_summary||{weeks:[],period:{}};
   const days=Array.from({length:14},(_,i)=>{const date=addDays(start,i),dayEntries=entries.filter(e=>dateOnly(e.entry_date_iso||e.clock_in)===date);return{date,entries:dayEntries,worked:dailyWorked(dayEntries)}}),allocated=allocateDailyWork(days);
+  const today=new Date().toLocaleDateString("en-CA",{timeZone:"America/New_York"});
   let html="";
   days.forEach((d,i)=>{
     const leavePresent=(data.leave_entries||[]).some(l=>dateOnly(l.leave_date_iso||l.leave_date)===d.date&&l.status!=="denied"),work=allocated[d.date]||{regular:0,ot:0},approvedLeave=["holiday","vacation","sick","floating_holiday","other"].reduce((a,t)=>a+approvedLeaveHours(d.date,t),0),dailyTotal=d.worked+approvedLeave;
     const employeeCanModify=currentMode==="employee"&&data.can_edit_entries!==false;
     const elevatedCanModify=currentMode==="supervisor"&&data.can_edit_entries===true;
-    const punchEnabled=elevatedCanModify&&canAddEntries();
+    const employeePunchRequestEnabled=employeeCanModify&&selectedIsSelf()&&has("request_punch_correction")&&d.date<=today;
+    const supervisorPunchEnabled=elevatedCanModify&&canAddEntries();
+    const punchEnabled=employeePunchRequestEnabled||supervisorPunchEnabled;
+    const punchTitle=employeePunchRequestEnabled?"Request missing time for this date":supervisorPunchEnabled?"Add punch entry":"Punch request not available for this date";
     const leaveEnabled=(employeeCanModify&&selectedIsSelf())||elevatedCanModify;
-    html+=`<tr class="${leavePresent?"leave-day":""}"><td class="left"><div class="datecell"><button class="icon-button day-punch" data-date="${d.date}" ${punchEnabled?"":"disabled"} title="${punchEnabled?"Add punch entry":"Select an existing punch for available actions"}">${punchSvg}</button><button class="icon-button leave day-leave" data-date="${d.date}" ${leaveEnabled?"":"disabled"} title="Add leave">${leaveSvg}</button><span class="date-label"><strong>${esc(dayName(d.date))}</strong> ${esc(localDateLabel(d.date))}</span></div></td>${punchCells(d.date,d.entries)}<td>${fmt(work.regular)}</td><td>${fmt(work.ot)}</td>${leaveCell(d.date,"holiday")}${leaveCell(d.date,"vacation")}${leaveCell(d.date,"sick")}${leaveCell(d.date,"floating_holiday")}${leaveCell(d.date,"other")}<td><strong>${fmt(dailyTotal)}</strong></td></tr>`;
+    html+=`<tr class="${leavePresent?"leave-day":""}"><td class="left"><div class="datecell"><button class="icon-button day-punch" data-date="${d.date}" ${punchEnabled?"":"disabled"} title="${punchTitle}">${punchSvg}</button><button class="icon-button leave day-leave" data-date="${d.date}" ${leaveEnabled?"":"disabled"} title="Add leave">${leaveSvg}</button><span class="date-label"><strong>${esc(dayName(d.date))}</strong> ${esc(localDateLabel(d.date))}</span></div></td>${punchCells(d.date,d.entries)}<td>${fmt(work.regular)}</td><td>${fmt(work.ot)}</td>${leaveCell(d.date,"holiday")}${leaveCell(d.date,"vacation")}${leaveCell(d.date,"sick")}${leaveCell(d.date,"floating_holiday")}${leaveCell(d.date,"other")}<td><strong>${fmt(dailyTotal)}</strong></td></tr>`;
     if(i===6)html+=totalRow("Week 1 Total",summary.weeks?.[0],"week-total");
     if(i===13)html+=totalRow("Week 2 Total",summary.weeks?.[1],"week-total");
   });
@@ -31,7 +35,13 @@ function renderSignatures(){
 function pendingItems(){
   const start=dateOnly(currentData.pay_period_start),end=dateOnly(currentData.pay_period_end);
   const leave=(currentData.leave_entries||[]).filter(l=>l.status==="pending").map(l=>({type:"leave",id:l.id,text:`${localDateLabel(l.leave_date_iso||l.leave_date)} — ${String(l.leave_type).replaceAll("_"," ")} ${num(l.hours).toFixed(2)} hrs`}));
-  const changes=(currentData.change_requests||currentData.requests||[]).filter(r=>r.status==="pending").filter(r=>{const d=dateOnly(r.requested_clock_in||r.created_at);return !d||(d>=start&&d<=end)}).map(r=>({type:"change",id:r.id,text:`Punch change request${r.created_at_display?` — ${r.created_at_display}`:""}`}));
+  const changes=(currentData.change_requests||currentData.requests||[]).filter(r=>r.status==="pending").filter(r=>{const d=dateOnly(r.requested_clock_in||r.created_at);return !d||(d>=start&&d<=end)}).map(r=>{
+    const missing=!r.time_entry_id;
+    const requested=missing&&r.requested_clock_in
+      ? `${localDateLabel(r.requested_clock_in)} — ${localDateTime(r.requested_clock_in)} to ${localDateTime(r.requested_clock_out)}`
+      : (r.created_at_display?` — ${r.created_at_display}`:"");
+    return{type:"change",id:r.id,text:missing?`Missing time request: ${requested}`:`Punch change request${requested}`};
+  });
   return [...leave,...changes];
 }
 function renderPending(){
@@ -57,26 +67,60 @@ function closeMenu(){document.getElementById("contextMenu").style.display="none"
 function handlePunchAction(action){closeMenu();if(action==="request")openEntryModal("request",activeEntry);if(action==="edit")openEntryModal("edit",activeEntry);if(action==="delete")deleteEntry(activeEntry)}
 function modal(id,show){document.getElementById(id).classList.toggle("show",show)}document.querySelectorAll("[data-close]").forEach(b=>b.addEventListener("click",()=>modal(b.dataset.close,false)));
 
+function entryModalMessageElement(){
+  let box=document.getElementById("entryModalMessage");
+  if(box)return box;
+  box=document.createElement("div");
+  box.id="entryModalMessage";
+  box.setAttribute("role","alert");
+  box.style.display="none";
+  box.style.margin="8px 0 14px";
+  box.style.padding="10px 12px";
+  box.style.borderRadius="6px";
+  const actions=document.querySelector("#entryModal .modal-actions");
+  actions?.parentNode?.insertBefore(box,actions);
+  return box;
+}
+function showEntryModalMessage(message,isError=true){
+  const box=entryModalMessageElement();
+  box.textContent=message||"";
+  box.style.display=message?"block":"none";
+  box.style.background=isError?"#f8d7da":"#d4edda";
+  box.style.color=isError?"#721c24":"#155724";
+  box.style.border=`1px solid ${isError?"#f5c6cb":"#c3e6cb"}`;
+}
+function clearEntryModalMessage(){showEntryModalMessage("",false)}
 function entryDateFromIso(v){return dateOnly(v)}
 function openEntryModal(mode,entry){
-  entryModalMode=mode;activeEntry=entry;document.getElementById("entryModalTitle").textContent=mode==="request"?"Request Punch Change":mode==="edit"?"Edit Punch Entry":"Add Punch Entry";const inDate=entry?entryDateFromIso(entry.clock_in):dateOnly(currentData.pay_period_start),outDate=entry?.clock_out?entryDateFromIso(entry.clock_out):inDate;document.getElementById("entryInDate").value=inDate;document.getElementById("entryInTime").value=entry?entryIn24(entry).slice(0,5):"08:00";document.getElementById("entryOutDate").value=outDate;document.getElementById("entryOutTime").value=entry?.clock_out?entryOut24(entry).slice(0,5):"";document.getElementById("entryReason").value="";if(mode==="request"&&entry?.clickedKind==="in"){document.getElementById("entryOutDate").value="";document.getElementById("entryOutTime").value=""}if(mode==="request"&&entry?.clickedKind==="out"){document.getElementById("entryInDate").value="";document.getElementById("entryInTime").value=""}modal("entryModal",true)
+  entryModalMode=mode;activeEntry=entry;clearEntryModalMessage();document.getElementById("entryModalTitle").textContent=mode==="request"?"Request Punch Change":mode==="edit"?"Edit Punch Entry":"Add Punch Entry";const inDate=entry?entryDateFromIso(entry.clock_in):dateOnly(currentData.pay_period_start),outDate=entry?.clock_out?entryDateFromIso(entry.clock_out):inDate;document.getElementById("entryInDate").value=inDate;document.getElementById("entryInTime").value=entry?entryIn24(entry).slice(0,5):"08:00";document.getElementById("entryOutDate").value=outDate;document.getElementById("entryOutTime").value=entry?.clock_out?entryOut24(entry).slice(0,5):"";document.getElementById("entryReason").value="";if(mode==="request"&&entry?.clickedKind==="in"){document.getElementById("entryOutDate").value="";document.getElementById("entryOutTime").value=""}if(mode==="request"&&entry?.clickedKind==="out"){document.getElementById("entryInDate").value="";document.getElementById("entryInTime").value=""}modal("entryModal",true)
 }
-function openAddEntry(day){entryModalMode="add";activeEntry=null;document.getElementById("entryModalTitle").textContent="Add Time for Employee";document.getElementById("entryInDate").value=day;document.getElementById("entryInTime").value="08:00";document.getElementById("entryOutDate").value=day;document.getElementById("entryOutTime").value="";document.getElementById("entryReason").value="";modal("entryModal",true)}
+function openAddEntry(day){
+  const employeeRequest=currentMode==="employee"&&selectedIsSelf();
+  entryModalMode=employeeRequest?"request-add":"add";activeEntry=null;clearEntryModalMessage();document.getElementById("entryModalTitle").textContent=employeeRequest?"Request Missing Time":"Add Time for Employee";document.getElementById("entryInDate").value=day;document.getElementById("entryInTime").value="08:00";document.getElementById("entryOutDate").value=day;document.getElementById("entryOutTime").value="";document.getElementById("entryReason").value="";modal("entryModal",true)
+}
 function defaultAddEntryDate(){const start=dateOnly(currentData?.pay_period_start||selectedPeriodStart),end=dateOnly(currentData?.pay_period_end),today=new Date().toLocaleDateString("en-CA",{timeZone:"America/New_York"});return start&&end&&today>=start&&today<=end?today:start}
 document.getElementById("addTimeBtn").addEventListener("click",()=>openAddEntry(defaultAddEntryDate()));
 function timestamp(date,time){return date&&time?`${date} ${time}:00`:null}
 document.getElementById("entrySubmitBtn").addEventListener("click",async()=>{
   const inDate=document.getElementById("entryInDate").value,inTime=document.getElementById("entryInTime").value,outDate=document.getElementById("entryOutDate").value,outTime=document.getElementById("entryOutTime").value,reason=document.getElementById("entryReason").value.trim();
+  clearEntryModalMessage();
   try{
     if(entryModalMode==="request"){
       if(!reason)throw new Error("Reason is required");const body={time_entry_id:activeEntry.id,employee_reason:reason,requested_clock_in:timestamp(inDate,inTime),requested_clock_out:timestamp(outDate,outTime)};if(!body.requested_clock_in&&!body.requested_clock_out)throw new Error("Select a clock in time, clock out time, or both");await jsonOrError(await apiFetch(`${apiBase}/employee/request-time-change`,{method:"POST",body:JSON.stringify(body)}));showMessage("Time change request submitted")
+    }else if(entryModalMode==="request-add"){
+      if(!inDate||!inTime)throw new Error("Clock in date and time are required");
+      if(!outDate||!outTime)throw new Error("Clock out date and time are required");
+      if(!reason)throw new Error("Reason is required");
+      const body={time_entry_id:null,employee_reason:reason,requested_clock_in:timestamp(inDate,inTime),requested_clock_out:timestamp(outDate,outTime)};
+      await jsonOrError(await apiFetch(`${apiBase}/employee/request-time-change`,{method:"POST",body:JSON.stringify(body)}));
+      showMessage("Missing time request submitted to your supervisor")
     }else if(entryModalMode==="edit"){
       if(!reason)throw new Error("Reason is required");const body={time_entry_id:activeEntry.id,new_clock_in:timestamp(inDate,inTime),new_clock_out:timestamp(outDate,outTime),reason};await jsonOrError(await apiFetch(`${apiBase}/supervisor/edit-time-entry`,{method:"POST",body:JSON.stringify(body)}));showMessage("Time entry updated")
     }else if(entryModalMode==="add"){
       if(!reason)throw new Error("Reason is required");const body={employee_id:selectedEmployeeId,clock_in:timestamp(inDate,inTime),clock_out:timestamp(outDate,outTime),reason};await jsonOrError(await apiFetch(`${apiBase}/supervisor/add-time-entry`,{method:"POST",body:JSON.stringify(body)}));showMessage("Time entry added")
     }
     modal("entryModal",false);await loadTimecard()
-  }catch(err){showMessage(err.message,"error")}
+  }catch(err){showEntryModalMessage(err.message||"Unable to save punch request",true)}
 });
 async function deleteEntry(entry){
   const reason=prompt("Reason for deleting this punch entry:");if(!reason)return;try{await jsonOrError(await apiFetch(`${apiBase}/delete-punch`,{method:"POST",body:JSON.stringify({time_entry_id:entry.id,reason})}));showMessage("Punch deleted. Original record remains in the audit trail.");await loadTimecard()}catch(err){showMessage(err.message,"error")}
@@ -130,7 +174,7 @@ function freshLocation(){
 document.getElementById("quickPunchBtn").addEventListener("click",async()=>{
   const btn=document.getElementById("quickPunchBtn");
   if(btn.dataset.locked==="1"){showMessage("This timecard is signed and locked. Your supervisor must return it before you can punch again.","warning");return}
-  if(btn.dataset.stale==="1"){const open=(currentData.entries||[]).find(e=>!e.clock_out);if(open){activeEntry={...open,clickedKind:"out"};openEntryModal("request",activeEntry);showMessage("This older open punch must be corrected and approved before another normal punch.","warning");return}showMessage("Open the missing punch on the timecard and request a correction.","warning");return}
+  if(btn.dataset.stale==="1"){const open=(currentData.entries||[]).find(e=>!e.clock_out);if(open){activeEntry={...open,clickedKind:"out"};openEntryModal("request",activeEntry);showEntryModalMessage("This older open punch must be corrected and approved before another normal punch.",false);return}showMessage("Open the missing punch on the timecard and request a correction.","warning");return}
   const action=btn.dataset.action;if(!action)return;
   btn.disabled=true;const prior=btn.textContent;btn.textContent="Getting current location…";
   try{
