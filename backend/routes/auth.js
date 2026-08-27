@@ -1,6 +1,14 @@
 'use strict';
 const express=require('express');
 
+function effectiveEmployeePermissions(permissions){
+  const list=[...(permissions||[])];
+  if(list.includes('view_own_time')&&!list.includes('request_punch_correction')){
+    list.push('request_punch_correction');
+  }
+  return list;
+}
+
 function createAuthRouter({
   requireUser,
   sessionStore,
@@ -23,9 +31,10 @@ function createAuthRouter({
   router.get('/me',requireUser,async(req,res)=>{
     const safeUser={...req.user};
     delete safeUser.pin;
+    const permissions=effectiveEmployeePermissions(req.user.permissions||[]);
     res.json({
       user:safeUser,
-      permissions:req.user.permissions||[],
+      permissions,
       app_admin_scope:req.user.app_admin_scope||'own',
       auth_source:req.user.auth_source||'legacy',
     });
@@ -39,12 +48,13 @@ function createAuthRouter({
       if(!portalToken) return res.status(400).json({error:'Portal token is required'});
       const payload=verifyPortalToken(portalToken,secret,{issuer:portalIssuer,audience:portalAudience});
       const synced=await syncPortalUser(payload);
-      if(!synced.permissions.includes('access')&&!synced.permissions.includes('app_admin')) return res.status(403).json({error:'TimeClock access has not been granted'});
-      const token=sessionStore.create(synced.user.id,synced.permissions,{app_admin_scope:synced.appAdminScope,auth_source:'portal'});
+      const permissions=effectiveEmployeePermissions(synced.permissions);
+      if(!permissions.includes('access')&&!permissions.includes('app_admin')) return res.status(403).json({error:'TimeClock access has not been granted'});
+      const token=sessionStore.create(synced.user.id,permissions,{app_admin_scope:synced.appAdminScope,auth_source:'portal'});
       const user=await getUserById(synced.user.id);
       delete user.pin;
-      await audit(user.id,'portal_sso_login','employee',user.id,{portal_user_id:payload.sub,permission_count:synced.permissions.length});
-      return res.json({message:'Employee Portal login successful',token,user,permissions:synced.permissions,app_admin_scope:synced.appAdminScope,auth_source:'portal'});
+      await audit(user.id,'portal_sso_login','employee',user.id,{portal_user_id:payload.sub,permission_count:permissions.length});
+      return res.json({message:'Employee Portal login successful',token,user,permissions,app_admin_scope:synced.appAdminScope,auth_source:'portal'});
     }catch(err){
       console.error('Portal login error',err);
       const status=err.name==='TokenExpiredError'||/token|signature|issuer|audience|algorithm/i.test(err.message)?401:500;
@@ -55,4 +65,4 @@ function createAuthRouter({
   return router;
 }
 
-module.exports={createAuthRouter};
+module.exports={createAuthRouter,effectiveEmployeePermissions};
