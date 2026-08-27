@@ -189,7 +189,7 @@ function createEmployeeRouter({ requireUser, requireAnyPermission, pool, audit, 
   router.post(
     '/employee/request-time-change',
     requireUser,
-    requireAnyPermission('request_punch_correction'),
+    requireAnyPermission('request_punch_correction', 'view_own_time'),
     async (req, res) => {
       const rawEntryId = req.body?.time_entry_id;
       const hasEntryId = rawEntryId !== null && rawEntryId !== undefined && String(rawEntryId).trim() !== '';
