@@ -3,6 +3,7 @@ const assert=require('assert');
 const crypto=require('crypto');
 const {verifyPortalToken}=require('../lib/portal-token');
 const {createSessionStore,getBearerToken}=require('../lib/session-store');
+const {effectiveEmployeePermissions}=require('../routes/auth');
 
 function sign(payload,secret){
   const header=Buffer.from(JSON.stringify({alg:'HS256',typ:'JWT'})).toString('base64url');
@@ -27,4 +28,7 @@ assert.strictEqual(store.get(sessionToken).app_admin_scope,'all');
 assert.strictEqual(store.getActive(sessionToken,Date.now()+2000),null);
 assert.strictEqual(getBearerToken({headers:{authorization:'Bearer abc'}}),'abc');
 assert.strictEqual(getBearerToken({headers:{}}),null);
+const effective=effectiveEmployeePermissions(['access']);
+assert(effective.includes('view_own_time'));
+assert(effective.includes('request_punch_correction'));
 console.log('auth primitive tests: PASS');
