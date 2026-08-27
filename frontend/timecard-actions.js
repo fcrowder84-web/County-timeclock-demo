@@ -7,17 +7,18 @@ function renderTimecard(){
     const leavePresent=(data.leave_entries||[]).some(l=>dateOnly(l.leave_date_iso||l.leave_date)===d.date&&l.status!=="denied"),work=allocated[d.date]||{regular:0,ot:0},approvedLeave=["holiday","vacation","sick","floating_holiday","other"].reduce((a,t)=>a+approvedLeaveHours(d.date,t),0),dailyTotal=d.worked+approvedLeave;
     const employeeCanModify=currentMode==="employee"&&data.can_edit_entries!==false;
     const elevatedCanModify=currentMode==="supervisor"&&data.can_edit_entries===true;
-    const employeePunchRequestEnabled=employeeCanModify&&selectedIsSelf()&&d.date<=today;
-    const supervisorPunchEnabled=elevatedCanModify&&canAddEntries();
+    const ownTimecard=selectedIsSelf();
+    const employeePunchRequestEnabled=ownTimecard&&d.date<=today;
+    const supervisorPunchEnabled=!ownTimecard&&elevatedCanModify&&canAddEntries();
     const punchEnabled=employeePunchRequestEnabled||supervisorPunchEnabled;
     const punchTitle=employeePunchRequestEnabled?"Request missing time for this date":supervisorPunchEnabled?"Add punch entry":"Punch request not available for this date";
-    const leaveEnabled=(employeeCanModify&&selectedIsSelf())||elevatedCanModify;
+    const leaveEnabled=(employeeCanModify&&ownTimecard)||elevatedCanModify;
     html+=`<tr class="${leavePresent?"leave-day":""}"><td class="left"><div class="datecell"><button class="icon-button day-punch" data-date="${d.date}" ${punchEnabled?"":"disabled"} title="${punchTitle}">${punchSvg}</button><button class="icon-button leave day-leave" data-date="${d.date}" ${leaveEnabled?"":"disabled"} title="Add leave">${leaveSvg}</button><span class="date-label"><strong>${esc(dayName(d.date))}</strong> ${esc(localDateLabel(d.date))}</span></div></td>${punchCells(d.date,d.entries)}<td>${fmt(work.regular)}</td><td>${fmt(work.ot)}</td>${leaveCell(d.date,"holiday")}${leaveCell(d.date,"vacation")}${leaveCell(d.date,"sick")}${leaveCell(d.date,"floating_holiday")}${leaveCell(d.date,"other")}<td><strong>${fmt(dailyTotal)}</strong></td></tr>`;
     if(i===6)html+=totalRow("Week 1 Total",summary.weeks?.[0],"week-total");
     if(i===13)html+=totalRow("Week 2 Total",summary.weeks?.[1],"week-total");
   });
   html+=totalRow("Pay Period Total",summary.period,"period-total");document.getElementById("timeRows").innerHTML=html;
-  document.getElementById("employeeNumber").textContent=employee.employee_number||"—";document.getElementById("departmentName").textContent=employee.department_name||employee.department||"—";document.getElementById("timecardStatus").textContent=statusLabel(data.approval);document.getElementById("workedRule").textContent=`${fmt(summary.period?.total_worked_hours)||"0.00"} worked / OT after ${fmt(summary.overtime_threshold_hours)||"40.00"} worked hrs/week`;document.getElementById("periodLabel").textContent=`${localDateLabel(data.pay_period_start)} – ${localDateLabel(data.pay_period_end)}`;document.getElementById("modeLabel").textContent=currentMode==="supervisor"?`Viewing as ${payrollView()?"Payroll / Admin":"Supervisor"}`:"Viewing your own timecard";
+  document.getElementById("employeeNumber").textContent=employee.employee_number||"—";document.getElementById("departmentName").textContent=employee.department_name||employee.department||"—";document.getElementById("timecardStatus").textContent=statusLabel(data.approval);document.getElementById("workedRule").textContent=`${fmt(summary.period?.total_worked_hours)||"0.00"} worked / OT after ${fmt(summary.overtime_threshold_hours)||"40.00"} worked hrs/week`;document.getElementById("periodLabel").textContent=`${localDateLabel(data.pay_period_start)} – ${localDateLabel(data.pay_period_end)}`;document.getElementById("modeLabel").textContent=selectedIsSelf()?"Viewing your own timecard":currentMode==="supervisor"?`Viewing as ${payrollView()?"Payroll / Admin":"Supervisor"}`:"Viewing your own timecard";
   renderSignatures();renderPending();bindRowActions();syncNavButtons();
 }
 function statusLabel(a){if(!a)return"In Progress";return({open:"In Progress",employee_submitted:"Employee Submitted",returned_to_employee:"Returned to Employee",supervisor_approved:"Supervisor Approved",payroll_finalized:"Payroll Finalized"})[a.status]||String(a.status||"In Progress").replaceAll("_"," ")}
@@ -29,7 +30,7 @@ function renderSignatures(){
   const empBtn=document.getElementById("employeeSignBtn");empBtn.classList.toggle("hidden",!(currentMode==="employee"&&selectedIsSelf()&&has("submit_timecard")&&currentData.can_edit_entries!==false));
   const supBtn=document.getElementById("supervisorSignBtn");supBtn.classList.toggle("hidden",!(currentMode==="supervisor"&&has("approve_timecard")&&a?.status==="employee_submitted"&&!a?.supervisor_approved_at));
   const ret=document.getElementById("returnBtn");ret.classList.toggle("hidden",!(currentMode==="supervisor"&&canReturn()&&a));
-  const addTimeBtn=document.getElementById("addTimeBtn");addTimeBtn.classList.toggle("hidden",!(currentMode==="supervisor"&&currentData.can_edit_entries===true&&canAddEntries()));
+  const addTimeBtn=document.getElementById("addTimeBtn");addTimeBtn.classList.toggle("hidden",!(currentMode==="supervisor"&&!selectedIsSelf()&&currentData.can_edit_entries===true&&canAddEntries()));
   const payrollLink=document.getElementById("payrollLink");payrollLink.classList.toggle("hidden",!payrollView());payrollLink.href=`/payroll.html?employeeId=${encodeURIComponent(selectedEmployeeId)}&periodStart=${encodeURIComponent(selectedPeriodStart||"")}`;
 }
 function pendingItems(){
@@ -58,8 +59,8 @@ function bindRowActions(){
 function findEntry(id){return(currentData.entries||[]).find(e=>Number(e.id)===Number(id))}
 function openPunchMenu(ev,id,kind){
   const entry=findEntry(id);if(!entry)return;activeEntry={...entry,clickedKind:kind};const menu=document.getElementById("contextMenu");let buttons=[];
-  if(currentMode==="employee"&&selectedIsSelf()&&currentData.can_edit_entries!==false){if(has("request_punch_correction"))buttons.push(["Request Change","request"]);buttons.push(["Delete Punch","delete"])}
-  if(currentMode==="supervisor"&&currentData.can_edit_entries===true){if(hasAny(["edit_employee_time","edit_payroll_time"]))buttons.push(["Edit","edit"]);buttons.push(["Delete","delete"])}
+  if(selectedIsSelf()&&currentData.can_edit_entries!==false){buttons.push(["Request Change","request"]);buttons.push(["Delete Punch","delete"])}
+  if(!selectedIsSelf()&&currentMode==="supervisor"&&currentData.can_edit_entries===true){if(hasAny(["edit_employee_time","edit_payroll_time"]))buttons.push(["Edit","edit"]);buttons.push(["Delete","delete"])}
   if(!buttons.length)buttons=[["View only","none"]];
   menu.innerHTML=buttons.map(([label,action])=>`<button data-action="${action}">${esc(label)}</button>`).join("");menu.querySelectorAll("button").forEach(b=>b.addEventListener("click",()=>handlePunchAction(b.dataset.action)));const x=Math.min(ev.clientX,innerWidth-180),y=Math.min(ev.clientY+8,innerHeight-160);menu.style.left=x+"px";menu.style.top=y+"px";menu.style.display="block";ev.stopPropagation()
 }
@@ -95,7 +96,7 @@ function openEntryModal(mode,entry){
   entryModalMode=mode;activeEntry=entry;clearEntryModalMessage();document.getElementById("entryModalTitle").textContent=mode==="request"?"Request Punch Change":mode==="edit"?"Edit Punch Entry":"Add Punch Entry";const inDate=entry?entryDateFromIso(entry.clock_in):dateOnly(currentData.pay_period_start),outDate=entry?.clock_out?entryDateFromIso(entry.clock_out):inDate;document.getElementById("entryInDate").value=inDate;document.getElementById("entryInTime").value=entry?entryIn24(entry).slice(0,5):"08:00";document.getElementById("entryOutDate").value=outDate;document.getElementById("entryOutTime").value=entry?.clock_out?entryOut24(entry).slice(0,5):"";document.getElementById("entryReason").value="";if(mode==="request"&&entry?.clickedKind==="in"){document.getElementById("entryOutDate").value="";document.getElementById("entryOutTime").value=""}if(mode==="request"&&entry?.clickedKind==="out"){document.getElementById("entryInDate").value="";document.getElementById("entryInTime").value=""}modal("entryModal",true)
 }
 function openAddEntry(day){
-  const employeeRequest=currentMode==="employee"&&selectedIsSelf();
+  const employeeRequest=selectedIsSelf();
   entryModalMode=employeeRequest?"request-add":"add";activeEntry=null;clearEntryModalMessage();document.getElementById("entryModalTitle").textContent=employeeRequest?"Request Missing Time":"Add Time for Employee";document.getElementById("entryInDate").value=day;document.getElementById("entryInTime").value="08:00";document.getElementById("entryOutDate").value=day;document.getElementById("entryOutTime").value="";document.getElementById("entryReason").value="";modal("entryModal",true)
 }
 function defaultAddEntryDate(){const start=dateOnly(currentData?.pay_period_start||selectedPeriodStart),end=dateOnly(currentData?.pay_period_end),today=new Date().toLocaleDateString("en-CA",{timeZone:"America/New_York"});return start&&end&&today>=start&&today<=end?today:start}
@@ -193,7 +194,7 @@ document.getElementById("quickPunchBtn").addEventListener("click",async()=>{
 document.getElementById("logoutBtn").addEventListener("click",()=>location.href="/global-logout.html");
 init().then(()=>{
   const params=new URLSearchParams(location.search);
-  if(params.get("addEntry")==="1"&&currentMode==="supervisor"&&currentData?.can_edit_entries===true&&canAddEntries()){
+  if(params.get("addEntry")==="1"&&currentMode==="supervisor"&&!selectedIsSelf()&&currentData?.can_edit_entries===true&&canAddEntries()){
     openAddEntry(defaultAddEntryDate());
     const url=new URL(location.href);url.searchParams.delete("addEntry");history.replaceState({},"",url);
   }
