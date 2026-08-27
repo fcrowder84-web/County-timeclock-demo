@@ -23,6 +23,19 @@ function createTeamStructureRouter({
   const router = express.Router();
 
   router.get(
+    '/supervisor/department-structure-access',
+    requireUser,
+    async (req, res) => {
+      try {
+        return res.json({ allowed: await canManageTeamStructure(req.user) });
+      } catch (err) {
+        console.error(err);
+        return res.status(500).json({ error: 'Department structure access check failed' });
+      }
+    },
+  );
+
+  router.get(
     '/supervisor/staff',
     requireUser,
     requireAnyPermission('view_assigned_employees', 'view_department_time', 'manage_employee_timeclock_settings', 'manage_supervisor_assignments'),
@@ -115,9 +128,14 @@ function createTeamStructureRouter({
     requireAnyPermission('view_assigned_employees', 'view_department_time', 'manage_supervisor_assignments'),
     async (req, res) => {
       try {
+        if (!(await canManageTeamStructure(req.user))) {
+          return res.status(403).json({ error: 'Department Structure is limited to department heads, Payroll, and administrators' });
+        }
         const structurePermissions = userPermissionSet(req.user);
-        const canManageAll = req.user.app_admin_scope === 'all' &&
-          (structurePermissions.has('app_admin') || structurePermissions.has('manage_supervisor_assignments'));
+        const structureRole = String(req.user.role || '').toLowerCase();
+        const canManageAll = ['admin', 'payroll'].includes(structureRole) ||
+          (req.user.app_admin_scope === 'all' &&
+            (structurePermissions.has('app_admin') || structurePermissions.has('manage_supervisor_assignments')));
 
         const departments = await pool.query(
           `SELECT d.id,d.name,

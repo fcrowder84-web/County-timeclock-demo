@@ -302,6 +302,10 @@
                 Home
             </button>
 
+            <button id="departmentStructureBtn" class="btn-primary hidden" style="float:right;margin-right:10px;" onclick="goDepartmentStructure()">
+                Department Structure
+            </button>
+
             <div id="userInfo"></div>
 
         </div>
@@ -317,8 +321,6 @@
         <div id="summaryBox"></div>
 
         <div id="requestsBox"></div>
-
-        <div id="employeesBox"></div>
 
     </div>
 
@@ -457,6 +459,30 @@
 
         function goHome() {
             window.location.href = "/index.html";
+        }
+
+        function goDepartmentStructure() {
+            window.location.href = "/department-structure.html";
+        }
+
+        async function checkDepartmentStructureAccess() {
+            const button = document.getElementById("departmentStructureBtn");
+            if (!button) return;
+            try {
+                const response = await apiFetch(`${apiBase}/supervisor/department-structure-access`);
+                const data = await response.json().catch(() => ({}));
+                button.classList.toggle("hidden", !response.ok || !data.allowed);
+            } catch (_) {
+                button.classList.add("hidden");
+            }
+        }
+
+        function addTimeForEmployee(employeeId) {
+            const params = new URLSearchParams();
+            params.set("employeeId", employeeId);
+            if (selectedPeriodStart) params.set("periodStart", selectedPeriodStart);
+            params.set("addEntry", "1");
+            window.location.href = `/timecard.html?${params.toString()}`;
         }
 
         async function apiFetch(url, options = {}) {
@@ -598,11 +624,7 @@
             if (hasPermission("approve_punch_correction")) loadRequests();
             else document.getElementById("requestsBox").innerHTML = "";
 
-            if (hasAnyPermission([
-                "view_assigned_employees", "view_department_time",
-                "manage_employee_timeclock_settings", "manage_supervisor_assignments"
-            ])) loadTeamStructure();
-            else document.getElementById("employeesBox").innerHTML = "";
+            checkDepartmentStructureAccess();
 
             if (selectedEmployeeId) viewTimecard(selectedEmployeeId);
         }
@@ -720,6 +742,11 @@
                             ${hasAnyPermission(["view_assigned_employees", "view_department_time", "view_payroll_records", "review_approved_timecards", "view_all_timeclock_records"]) ? `
                             <button class="btn-primary" onclick="viewTimecard(${row.id})">
                                 View Timecard
+                            </button>` : ""}
+
+                            ${hasAnyPermission(["add_employee_entry", "edit_employee_time", "edit_payroll_time"]) ? `
+                            <button class="btn-edit" onclick="addTimeForEmployee(${row.id})">
+                                Add Time
                             </button>` : ""}
 
                             ${hasPermission("approve_timecard") ? `

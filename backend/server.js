@@ -202,11 +202,8 @@ async function isAssignedEmployee(user, employeeId) {
 
 async function canManageTeamStructure(user, departmentId = null) {
   const permissions = userPermissionSet(user);
-  if (permissions.has("app_admin") && user.app_admin_scope === "all") return true;
-  if (permissions.has("manage_supervisor_assignments")) {
-    if (user.app_admin_scope === "all") return true;
-    if (departmentId == null || Number(departmentId) === Number(user.department_id)) return true;
-  }
+  const role = String(user?.role || "").toLowerCase();
+  if (permissions.has("app_admin") || role === "admin" || role === "payroll") return true;
   return isDepartmentHead(user, departmentId);
 }
 

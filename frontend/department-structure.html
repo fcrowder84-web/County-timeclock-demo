@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Department Structure - Edgefield County TimeClock</title>
+<script src="/safe-html.js"></script>
+<style>
+body{font-family:Arial,sans-serif;max-width:1500px;margin:40px auto;padding:20px;background:#f4f6f9;color:#1f2937}
+.topbar,.card{background:#fff;border-radius:10px;padding:18px 20px;box-shadow:0 2px 6px rgba(0,0,0,.12);margin-bottom:20px}
+.topbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap}.topbar h1{margin:0 auto 0 0}h2,h3{margin-top:0}
+button,a.btn{padding:9px 14px;border:0;border-radius:6px;cursor:pointer;text-decoration:none;font-size:14px}.primary{background:#1f3c5b;color:#fff}.secondary{background:#566573;color:#fff}.danger{background:#c0392b;color:#fff}
+select{width:100%;padding:10px;margin:6px 0 10px;box-sizing:border-box;font-size:15px}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px}.supervisor-card{border:1px solid #d5dbe3;border-radius:10px;padding:14px;background:#fafbfc}
+.muted{color:#667085}.notice{display:none;padding:12px;border-radius:6px;margin-bottom:20px}.notice.show{display:block}.error{background:#f8d7da;color:#721c24}.success{background:#d4edda;color:#155724}ul{padding-left:20px}.row-action{margin-left:8px;padding:4px 8px}.restricted{max-width:700px;margin:80px auto;text-align:center}
+</style>
+</head>
+<body>
+<div class="topbar">
+<h1>Department Structure</h1>
+<a class="btn secondary" href="/supervisor.html">Supervisor</a>
+<a class="btn secondary" href="/index.html">Home</a>
+<a class="btn secondary" href="/global-logout.html">Sign Out</a>
+</div>
+<div id="messageBox" class="notice"></div>
+<div id="intro" class="card">
+<h2>Department Review Structure</h2>
+<p>This page controls which supervisor reviews each employee's TimeClock records and signed timecard. Employee accounts and application permissions remain managed in the Employee Portal.</p>
+<p class="muted">Access is limited to department heads, Payroll, and administrators.</p>
+</div>
+<div id="structure"></div>
+<script>
+const apiBase="/api";
+let currentUser=null,currentPermissions=new Set(),structureData=null;
+function token(){return localStorage.getItem("timeclock_token")}
+function has(key){return currentPermissions.has("app_admin")||currentPermissions.has(key)}
+function esc(value){return SafeHtml.escape(value==null?"":String(value))}
+function employeeName(person){return `${person.first_name} ${person.last_name}`}
+function showMessage(message,isError=false){const box=document.getElementById("messageBox");box.textContent=message;box.className=`notice show ${isError?"error":"success"}`;clearTimeout(showMessage.t);showMessage.t=setTimeout(()=>box.className="notice",6000)}
+async function apiFetch(url,options={}){const headers={...(options.headers||{})};if(token())headers.Authorization=`Bearer ${token()}`;if(options.body&&!headers["Content-Type"])headers["Content-Type"]="application/json";const response=await fetch(url,{...options,headers});if(response.status===401){localStorage.removeItem("timeclock_token");location.replace("https://employee.edgefieldcountysc.org/apps/timeclock/launch?return_to=supervisor");throw new Error("Login required")}return response}
+async function jsonOrError(response){let data={};try{data=await response.json()}catch(_){data={}}if(!response.ok)throw new Error(data.error||`Request failed (${response.status})`);return data}
+async function init(){if(!token()){location.replace("https://employee.edgefieldcountysc.org/apps/timeclock/launch?return_to=supervisor");return}try{const me=await jsonOrError(await apiFetch(`${apiBase}/me`));currentUser=me.user;currentPermissions=new Set(me.permissions||[]);const access=await jsonOrError(await apiFetch(`${apiBase}/supervisor/department-structure-access`));if(!access.allowed){document.getElementById("intro").className="card restricted";document.getElementById("intro").innerHTML="<h2>Department Structure Access Required</h2><p>This page is limited to department heads, Payroll, and administrators.</p>";return}await loadStructure()}catch(err){showMessage(err.message,true)}}
+async function loadStructure(){try{structureData=await jsonOrError(await apiFetch(`${apiBase}/supervisor/team-structure`));renderStructure()}catch(err){showMessage(err.message,true)}}
+function renderStructure(){const data=structureData;const assignmentsByEmployee=new Map((data.assignments||[]).map(item=>[Number(item.employee_id),item]));let html="";(data.departments||[]).forEach(department=>{const people=(data.employees||[]).filter(person=>Number(person.department_id)===Number(department.id));const headOptions=people.map(person=>`<option value="${Number(person.id)}" ${Number(department.department_head_id)===Number(person.id)?"selected":""}>${esc(employeeName(person))}</option>`).join("");const canSetHead=has("manage_supervisor_assignments")&&data.can_manage_all;const supervisorIds=new Set((data.assignments||[]).filter(item=>Number(item.department_id)===Number(department.id)).map(item=>Number(item.supervisor_employee_id)));people.filter(person=>person.is_supervisor).forEach(person=>supervisorIds.add(Number(person.id)));const supervisors=people.filter(person=>supervisorIds.has(Number(person.id)));const unassigned=people.filter(person=>!assignmentsByEmployee.has(Number(person.id))&&Number(department.department_head_id)!==Number(person.id));html+=`<section class="card"><h2>${esc(department.name)}</h2><div class="grid"><div><label><strong>Department Head</strong></label>${canSetHead?`<select id="departmentHead-${Number(department.id)}"><option value="">Not assigned</option>${headOptions}</select><button class="primary" onclick="saveDepartmentHead(${Number(department.id)})">Save Department Head</button>`:`<p>${department.department_head_first_name?esc(`${department.department_head_first_name} ${department.department_head_last_name}`):"Not assigned"}</p>`}</div><div><label><strong>Assign Employee to Supervisor</strong></label><select id="teamEmployee-${Number(department.id)}"><option value="">Select employee</option>${people.map(person=>`<option value="${Number(person.id)}">${esc(employeeName(person))}</option>`).join("")}</select><select id="teamSupervisor-${Number(department.id)}"><option value="">Select supervisor</option>${people.map(person=>`<option value="${Number(person.id)}">${esc(employeeName(person))}</option>`).join("")}</select><button class="primary" onclick="assignEmployee(${Number(department.id)})">Assign</button></div></div>`;if(supervisors.length){html+=`<div class="grid" style="margin-top:18px">`;supervisors.forEach(supervisor=>{const assigned=(data.assignments||[]).filter(item=>Number(item.department_id)===Number(department.id)&&Number(item.supervisor_employee_id)===Number(supervisor.id));html+=`<div class="supervisor-card"><h3>Supervisor: ${esc(employeeName(supervisor))}</h3>${assigned.length?`<ul>${assigned.map(item=>`<li>${esc(`${item.employee_first_name} ${item.employee_last_name}`)} <button class="danger row-action" onclick="unassignEmployee(${Number(item.employee_id)},${Number(department.id)})">Remove</button></li>`).join("")}</ul>`:"<p>No employees assigned.</p>"}</div>`});html+="</div>"}html+=`<div style="margin-top:16px"><strong>Unassigned Employees:</strong> ${unassigned.length?unassigned.map(person=>esc(employeeName(person))).join(", "):"None"}</div></section>`});document.getElementById("structure").innerHTML=html||'<div class="card"><p>No departments are available.</p></div>'}
+async function saveDepartmentHead(departmentId){const employeeId=document.getElementById(`departmentHead-${departmentId}`).value||null;try{const data=await jsonOrError(await apiFetch(`${apiBase}/supervisor/team-structure/department-head`,{method:"POST",body:JSON.stringify({department_id:departmentId,employee_id:employeeId})}));showMessage(data.message||"Department head updated");await loadStructure()}catch(err){showMessage(err.message,true)}}
+async function assignEmployee(departmentId){const employeeId=document.getElementById(`teamEmployee-${departmentId}`).value,supervisorId=document.getElementById(`teamSupervisor-${departmentId}`).value;if(!employeeId||!supervisorId){showMessage("Select both an employee and a supervisor",true);return}if(employeeId===supervisorId){showMessage("An employee cannot supervise themselves",true);return}try{const data=await jsonOrError(await apiFetch(`${apiBase}/supervisor/team-structure/assign`,{method:"POST",body:JSON.stringify({department_id:departmentId,employee_id:employeeId,supervisor_employee_id:supervisorId})}));showMessage(data.message||"Employee assigned");await loadStructure()}catch(err){showMessage(err.message,true)}}
+async function unassignEmployee(employeeId,departmentId){if(!confirm("Remove this employee from their assigned supervisor?"))return;try{const data=await jsonOrError(await apiFetch(`${apiBase}/supervisor/team-structure/unassign`,{method:"POST",body:JSON.stringify({employee_id:employeeId,department_id:departmentId})}));showMessage(data.message||"Employee unassigned");await loadStructure()}catch(err){showMessage(err.message,true)}}
+init();
+</script>
+</body>
+</html>

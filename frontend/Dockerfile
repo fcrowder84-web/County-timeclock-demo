@@ -7,6 +7,7 @@ COPY sso.html /usr/share/nginx/html/sso.html
 COPY safe-html.js /usr/share/nginx/html/safe-html.js
 COPY employee.html /usr/share/nginx/html/employee.html
 COPY supervisor.html /usr/share/nginx/html/supervisor.html
+COPY department-structure.html /usr/share/nginx/html/department-structure.html
 COPY payroll.html /usr/share/nginx/html/payroll.html
 COPY payroll-timecards.html /usr/share/nginx/html/payroll-timecards.html
 COPY leave.html /usr/share/nginx/html/leave.html

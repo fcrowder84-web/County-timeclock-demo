@@ -25,6 +25,7 @@ function renderSignatures(){
   const empBtn=document.getElementById("employeeSignBtn");empBtn.classList.toggle("hidden",!(currentMode==="employee"&&selectedIsSelf()&&has("submit_timecard")&&currentData.can_edit_entries!==false));
   const supBtn=document.getElementById("supervisorSignBtn");supBtn.classList.toggle("hidden",!(currentMode==="supervisor"&&has("approve_timecard")&&a?.status==="employee_submitted"&&!a?.supervisor_approved_at));
   const ret=document.getElementById("returnBtn");ret.classList.toggle("hidden",!(currentMode==="supervisor"&&canReturn()&&a));
+  const addTimeBtn=document.getElementById("addTimeBtn");addTimeBtn.classList.toggle("hidden",!(currentMode==="supervisor"&&currentData.can_edit_entries===true&&canAddEntries()));
   const payrollLink=document.getElementById("payrollLink");payrollLink.classList.toggle("hidden",!payrollView());payrollLink.href=`/payroll.html?employeeId=${encodeURIComponent(selectedEmployeeId)}&periodStart=${encodeURIComponent(selectedPeriodStart||"")}`;
 }
 function pendingItems(){
@@ -60,7 +61,9 @@ function entryDateFromIso(v){return dateOnly(v)}
 function openEntryModal(mode,entry){
   entryModalMode=mode;activeEntry=entry;document.getElementById("entryModalTitle").textContent=mode==="request"?"Request Punch Change":mode==="edit"?"Edit Punch Entry":"Add Punch Entry";const inDate=entry?entryDateFromIso(entry.clock_in):dateOnly(currentData.pay_period_start),outDate=entry?.clock_out?entryDateFromIso(entry.clock_out):inDate;document.getElementById("entryInDate").value=inDate;document.getElementById("entryInTime").value=entry?entryIn24(entry).slice(0,5):"08:00";document.getElementById("entryOutDate").value=outDate;document.getElementById("entryOutTime").value=entry?.clock_out?entryOut24(entry).slice(0,5):"";document.getElementById("entryReason").value="";if(mode==="request"&&entry?.clickedKind==="in"){document.getElementById("entryOutDate").value="";document.getElementById("entryOutTime").value=""}if(mode==="request"&&entry?.clickedKind==="out"){document.getElementById("entryInDate").value="";document.getElementById("entryInTime").value=""}modal("entryModal",true)
 }
-function openAddEntry(day){entryModalMode="add";activeEntry=null;document.getElementById("entryModalTitle").textContent="Add Punch Entry";document.getElementById("entryInDate").value=day;document.getElementById("entryInTime").value="08:00";document.getElementById("entryOutDate").value=day;document.getElementById("entryOutTime").value="";document.getElementById("entryReason").value="";modal("entryModal",true)}
+function openAddEntry(day){entryModalMode="add";activeEntry=null;document.getElementById("entryModalTitle").textContent="Add Time for Employee";document.getElementById("entryInDate").value=day;document.getElementById("entryInTime").value="08:00";document.getElementById("entryOutDate").value=day;document.getElementById("entryOutTime").value="";document.getElementById("entryReason").value="";modal("entryModal",true)}
+function defaultAddEntryDate(){const start=dateOnly(currentData?.pay_period_start||selectedPeriodStart),end=dateOnly(currentData?.pay_period_end),today=new Date().toLocaleDateString("en-CA",{timeZone:"America/New_York"});return start&&end&&today>=start&&today<=end?today:start}
+document.getElementById("addTimeBtn").addEventListener("click",()=>openAddEntry(defaultAddEntryDate()));
 function timestamp(date,time){return date&&time?`${date} ${time}:00`:null}
 document.getElementById("entrySubmitBtn").addEventListener("click",async()=>{
   const inDate=document.getElementById("entryInDate").value,inTime=document.getElementById("entryInTime").value,outDate=document.getElementById("entryOutDate").value,outTime=document.getElementById("entryOutTime").value,reason=document.getElementById("entryReason").value.trim();
@@ -144,4 +147,10 @@ document.getElementById("quickPunchBtn").addEventListener("click",async()=>{
   }
 });
 document.getElementById("logoutBtn").addEventListener("click",()=>location.href="/global-logout.html");
-init();
+init().then(()=>{
+  const params=new URLSearchParams(location.search);
+  if(params.get("addEntry")==="1"&&currentMode==="supervisor"&&currentData?.can_edit_entries===true&&canAddEntries()){
+    openAddEntry(defaultAddEntryDate());
+    const url=new URL(location.href);url.searchParams.delete("addEntry");history.replaceState({},"",url);
+  }
+});
