@@ -87,10 +87,10 @@ function createSupervisorRouter({
              COALESCE((
                SELECT COUNT(*)
                FROM time_change_requests pending_change
-               JOIN time_entries change_entry ON change_entry.id=pending_change.time_entry_id
+               LEFT JOIN time_entries change_entry ON change_entry.id=pending_change.time_entry_id
                WHERE pending_change.employee_id=e.id
                  AND pending_change.status='pending'
-                 AND change_entry.deleted_at IS NULL
+                 AND (pending_change.time_entry_id IS NULL OR change_entry.deleted_at IS NULL)
                  AND (
                    (change_entry.clock_in >= $1::date AND change_entry.clock_in < ($2::date + INTERVAL '1 day'))
                    OR
@@ -162,10 +162,11 @@ function createSupervisorRouter({
              to_char(tcr.requested_clock_out,'MM/DD/YYYY HH12:MI AM') AS requested_clock_out_display,
              to_char(tcr.created_at,'MM/DD/YYYY HH12:MI AM') AS created_at_display
            FROM time_change_requests tcr
-           JOIN time_entries te ON te.id=tcr.time_entry_id AND te.deleted_at IS NULL
+           LEFT JOIN time_entries te ON te.id=tcr.time_entry_id
            JOIN employees e ON e.id=tcr.employee_id
            LEFT JOIN departments d ON d.id=e.department_id
            WHERE tcr.status='pending'
+             AND (tcr.time_entry_id IS NULL OR te.deleted_at IS NULL)
              AND (
                $1::text IN ('admin','payroll')
                OR e.id IN (
@@ -227,23 +228,35 @@ function createSupervisorRouter({
           return res.status(409).json({ error: 'This change request has already been reviewed' });
         }
 
-        const existingResult = await client.query(
-          `SELECT *
-             FROM time_entries
-            WHERE id=$1
-              AND employee_id=$2
-              AND deleted_at IS NULL
-            FOR UPDATE`,
-          [request.time_entry_id, request.employee_id],
-        );
-        const existing = existingResult.rows[0] || null;
-        if (!existing) {
-          await client.query('ROLLBACK');
-          return res.status(404).json({ error: 'Original time entry not found' });
+        let existing = null;
+        if (request.time_entry_id != null) {
+          const existingResult = await client.query(
+            `SELECT *
+               FROM time_entries
+              WHERE id=$1
+                AND employee_id=$2
+                AND deleted_at IS NULL
+              FOR UPDATE`,
+            [request.time_entry_id, request.employee_id],
+          );
+          existing = existingResult.rows[0] || null;
+          if (!existing) {
+            await client.query('ROLLBACK');
+            return res.status(404).json({ error: 'Original time entry not found' });
+          }
         }
 
-        const newClockIn = request.requested_clock_in ?? existing.clock_in;
-        const newClockOut = request.requested_clock_out ?? existing.clock_out;
+        const newClockIn = request.requested_clock_in ?? existing?.clock_in ?? null;
+        const newClockOut = request.requested_clock_out ?? existing?.clock_out ?? null;
+        if (!newClockIn) {
+          await client.query('ROLLBACK');
+          return res.status(400).json({ error: 'Clock in is required' });
+        }
+        if (!existing && !newClockOut) {
+          await client.query('ROLLBACK');
+          return res.status(400).json({ error: 'Clock out is required for a missing workday request' });
+        }
+
         const parsedIn = parseTimestamp(newClockIn, 'clock in');
         if (newClockOut != null) {
           const parsedOut = parseTimestamp(newClockOut, 'clock out');
@@ -253,34 +266,82 @@ function createSupervisorRouter({
           }
         }
 
-        await client.query(
-          `INSERT INTO time_entry_audit(
-             time_entry_id,changed_by_employee_id,old_clock_in,old_clock_out,
-             new_clock_in,new_clock_out,reason
-           ) VALUES($1,$2,$3,$4,$5,$6,$7)`,
-          [
-            existing.id,
-            req.user.id,
-            existing.clock_in,
-            existing.clock_out,
-            newClockIn,
-            newClockOut,
-            request.employee_reason,
-          ],
-        );
+        let updatedEntry;
+        if (existing) {
+          await client.query(
+            `INSERT INTO time_entry_audit(
+               time_entry_id,changed_by_employee_id,old_clock_in,old_clock_out,
+               new_clock_in,new_clock_out,reason
+             ) VALUES($1,$2,$3,$4,$5,$6,$7)`,
+            [
+              existing.id,
+              req.user.id,
+              existing.clock_in,
+              existing.clock_out,
+              newClockIn,
+              newClockOut,
+              request.employee_reason,
+            ],
+          );
 
-        const updatedEntry = await client.query(
-          `UPDATE time_entries
-              SET clock_in=$1,
-                  clock_out=$2,
-                  status=CASE WHEN $2::timestamp IS NULL THEN 'open' ELSE 'closed' END
-            WHERE id=$3
-              AND deleted_at IS NULL
-            RETURNING *`,
-          [newClockIn, newClockOut, existing.id],
-        );
-        if (!updatedEntry.rows.length) throw new Error('Time entry changed while request was being approved');
+          updatedEntry = await client.query(
+            `UPDATE time_entries
+                SET clock_in=$1,
+                    clock_out=$2,
+                    status=CASE WHEN $2::timestamp IS NULL THEN 'open' ELSE 'closed' END
+              WHERE id=$3
+                AND deleted_at IS NULL
+              RETURNING *`,
+            [newClockIn, newClockOut, existing.id],
+          );
+          if (!updatedEntry.rows.length) throw new Error('Time entry changed while request was being approved');
+        } else {
+          const overlap = await client.query(
+            `SELECT id
+               FROM time_entries
+              WHERE employee_id=$1
+                AND deleted_at IS NULL
+                AND clock_in < $3::timestamp
+                AND COALESCE(clock_out,NOW()) > $2::timestamp
+              LIMIT 1
+              FOR UPDATE`,
+            [request.employee_id, newClockIn, newClockOut],
+          );
+          if (overlap.rows.length) {
+            await client.query('ROLLBACK');
+            return res.status(409).json({
+              error: 'The requested missing time overlaps an existing punch. Edit the existing punch instead.',
+            });
+          }
 
+          updatedEntry = await client.query(
+            `INSERT INTO time_entries(employee_id,clock_in,clock_out,notes,status)
+             VALUES($1,$2,$3,$4,'closed')
+             RETURNING *`,
+            [
+              request.employee_id,
+              newClockIn,
+              newClockOut,
+              `Created from approved missing time request #${request.id}`,
+            ],
+          );
+
+          await client.query(
+            `INSERT INTO time_entry_audit(
+               time_entry_id,changed_by_employee_id,old_clock_in,old_clock_out,
+               new_clock_in,new_clock_out,reason
+             ) VALUES($1,$2,NULL,NULL,$3,$4,$5)`,
+            [
+              updatedEntry.rows[0].id,
+              req.user.id,
+              newClockIn,
+              newClockOut,
+              request.employee_reason,
+            ],
+          );
+        }
+
+        const oldClockInForPeriod = existing?.clock_in ?? newClockIn;
         const invalidated = await client.query(
           `UPDATE pay_period_approvals
               SET supervisor_approved_at=NULL,
@@ -295,7 +356,7 @@ function createSupervisorRouter({
                 ($3::timestamp >= pay_period_start AND $3::timestamp < (pay_period_end + INTERVAL '1 day'))
               )
             RETURNING id`,
-          [existing.employee_id, existing.clock_in, newClockIn],
+          [request.employee_id, oldClockInForPeriod, newClockIn],
         );
 
         const reviewed = await client.query(
@@ -308,12 +369,16 @@ function createSupervisorRouter({
         if (!reviewed.rows.length) throw new Error('Change request was reviewed by another request');
 
         await client.query('COMMIT');
-        await audit(req.user.id, 'approve_time_change_request', 'time_change_request', requestId, {
+        await audit(req.user.id, existing ? 'approve_time_change_request' : 'approve_missing_time_request', 'time_change_request', requestId, {
           employee_id: request.employee_id,
-          time_entry_id: request.time_entry_id,
+          time_entry_id: updatedEntry.rows[0].id,
+          created_new_entry: !existing,
           invalidated_approval_ids: invalidated.rows.map((row) => row.id),
         });
-        return res.json({ message: 'Request approved', entry: updatedEntry.rows[0] });
+        return res.json({
+          message: existing ? 'Request approved' : 'Missing time request approved and punch created',
+          entry: updatedEntry.rows[0],
+        });
       } catch (err) {
         if (client) await client.query('ROLLBACK').catch(() => {});
         if (err.statusCode) return res.status(err.statusCode).json({ error: err.message });
@@ -543,8 +608,9 @@ function createSupervisorRouter({
           client.query(
             `SELECT tcr.id
                FROM time_change_requests tcr
-               JOIN time_entries te ON te.id=tcr.time_entry_id AND te.deleted_at IS NULL
+               LEFT JOIN time_entries te ON te.id=tcr.time_entry_id
               WHERE tcr.employee_id=$1 AND tcr.status='pending'
+                AND (tcr.time_entry_id IS NULL OR te.deleted_at IS NULL)
                 AND (
                   (te.clock_in >= $2::date AND te.clock_in < ($3::date + INTERVAL '1 day'))
                   OR
