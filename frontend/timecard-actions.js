@@ -7,7 +7,7 @@ function renderTimecard(){
     const leavePresent=(data.leave_entries||[]).some(l=>dateOnly(l.leave_date_iso||l.leave_date)===d.date&&l.status!=="denied"),work=allocated[d.date]||{regular:0,ot:0},approvedLeave=["holiday","vacation","sick","floating_holiday","other"].reduce((a,t)=>a+approvedLeaveHours(d.date,t),0),dailyTotal=d.worked+approvedLeave;
     const employeeCanModify=currentMode==="employee"&&data.can_edit_entries!==false;
     const elevatedCanModify=currentMode==="supervisor"&&data.can_edit_entries===true;
-    const employeePunchRequestEnabled=employeeCanModify&&selectedIsSelf()&&has("request_punch_correction")&&d.date<=today;
+    const employeePunchRequestEnabled=employeeCanModify&&selectedIsSelf()&&d.date<=today;
     const supervisorPunchEnabled=elevatedCanModify&&canAddEntries();
     const punchEnabled=employeePunchRequestEnabled||supervisorPunchEnabled;
     const punchTitle=employeePunchRequestEnabled?"Request missing time for this date":supervisorPunchEnabled?"Add punch entry":"Punch request not available for this date";
