@@ -33,6 +33,22 @@ function createEmployeeRouter({ requireUser, requireAnyPermission, pool, audit, 
         return res.status(400).json({ error: 'Clock out before submitting your timecard' });
       }
 
+      const pendingChanges = await client.query(
+        `SELECT id
+           FROM time_change_requests
+          WHERE employee_id=$1
+            AND status='pending'
+            AND requested_clock_in >= $2::date
+            AND requested_clock_in < ($3::date + INTERVAL '1 day')`,
+        [req.user.id, period.pay_period_start, period.pay_period_end],
+      );
+      if (pendingChanges.rows.length) {
+        await client.query('ROLLBACK');
+        return res.status(409).json({
+          error: 'Resolve pending punch requests before submitting your timecard',
+        });
+      }
+
       const existingApproval = await client.query(
         `SELECT *
            FROM pay_period_approvals
@@ -140,6 +156,8 @@ function createEmployeeRouter({ requireUser, requireAnyPermission, pool, audit, 
       const requestsResult = await pool.query(
         `SELECT
            tcr.*,
+           to_char(requested_clock_in, 'MM/DD/YYYY HH12:MI AM') AS requested_clock_in_display,
+           to_char(requested_clock_out, 'MM/DD/YYYY HH12:MI AM') AS requested_clock_out_display,
            to_char(created_at, 'MM/DD/YYYY HH12:MI AM') AS created_at_display,
            to_char(reviewed_at, 'MM/DD/YYYY HH12:MI AM') AS reviewed_at_display
          FROM time_change_requests tcr
@@ -172,9 +190,9 @@ function createEmployeeRouter({ requireUser, requireAnyPermission, pool, audit, 
     }
   });
 
-  // Employees do not directly rewrite punch history.  They request a change
-  // and a supervisor approves it; deletion is handled separately through the
-  // auditable soft-delete route.
+  // Employees do not directly rewrite punch history. They request a change
+  // and a supervisor approves it. A request may reference an existing punch,
+  // or it may have no time_entry_id when the employee missed the whole day.
   router.post(
     '/employee/edit-time-entry',
     requireUser,
@@ -189,16 +207,23 @@ function createEmployeeRouter({ requireUser, requireAnyPermission, pool, audit, 
     requireUser,
     requireAnyPermission('request_punch_correction'),
     async (req, res) => {
-      const entryId = Number(req.body?.time_entry_id);
+      const rawEntryId = req.body?.time_entry_id;
+      const hasEntryId = rawEntryId !== null && rawEntryId !== undefined && String(rawEntryId).trim() !== '';
+      const entryId = hasEntryId ? Number(rawEntryId) : null;
       const requestedClockIn = req.body?.requested_clock_in || null;
       const requestedClockOut = req.body?.requested_clock_out || null;
       const reason = String(req.body?.employee_reason || '').trim();
 
-      if (!Number.isInteger(entryId) || entryId <= 0) {
+      if (hasEntryId && (!Number.isInteger(entryId) || entryId <= 0)) {
         return res.status(400).json({ error: 'Valid time entry is required' });
       }
       if (!requestedClockIn && !requestedClockOut) {
         return res.status(400).json({ error: 'Select a clock in time, clock out time, or both' });
+      }
+      if (!hasEntryId && (!requestedClockIn || !requestedClockOut)) {
+        return res.status(400).json({
+          error: 'Clock in and clock out are both required when requesting a missing workday',
+        });
       }
       if (!reason) {
         return res.status(400).json({ error: 'Reason is required' });
@@ -206,34 +231,38 @@ function createEmployeeRouter({ requireUser, requireAnyPermission, pool, audit, 
       if (reason.length > 1000) {
         return res.status(400).json({ error: 'Reason must be 1000 characters or less' });
       }
-      if (requestedClockIn && !validDate(requestedClockIn)) {
+
+      const parsedRequestedIn = requestedClockIn ? validDate(requestedClockIn) : null;
+      const parsedRequestedOut = requestedClockOut ? validDate(requestedClockOut) : null;
+      if (requestedClockIn && !parsedRequestedIn) {
         return res.status(400).json({ error: 'Requested clock in is invalid' });
       }
-      if (requestedClockOut && !validDate(requestedClockOut)) {
+      if (requestedClockOut && !parsedRequestedOut) {
         return res.status(400).json({ error: 'Requested clock out is invalid' });
       }
 
       try {
-        const entryResult = await pool.query(
-          `SELECT *
-             FROM time_entries
-            WHERE id=$1
-              AND deleted_at IS NULL`,
-          [entryId],
-        );
-        if (!entryResult.rows.length) {
-          return res.status(404).json({ error: 'Time entry not found' });
+        let entry = null;
+        if (hasEntryId) {
+          const entryResult = await pool.query(
+            `SELECT *
+               FROM time_entries
+              WHERE id=$1
+                AND deleted_at IS NULL`,
+            [entryId],
+          );
+          if (!entryResult.rows.length) {
+            return res.status(404).json({ error: 'Time entry not found' });
+          }
+
+          entry = entryResult.rows[0];
+          if (Number(entry.employee_id) !== Number(req.user.id)) {
+            return res.status(403).json({ error: 'Cannot modify another employee' });
+          }
         }
 
-        const entry = entryResult.rows[0];
-        if (Number(entry.employee_id) !== Number(req.user.id)) {
-          return res.status(403).json({ error: 'Cannot modify another employee' });
-        }
-
-        const effectiveClockIn = validDate(requestedClockIn || entry.clock_in);
-        const effectiveClockOut = requestedClockOut
-          ? validDate(requestedClockOut)
-          : (entry.clock_out ? validDate(entry.clock_out) : null);
+        const effectiveClockIn = parsedRequestedIn || validDate(entry?.clock_in);
+        const effectiveClockOut = parsedRequestedOut || (entry?.clock_out ? validDate(entry.clock_out) : null);
 
         if (!effectiveClockIn) {
           return res.status(400).json({ error: 'Clock in is invalid' });
@@ -244,14 +273,64 @@ function createEmployeeRouter({ requireUser, requireAnyPermission, pool, audit, 
           });
         }
 
-        await pool.query(
+        const approvalResult = await pool.query(
+          `SELECT *
+             FROM pay_period_approvals
+            WHERE employee_id=$1
+              AND $2::timestamp >= pay_period_start
+              AND $2::timestamp < (pay_period_end + INTERVAL '1 day')
+            ORDER BY id DESC
+            LIMIT 1`,
+          [req.user.id, effectiveClockIn],
+        );
+        const approval = approvalResult.rows[0] || null;
+        if (approval?.employee_signed_at && approval.status !== 'returned_to_employee') {
+          return res.status(409).json({
+            error: 'This timecard is signed and locked. Your supervisor must return it before you can request another change.',
+          });
+        }
+
+        if (!hasEntryId) {
+          const duplicate = await pool.query(
+            `SELECT id
+               FROM time_change_requests
+              WHERE employee_id=$1
+                AND time_entry_id IS NULL
+                AND status='pending'
+                AND requested_clock_in=$2::timestamp
+                AND requested_clock_out=$3::timestamp
+              LIMIT 1`,
+            [req.user.id, requestedClockIn, requestedClockOut],
+          );
+          if (duplicate.rows.length) {
+            return res.status(409).json({ error: 'That missing time request is already pending' });
+          }
+        }
+
+        const inserted = await pool.query(
           `INSERT INTO time_change_requests(
              employee_id,time_entry_id,requested_clock_in,requested_clock_out,employee_reason,status
-           ) VALUES($1,$2,$3,$4,$5,'pending')`,
+           ) VALUES($1,$2,$3,$4,$5,'pending')
+           RETURNING id`,
           [req.user.id, entryId, requestedClockIn, requestedClockOut, reason],
         );
 
-        return res.json({ message: 'Time change request submitted' });
+        await audit(
+          req.user.id,
+          hasEntryId ? 'request_time_change' : 'request_missing_time',
+          'time_change_request',
+          inserted.rows[0].id,
+          {
+            time_entry_id: entryId,
+            requested_clock_in: requestedClockIn,
+            requested_clock_out: requestedClockOut,
+          },
+        );
+
+        return res.json({
+          message: hasEntryId ? 'Time change request submitted' : 'Missing time request submitted',
+          request_id: inserted.rows[0].id,
+        });
       } catch (err) {
         if (err.code === '23514') {
           return res.status(400).json({
