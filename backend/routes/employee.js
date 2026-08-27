@@ -33,22 +33,6 @@ function createEmployeeRouter({ requireUser, requireAnyPermission, pool, audit, 
         return res.status(400).json({ error: 'Clock out before submitting your timecard' });
       }
 
-      const pendingChanges = await client.query(
-        `SELECT id
-           FROM time_change_requests
-          WHERE employee_id=$1
-            AND status='pending'
-            AND requested_clock_in >= $2::date
-            AND requested_clock_in < ($3::date + INTERVAL '1 day')`,
-        [req.user.id, period.pay_period_start, period.pay_period_end],
-      );
-      if (pendingChanges.rows.length) {
-        await client.query('ROLLBACK');
-        return res.status(409).json({
-          error: 'Resolve pending punch requests before submitting your timecard',
-        });
-      }
-
       const existingApproval = await client.query(
         `SELECT *
            FROM pay_period_approvals
