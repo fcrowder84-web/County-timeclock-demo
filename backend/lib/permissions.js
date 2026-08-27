@@ -66,7 +66,11 @@ function userPermissionSet(user) {
 
 function userHasPermission(user, permissionKey) {
   const permissions = userPermissionSet(user);
-  return permissions.has('app_admin') || permissions.has(permissionKey);
+  if (permissions.has('app_admin') || permissions.has(permissionKey)) return true;
+  // Anyone granted TimeClock access must be able to view their own card.
+  // This is self-service only; it does not grant supervisor/payroll authority.
+  if (permissionKey === 'view_own_time' && permissions.has('access')) return true;
+  return false;
 }
 
 function userHasAnyPermission(user, permissionKeys) {
