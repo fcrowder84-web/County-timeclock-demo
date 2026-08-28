@@ -10,7 +10,11 @@ async function canReviewEmployee(pool, user, employeeId) {
   const role = String(user?.role || '').toLowerCase();
   const permissions = permissionSet(user);
   if (Number(user?.id) === Number(employeeId)) {
-    return permissions.has('approve_own_punch_corrections');
+    return permissions.has('approve_own_punch_corrections')
+      || permissions.has('approve_punch_correction')
+      || permissions.has('app_admin')
+      || role === 'payroll'
+      || role === 'admin';
   }
   if (permissions.has('app_admin') || permissions.has('view_all_timeclock_records') || role === 'payroll' || role === 'admin') {
     return true;
