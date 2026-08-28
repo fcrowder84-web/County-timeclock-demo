@@ -3,6 +3,7 @@
 const express = require('express');
 const { summarizeTimecard } = require('../lib/timecard-summary');
 const { insertPunchIntoSequence } = require('../lib/punch-sequence');
+const { createApproveSinglePunchHandler } = require('../lib/approve-single-punch');
 
 function validDate(value) {
   if (!value) return null;
@@ -272,9 +273,9 @@ function createEmployeeRouter({ requireUser, requireAnyPermission, pool, audit, 
       if (requestedClockOut && !parsedRequestedOut) return res.status(400).json({ error: 'Requested clock out is invalid' });
 
       try {
-        // New Add Punch requests are deliberately stored as one independent
-        // punch event. Approval later inserts that timestamp into the day's
-        // chronological event stream and rebuilds the in/out pairing.
+        // Add Punch requests are stored as one independent punch event.
+        // Approval inserts that timestamp into the day's chronological event
+        // stream and rebuilds the in/out pairing.
         if (parsedRequestedPunch) {
           const approvalResult = await approvalForTimestamp(pool, req.user.id, requestedPunch);
           const approval = approvalResult.rows[0] || null;
@@ -489,6 +490,13 @@ function createEmployeeRouter({ requireUser, requireAnyPermission, pool, audit, 
         client.release();
       }
     },
+  );
+
+  router.post(
+    '/supervisor/approve-single-punch',
+    requireUser,
+    requireAnyPermission('approve_punch_correction'),
+    createApproveSinglePunchHandler({ pool, audit }),
   );
 
   return router;
