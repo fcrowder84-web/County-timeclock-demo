@@ -19,6 +19,7 @@
     return d?d.toLocaleTimeString([],{hour:"numeric",minute:"2-digit"}):String(value||"");
   }
   function allRequests(){return currentData?.change_requests||currentData?.requests||[]}
+  function isSinglePunchRequest(r){return r&&r.status==="pending"&&!r.time_entry_id&&Boolean(r.requested_clock_in)!==Boolean(r.requested_clock_out)}
   function actualPunchTimes(){
     const times=[];
     (currentData?.entries||[]).forEach(e=>{if(e.clock_in)times.push(e.clock_in);if(e.clock_out)times.push(e.clock_out)});
@@ -40,9 +41,6 @@
     return allRequests().flatMap(requestedEventsForRequest)
       .filter(e=>punchDate(e.ts)===day)
       .sort((a,b)=>parsePunchDate(a.ts)-parsePunchDate(b.ts));
-  }
-  function incompleteSingleRequest(r){
-    return r&&r.status==="pending"&&!r.time_entry_id&&Boolean(r.requested_clock_in)!==Boolean(r.requested_clock_out);
   }
 
   const originalPunchCells=punchCells;
@@ -74,7 +72,7 @@
     for(let i=0;i<4;i++){
       const items=i<3?(events[i]?[events[i]]:[]):events.slice(3);
       cells.push(`<td>${items.map(p=>p.pending
-        ? `<span class="punch missing pending-request" title="Punch request received and pending approval">${esc(p.label)}</span>`
+        ? `<span class="punch missing pending-request" title="Punch request received and pending supervisor approval">${esc(p.label)}</span>`
         : `<span class="punch ${p.cls||""}" data-entry-id="${Number(p.entry.id)}" data-kind="${p.kind}">${esc(p.label)}</span>`
       ).join(" ")}</td>`);
     }
@@ -83,21 +81,16 @@
 
   pendingItems=function(){
     const start=dateOnly(currentData.pay_period_start),end=dateOnly(currentData.pay_period_end);
-    const leave=(currentData.leave_entries||[]).filter(l=>l.status==="pending").map(l=>({type:"leave",id:l.id,reviewable:true,text:`${localDateLabel(l.leave_date_iso||l.leave_date)} — ${String(l.leave_type).replaceAll("_"," ")} ${num(l.hours).toFixed(2)} hrs`}));
+    const leave=(currentData.leave_entries||[]).filter(l=>l.status==="pending").map(l=>({type:"leave",id:l.id,text:`${localDateLabel(l.leave_date_iso||l.leave_date)} — ${String(l.leave_type).replaceAll("_"," ")} ${num(l.hours).toFixed(2)} hrs`}));
     const changes=allRequests().filter(r=>r.status==="pending").filter(r=>{
       const d=punchDate(r.requested_clock_in||r.requested_clock_out||r.created_at);return !d||(d>=start&&d<=end)
     }).map(r=>{
       const events=requestedEventsForRequest(r).map(e=>punchTimeLabel(e.ts));
       const day=punchDate(r.requested_clock_in||r.requested_clock_out||r.created_at);
-      const incomplete=incompleteSingleRequest(r);
-      let text;
-      if(!r.time_entry_id){
-        text=`Punch request: ${localDateLabel(day)}${events.length?` — ${events.join(" / ")}`:""}`;
-        text+=incomplete?" — waiting for matching punch":" — waiting for supervisor approval";
-      }else{
-        text=`Punch change request: ${localDateLabel(day)}${events.length?` — ${events.join(" / ")}`:""} — waiting for supervisor approval`;
-      }
-      return{type:"change",id:r.id,reviewable:!incomplete,text};
+      const text=isSinglePunchRequest(r)
+        ? `Punch request: ${localDateLabel(day)}${events.length?` — ${events[0]}`:""} — waiting for supervisor approval`
+        : `Punch change request: ${localDateLabel(day)}${events.length?` — ${events.join(" / ")}`:""} — waiting for supervisor approval`;
+      return{type:"change",id:r.id,text};
     });
     return [...leave,...changes];
   };
@@ -109,12 +102,23 @@
       let actions="";
       if(currentMode==="supervisor"){
         if(i.type==="leave"&&hasAny(["approve_timecard","edit_employee_time","edit_payroll_time","app_admin"]))actions=`<span><button class="btn pending-leave-review" data-id="${Number(i.id)}" data-status="approved">Approve</button><button class="btn pending-leave-review" data-id="${Number(i.id)}" data-status="denied">Deny</button></span>`;
-        else if(i.type==="change"&&has("approve_punch_correction"))actions=i.reviewable?`<span><button class="btn pending-change-review" data-id="${Number(i.id)}" data-status="approved">Approve</button><button class="btn pending-change-review" data-id="${Number(i.id)}" data-status="denied">Deny</button></span>`:`<span class="muted">Waiting for matching punch</span>`;
+        else if(i.type==="change"&&has("approve_punch_correction"))actions=`<span><button class="btn pending-change-review" data-id="${Number(i.id)}" data-status="approved">Approve</button><button class="btn pending-change-review" data-id="${Number(i.id)}" data-status="denied">Deny</button></span>`;
       }
       return `<div class="pending-item"><span>${esc(i.text)}</span>${actions}</div>`;
     }).join("");
     list.querySelectorAll(".pending-leave-review").forEach(b=>b.addEventListener("click",()=>reviewLeave(b.dataset.id,b.dataset.status)));
     list.querySelectorAll(".pending-change-review").forEach(b=>b.addEventListener("click",()=>reviewChange(b.dataset.id,b.dataset.status)));
+  };
+
+  const originalReviewChange=reviewChange;
+  reviewChange=async function(id,status){
+    const request=allRequests().find(r=>Number(r.id)===Number(id));
+    if(status!=="approved"||!isSinglePunchRequest(request))return originalReviewChange(id,status);
+    const note=prompt("Supervisor note for approval (optional):")||"";
+    try{
+      const data=await jsonOrError(await apiFetch(`${apiBase}/supervisor/approve-single-punch`,{method:"POST",body:JSON.stringify({request_id:Number(id),supervisor_note:note})}));
+      showMessage(data.message||"Punch request approved");await loadTimecard();
+    }catch(err){showMessage(err.message,"error")}
   };
 
   function fieldBox(id){return document.getElementById(id)?.closest("div")}
