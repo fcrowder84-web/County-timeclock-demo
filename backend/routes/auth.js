@@ -1,5 +1,6 @@
 'use strict';
 const express=require('express');
+const {createMobilePairingStore}=require('../lib/mobile-pairing');
 
 function effectiveEmployeePermissions(permissions){
   const list=[...(permissions||[])];
@@ -10,6 +11,11 @@ function effectiveEmployeePermissions(permissions){
     list.push('request_punch_correction');
   }
   return [...new Set(list)];
+}
+
+function requestAddress(req){
+  const forwarded=String(req.headers?.['x-forwarded-for']||'').split(',')[0].trim();
+  return forwarded||String(req.headers?.['x-real-ip']||req.ip||req.socket?.remoteAddress||'unknown');
 }
 
 function createAuthRouter({
@@ -24,6 +30,7 @@ function createAuthRouter({
   audit,
 }){
   const router=express.Router();
+  const mobilePairing=createMobilePairingStore();
 
   router.post('/logout',requireUser,async(req,res)=>{
     const token=getBearerToken(req);
@@ -41,6 +48,68 @@ function createAuthRouter({
       app_admin_scope:req.user.app_admin_scope||'own',
       auth_source:req.user.auth_source||'legacy',
     });
+  });
+
+  router.post('/auth/mobile-code',requireUser,async(req,res)=>{
+    try{
+      const permissions=effectiveEmployeePermissions(req.user.permissions||[]);
+      if(!permissions.includes('access')&&!permissions.includes('app_admin')){
+        return res.status(403).json({error:'TimeClock access has not been granted'});
+      }
+      const issued=mobilePairing.issue({
+        employee_id:req.user.id,
+        permissions,
+        app_admin_scope:req.user.app_admin_scope||'own',
+        auth_source:req.user.auth_source||'portal',
+      });
+      await audit(req.user.id,'generate_mobile_pairing_code','employee',req.user.id,{
+        expires_at:new Date(issued.expires_at).toISOString(),
+      });
+      return res.json({
+        code:issued.code,
+        expires_at:new Date(issued.expires_at).toISOString(),
+        expires_in_seconds:300,
+      });
+    }catch(err){
+      console.error('Generate mobile pairing code error',err);
+      return res.status(500).json({error:'Unable to generate mobile login code'});
+    }
+  });
+
+  router.post('/auth/mobile-code/redeem',async(req,res)=>{
+    try{
+      const paired=mobilePairing.redeem(req.body?.code,requestAddress(req));
+      const user=await getUserById(paired.employee_id);
+      if(!user||!user.active||user.is_active===false){
+        return res.status(403).json({error:'This employee account is not active'});
+      }
+      const permissions=effectiveEmployeePermissions(paired.permissions||[]);
+      if(!permissions.includes('access')&&!permissions.includes('app_admin')){
+        return res.status(403).json({error:'TimeClock access has not been granted'});
+      }
+      const token=sessionStore.create(user.id,permissions,{
+        app_admin_scope:paired.app_admin_scope,
+        auth_source:paired.auth_source,
+      });
+      const safeUser={...user};
+      delete safeUser.pin;
+      await audit(user.id,'redeem_mobile_pairing_code','employee',user.id,{
+        source_ip:requestAddress(req),
+        permission_count:permissions.length,
+      });
+      return res.json({
+        message:'Phone connected to TimeClock',
+        token,
+        user:safeUser,
+        permissions,
+      });
+    }catch(err){
+      if(err.statusCode){
+        return res.status(err.statusCode).json({error:err.message,code:err.code});
+      }
+      console.error('Redeem mobile pairing code error',err);
+      return res.status(500).json({error:'Unable to connect phone to TimeClock'});
+    }
   });
 
   router.post('/auth/portal',async(req,res)=>{
@@ -68,4 +137,4 @@ function createAuthRouter({
   return router;
 }
 
-module.exports={createAuthRouter,effectiveEmployeePermissions};
+module.exports={createAuthRouter,effectiveEmployeePermissions,requestAddress};
