@@ -70,10 +70,6 @@ function userHasPermission(user, permissionKey) {
   // Anyone granted TimeClock access must be able to view their own card.
   // This is self-service only; it does not grant supervisor/payroll authority.
   if (permissionKey === 'view_own_time' && permissions.has('access')) return true;
-  // These aliases only allow the request to reach the approval route. The
-  // employee-scope check still enforces that the target must be the user.
-  if (permissionKey === 'approve_punch_correction' && permissions.has('approve_own_punch_corrections')) return true;
-  if (permissionKey === 'approve_timecard' && permissions.has('approve_own_timecard')) return true;
   return false;
 }
 
