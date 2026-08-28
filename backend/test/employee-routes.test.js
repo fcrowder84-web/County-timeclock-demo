@@ -23,21 +23,19 @@ function compact(sql) { return String(sql).replace(/\s+/g, ' ').trim(); }
 
 (async () => {
   const period = { pay_period_start: '2026-08-03', pay_period_end: '2026-08-16' };
-  const auditCalls = [];
 
   assert(validDate('2026-08-12T08:00:00Z'));
   assert.strictEqual(validDate('not-a-date'), null);
 
-  const basePool = {
-    query: async () => { throw new Error('unexpected query'); },
-    connect: async () => { throw new Error('unexpected connect'); },
-  };
   const router = createEmployeeRouter({
     requireUser: noop,
     requireAnyPermission: allow,
     getRequestedPayPeriod: async () => period,
-    audit: async (...args) => auditCalls.push(args),
-    pool: basePool,
+    audit: async () => {},
+    pool: {
+      query: async () => { throw new Error('unexpected query'); },
+      connect: async () => { throw new Error('unexpected connect'); },
+    },
   });
 
   assert.deepStrictEqual(
@@ -48,6 +46,7 @@ function compact(sql) { return String(sql).replace(/\s+/g, ' ').trim(); }
       'post /employee/edit-time-entry',
       'post /employee/request-time-change',
       'post /supervisor/add-time-entry',
+      'post /supervisor/approve-single-punch',
     ],
   );
 
@@ -65,7 +64,7 @@ function compact(sql) { return String(sql).replace(/\s+/g, ' ').trim(); }
     res,
   );
   assert.strictEqual(res.statusCode, 400);
-  assert.match(res.body.error, /punch date and time|clock in time/i);
+  assert.match(res.body.error, /punch date and time/i);
 
   const otherEmployeeRouter = createEmployeeRouter({
     requireUser: noop,
@@ -124,8 +123,8 @@ function compact(sql) { return String(sql).replace(/\s+/g, ' ').trim(); }
   assert.strictEqual(res.statusCode, 400);
   assert.match(res.body.error, /Clock out must be after clock in/);
 
-  // A first single punch on an otherwise empty date is stored immediately as
-  // a pending, incomplete request so the employee can see that it was received.
+  // A single Add Punch request is stored independently. It does not require
+  // the employee to invent the matching in/out punch in the request form.
   const singleQueries = [];
   const singleAudit = [];
   const singlePunchRouter = createEmployeeRouter({
@@ -139,9 +138,8 @@ function compact(sql) { return String(sql).replace(/\s+/g, ' ').trim(); }
         const text = compact(sql);
         singleQueries.push(text);
         if (text.includes('FROM pay_period_approvals')) return { rows: [] };
-        if (text.includes('FROM time_entries') && text.includes('clock_out IS NULL')) return { rows: [] };
+        if (text.includes('FROM time_entries')) return { rows: [] };
         if (text.includes('FROM time_change_requests') && text.includes('requested_clock_out IS NULL')) return { rows: [] };
-        if (text.includes('FROM time_change_requests') && text.includes('IS NOT DISTINCT FROM')) return { rows: [] };
         if (text.startsWith('INSERT INTO time_change_requests')) return { rows: [{ id: 42 }] };
         throw new Error(`unexpected single punch query: ${text}`);
       },
@@ -160,49 +158,9 @@ function compact(sql) { return String(sql).replace(/\s+/g, ' ').trim(); }
   );
   assert.strictEqual(res.statusCode, 200);
   assert.strictEqual(res.body.request_id, 42);
-  assert.strictEqual(res.body.paired, false);
-  assert.match(res.body.message, /saved|matching punch/i);
+  assert.match(res.body.message, /waiting for supervisor approval/i);
   assert(singleQueries.some((sql) => sql.startsWith('INSERT INTO time_change_requests')));
   assert(singleAudit.some((call) => call[1] === 'request_single_punch'));
-
-  // A second single punch on the same date completes the existing pending
-  // request instead of creating a second unrelated approval item.
-  const pairAudit = [];
-  const pairPunchRouter = createEmployeeRouter({
-    requireUser: noop,
-    requireAnyPermission: allow,
-    getRequestedPayPeriod: async () => period,
-    audit: async (...args) => pairAudit.push(args),
-    pool: {
-      connect: async () => { throw new Error('unexpected connect'); },
-      query: async (sql) => {
-        const text = compact(sql);
-        if (text.includes('FROM pay_period_approvals')) return { rows: [] };
-        if (text.includes('FROM time_entries') && text.includes('clock_out IS NULL')) return { rows: [] };
-        if (text.includes('FROM time_change_requests') && text.includes('requested_clock_out IS NULL')) {
-          return { rows: [{ id: 9, requested_clock_in: '2026-08-12T08:00:00Z', employee_reason: 'Forgot first punch' }] };
-        }
-        if (text.startsWith('UPDATE time_change_requests')) return { rows: [{ id: 9 }] };
-        throw new Error(`unexpected paired punch query: ${text}`);
-      },
-    },
-  });
-  res = makeRes();
-  await handlerFor(pairPunchRouter, 'post', '/employee/request-time-change')(
-    {
-      user: { id: 7 },
-      body: {
-        requested_punch: '2026-08-12T17:00:00Z',
-        employee_reason: 'Forgot second punch',
-      },
-    },
-    res,
-  );
-  assert.strictEqual(res.statusCode, 200);
-  assert.strictEqual(res.body.request_id, 9);
-  assert.strictEqual(res.body.paired, true);
-  assert.match(res.body.message, /supervisor approval/i);
-  assert(pairAudit.some((call) => call[1] === 'complete_missing_time_request'));
 
   async function makeSubmitRouter({ openRows = [], approvalRows = [] }) {
     const txQueries = [];
