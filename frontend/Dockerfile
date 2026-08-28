@@ -16,6 +16,7 @@ COPY timecard.html /usr/share/nginx/html/timecard.html
 COPY timecard.css /usr/share/nginx/html/timecard.css
 COPY timecard-base.js /usr/share/nginx/html/timecard-base.js
 COPY timecard-actions.js /usr/share/nginx/html/timecard-actions.js
+COPY timecard-single-punch.js /usr/share/nginx/html/timecard-single-punch.js
 COPY mobile.html /usr/share/nginx/html/mobile.html
 COPY punches.html /usr/share/nginx/html/punches.html
 COPY manifest.webmanifest /usr/share/nginx/html/manifest.webmanifest
