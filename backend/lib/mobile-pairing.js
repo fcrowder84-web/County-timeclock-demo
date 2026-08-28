@@ -21,7 +21,7 @@ function createMobilePairingStore({
   const attempts = new Map();
 
   function normalizeCode(value) {
-    return String(value || '').replace(/\D/g, '').slice(0, 6);
+    return String(value || '').replace(/\D/g, '');
   }
 
   function digest(code) {
@@ -64,7 +64,7 @@ function createMobilePairingStore({
   function issue(payload) {
     cleanupExpired();
     const employeeKey = String(payload.employee_id);
-    const oldHash = employeeCodes.get(employeeKey);
+    const oldHash = employeeCodes.get(employeeKey) || null;
     if (oldHash) codes.delete(oldHash);
 
     let code;
@@ -72,7 +72,7 @@ function createMobilePairingStore({
     do {
       code = String(crypto.randomInt(0, 1000000)).padStart(6, '0');
       hash = digest(code);
-    } while (codes.has(hash));
+    } while (codes.has(hash) || hash === oldHash);
 
     const expiresAt = now() + ttlMs;
     codes.set(hash, { ...payload, expires_at: expiresAt });
