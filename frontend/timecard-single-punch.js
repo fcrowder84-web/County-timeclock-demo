@@ -142,6 +142,10 @@
     fieldBox("entryOutDate")?.classList.add("hidden");fieldBox("entryOutTime")?.classList.add("hidden");
     document.getElementById("entryReason").value="";
     modal("entryModal",true);
+    const existing=(currentData?.entries||[]).filter(e=>dateOnly(e.entry_date_iso||e.clock_in)===day);
+    if(employeeRequest&&existing.length){
+      showEntryModalMessage("Existing punches are already on this date. This requested punch will be inserted chronologically. Delete any incorrect punch first.",false);
+    }
   };
 
   document.getElementById("entrySubmitBtn").addEventListener("click",async ev=>{
