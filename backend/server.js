@@ -224,10 +224,14 @@ async function canAccessEmployee(user, employeeId, actionPermissions = []) {
   const isSelf = Number(user.id) === Number(employeeId);
   if (isSelf) {
     if (actionPermissions.includes("approve_punch_correction")) {
-      return permissions.has("approve_own_punch_corrections");
+      return permissions.has("approve_own_punch_corrections")
+        || permissions.has("approve_punch_correction")
+        || permissions.has("app_admin");
     }
     if (actionPermissions.includes("approve_timecard")) {
-      return permissions.has("approve_own_timecard");
+      return permissions.has("approve_own_timecard")
+        || permissions.has("approve_timecard")
+        || permissions.has("app_admin");
     }
     return true;
   }
