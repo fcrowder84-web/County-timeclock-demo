@@ -286,9 +286,9 @@ function createEmployeeRouter({ requireUser, requireAnyPermission, pool, audit, 
       }
 
       try {
-        // A single-punch request is first matched to an existing open entry.
-        // If no open entry exists, keep the first punch pending. A second
-        // single punch on the same date completes that pending interval.
+        // A single-punch request is first matched to an existing open entry on
+        // the same date. If no same-date open entry exists, keep the first
+        // punch pending. A second single punch on that date completes it.
         if (parsedRequestedPunch) {
           const lockResult = await approvalForTimestamp(pool, req.user.id, requestedPunch);
           const punchApproval = lockResult.rows[0] || null;
@@ -304,9 +304,10 @@ function createEmployeeRouter({ requireUser, requireAnyPermission, pool, audit, 
               WHERE employee_id=$1
                 AND deleted_at IS NULL
                 AND clock_out IS NULL
+                AND clock_in::date=$2::timestamp::date
               ORDER BY clock_in DESC
               LIMIT 1`,
-            [req.user.id],
+            [req.user.id, requestedPunch],
           );
           const openEntry = openResult.rows[0] || null;
 
@@ -485,8 +486,8 @@ function createEmployeeRouter({ requireUser, requireAnyPermission, pool, audit, 
 
   // Supervisor/payroll direct Add Punch action. The caller supplies one punch
   // timestamp; the server places it as an inferred clock-in or clock-out from
-  // the employee's current open state. The legacy clock_in/clock_out pair is
-  // also accepted for compatibility with older clients.
+  // an open entry on that date. The legacy clock_in/clock_out pair remains
+  // accepted for compatibility with older clients.
   router.post(
     '/supervisor/add-time-entry',
     requireUser,
@@ -575,10 +576,11 @@ function createEmployeeRouter({ requireUser, requireAnyPermission, pool, audit, 
               WHERE employee_id=$1
                 AND deleted_at IS NULL
                 AND clock_out IS NULL
+                AND clock_in::date=$2::timestamp::date
               ORDER BY clock_in DESC
               LIMIT 1
               FOR UPDATE`,
-            [employeeId],
+            [employeeId, punchAt],
           );
           const openEntry = openResult.rows[0] || null;
 
