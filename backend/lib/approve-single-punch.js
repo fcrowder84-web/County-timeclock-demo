@@ -7,9 +7,11 @@ function permissionSet(user) {
 }
 
 async function canReviewEmployee(pool, user, employeeId) {
-  if (Number(user?.id) === Number(employeeId)) return false;
   const role = String(user?.role || '').toLowerCase();
   const permissions = permissionSet(user);
+  if (Number(user?.id) === Number(employeeId)) {
+    return permissions.has('approve_own_punch_corrections');
+  }
   if (permissions.has('app_admin') || permissions.has('view_all_timeclock_records') || role === 'payroll' || role === 'admin') {
     return true;
   }
@@ -128,6 +130,7 @@ function createApproveSinglePunchHandler({ pool, audit }) {
         employee_id: request.employee_id,
         punch_at: punchAt,
         inferred_punch_type: placed.inferred_punch_type,
+        self_approved: Number(req.user.id) === Number(request.employee_id),
         invalidated_approval_ids: invalidated.rows.map((row) => row.id),
       });
       return res.json({
