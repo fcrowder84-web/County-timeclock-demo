@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Edgefield County Timecard</title>
-<link rel="stylesheet" href="/timecard.css?v=20260827-1">
+<link rel="stylesheet" href="/timecard.css?v=20260828-1">
 </head>
 <body>
 <div class="shell">
@@ -39,8 +39,9 @@
 <div id="contextMenu" class="menu"></div>
 <div id="entryModal" class="modal-overlay"><div class="modal"><h2 id="entryModalTitle">Punch</h2><div class="form-grid"><div><label>Clock In Date</label><input type="date" id="entryInDate"></div><div><label>Clock In Time</label><input type="time" id="entryInTime" step="60"></div><div><label>Clock Out Date</label><input type="date" id="entryOutDate"></div><div><label>Clock Out Time</label><input type="time" id="entryOutTime" step="60"></div><div class="full"><label>Reason</label><textarea id="entryReason" maxlength="500"></textarea></div></div><div class="modal-actions"><button class="btn" data-close="entryModal">Cancel</button><button id="entrySubmitBtn" class="btn btn-primary">Save</button></div></div></div>
 <div id="leaveModal" class="modal-overlay"><div class="modal"><h2>Add Leave</h2><div class="form-grid"><div><label>Date</label><input type="date" id="leaveDate"></div><div><label>Leave Type</label><select id="leaveType"><option value="vacation">Vacation</option><option value="sick">Sick</option><option value="holiday">Holiday</option><option value="floating_holiday">Floating Holiday</option><option value="bereavement">Bereavement</option><option value="jury_duty">Jury Duty</option><option value="administrative">Administrative</option><option value="other">Other</option></select></div><div><label>Hours</label><input type="number" id="leaveHours" min=".25" max="24" step=".25" value="8"></div><div class="full"><label>Note (optional)</label><textarea id="leaveNote" maxlength="1000"></textarea></div></div><div class="modal-actions"><button class="btn" data-close="leaveModal">Cancel</button><button id="leaveSubmitBtn" class="btn btn-primary">Submit Leave</button></div></div></div>
-<script src="/safe-html.js?v=20260827-1"></script>
-<script src="/timecard-base.js?v=20260827-1"></script>
-<script src="/timecard-actions.js?v=20260827-1"></script>
+<script src="/safe-html.js?v=20260828-1"></script>
+<script src="/timecard-base.js?v=20260828-1"></script>
+<script src="/timecard-actions.js?v=20260828-1"></script>
+<script src="/timecard-single-punch.js?v=20260828-1"></script>
 </body>
 </html>
