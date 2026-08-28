@@ -21,4 +21,13 @@ assert.strictEqual(userHasPermission({permissions:['view_own_time']},'view_own_t
 assert.strictEqual(userHasPermission({permissions:['access']},'view_own_time'),true);
 assert.strictEqual(userHasPermission({permissions:['app_admin']},'anything'),true);
 assert.strictEqual(userHasAnyPermission({permissions:['clock_in_out']},['edit_payroll_time','clock_in_out']),true);
+
+// Self-approval flags may enter the corresponding approval route, but they
+// remain separate from each other and do not change the user's legacy role.
+assert.strictEqual(userHasPermission({permissions:['approve_own_punch_corrections']},'approve_punch_correction'),true);
+assert.strictEqual(userHasPermission({permissions:['approve_own_punch_corrections']},'approve_timecard'),false);
+assert.strictEqual(userHasPermission({permissions:['approve_own_timecard']},'approve_timecard'),true);
+assert.strictEqual(userHasPermission({permissions:['approve_own_timecard']},'approve_punch_correction'),false);
+assert.strictEqual(deriveLegacyRole(['approve_own_punch_corrections']),'employee');
+assert.strictEqual(deriveLegacyRole(['approve_own_timecard']),'employee');
 console.log('permissions tests: PASS');
