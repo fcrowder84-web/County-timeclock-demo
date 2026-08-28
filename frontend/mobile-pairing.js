@@ -18,7 +18,7 @@
       <div id="mobilePairingCode" style="font-size:42px;font-weight:800;letter-spacing:.14em;margin:22px 0 8px;font-variant-numeric:tabular-nums">------</div>
       <div id="mobilePairingExpiry" style="color:#667085;margin-bottom:18px">Generating code…</div>
       <p style="font-size:14px;color:#667085">The code works once and expires after 5 minutes. Generating another code cancels this one.</p>
-      <button type="button" id="mobilePairingClose" class="btn">Close</button>
+      <button type="button" id="mobilePairingClose" style="border:0;border-radius:9px;padding:10px 16px;font-weight:700;cursor:pointer">Close</button>
     </div>`;
     document.body.appendChild(overlay);
     overlay.querySelector('#mobilePairingClose').addEventListener('click',()=>overlay.style.display='none');
@@ -48,14 +48,14 @@
   }
 
   function installDesktopGenerator(){
-    const actions=document.querySelector('.top-actions');
+    const actions=document.querySelector('.top-actions')||document.querySelector('#signedIn .actions');
     if(!actions||!getToken()||document.getElementById('mobilePairingGenerateBtn'))return;
     const button=document.createElement('button');
     button.type='button';
     button.id='mobilePairingGenerateBtn';
-    button.className='btn';
+    button.className=actions.classList.contains('top-actions')?'btn':'secondary';
     button.textContent='Phone Login Code';
-    button.title='Generate a one-time code to sign this employee into Mobile Quick Punch';
+    button.title='Generate a one-time code to sign your phone into Mobile Quick Punch';
     button.addEventListener('click',generateDesktopCode);
     const printButton=[...actions.querySelectorAll('button')].find(item=>item.textContent.trim()==='Print');
     actions.insertBefore(button,printButton||actions.firstChild);
