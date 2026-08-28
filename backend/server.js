@@ -221,9 +221,18 @@ async function ensureOwnDepartmentAssignment(employeeId, departmentId, permissio
 }
 
 async function canAccessEmployee(user, employeeId, actionPermissions = []) {
-  if (Number(user.id) === Number(employeeId)) return true;
-
   const permissions = userPermissionSet(user);
+  const isSelf = Number(user.id) === Number(employeeId);
+  if (isSelf) {
+    if (actionPermissions.includes("approve_punch_correction")) {
+      return permissions.has("approve_own_punch_corrections");
+    }
+    if (actionPermissions.includes("approve_timecard")) {
+      return permissions.has("approve_own_timecard");
+    }
+    return true;
+  }
+
   if (permissions.has("view_all_timeclock_records")) return true;
   if (permissions.has("app_admin")) {
     if (user.app_admin_scope === "all") return true;
@@ -242,6 +251,11 @@ async function canAccessEmployee(user, employeeId, actionPermissions = []) {
     "return_timecard",
     "return_to_supervisor",
   ];
+
+  // Self-only approval flags may satisfy route middleware, but they never
+  // authorize acting on another employee, even for a department head.
+  if (requested.includes("approve_punch_correction") && !permissions.has("approve_punch_correction")) return false;
+  if (requested.includes("approve_timecard") && !permissions.has("approve_timecard")) return false;
 
   const targetDepartment = await pool.query(
     `SELECT department_id FROM employees WHERE id=$1 LIMIT 1`,
