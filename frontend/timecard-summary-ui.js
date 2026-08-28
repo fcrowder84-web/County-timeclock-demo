@@ -54,11 +54,11 @@
     // chronological punch-placement endpoint. All older correction requests
     // retain their original approval path.
     global.addEventListener('load', () => {
-        if (typeof global.approveRequest !== 'function' || !document.getElementById('requestsBox')) return;
+        if (typeof global.approveRequest !== 'function' || typeof global.apiFetch !== 'function' || !document.getElementById('requestsBox')) return;
         const originalApproveRequest = global.approveRequest;
         global.approveRequest = async function approveRequestWithSinglePunch(requestId) {
             try {
-                const listResponse = await global.apiFetch(`${global.apiBase}/supervisor/change-requests`);
+                const listResponse = await global.apiFetch('/api/supervisor/change-requests');
                 const requests = await listResponse.json();
                 const request = (requests || []).find(item => Number(item.id) === Number(requestId));
                 const singlePunch = request
@@ -67,7 +67,7 @@
                 if (!singlePunch) return originalApproveRequest(requestId);
 
                 const note = global.prompt('Supervisor note (optional):') || '';
-                const response = await global.apiFetch(`${global.apiBase}/supervisor/approve-single-punch`, {
+                const response = await global.apiFetch('/api/supervisor/approve-single-punch', {
                     method: 'POST',
                     body: JSON.stringify({ request_id: Number(requestId), supervisor_note: note }),
                 });
