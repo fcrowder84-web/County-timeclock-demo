@@ -47,4 +47,36 @@
     }
 
     global.TimecardSummaryUi = { render };
+
+    // The legacy supervisor dashboard posts every request to the full
+    // change-request approval endpoint. A new single Add Punch request has
+    // only one requested timestamp, so route just that request to the
+    // chronological punch-placement endpoint. All older correction requests
+    // retain their original approval path.
+    global.addEventListener('load', () => {
+        if (typeof global.approveRequest !== 'function' || !document.getElementById('requestsBox')) return;
+        const originalApproveRequest = global.approveRequest;
+        global.approveRequest = async function approveRequestWithSinglePunch(requestId) {
+            try {
+                const listResponse = await global.apiFetch(`${global.apiBase}/supervisor/change-requests`);
+                const requests = await listResponse.json();
+                const request = (requests || []).find(item => Number(item.id) === Number(requestId));
+                const singlePunch = request
+                    && request.time_entry_id == null
+                    && Boolean(request.requested_clock_in) !== Boolean(request.requested_clock_out);
+                if (!singlePunch) return originalApproveRequest(requestId);
+
+                const note = global.prompt('Supervisor note (optional):') || '';
+                const response = await global.apiFetch(`${global.apiBase}/supervisor/approve-single-punch`, {
+                    method: 'POST',
+                    body: JSON.stringify({ request_id: Number(requestId), supervisor_note: note }),
+                });
+                const data = await response.json();
+                global.showMessage(data.message || data.error, !!data.error);
+                global.loadDashboard();
+            } catch (err) {
+                if (err?.message !== 'Login required') global.showMessage(err?.message || 'Unable to approve punch request', true);
+            }
+        };
+    });
 })(window);
