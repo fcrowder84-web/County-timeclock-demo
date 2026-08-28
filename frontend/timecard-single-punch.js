@@ -20,6 +20,8 @@
   }
   function allRequests(){return currentData?.change_requests||currentData?.requests||[]}
   function isSinglePunchRequest(r){return r&&r.status==="pending"&&!r.time_entry_id&&Boolean(r.requested_clock_in)!==Boolean(r.requested_clock_out)}
+  function canApproveOwnPunch(){return selectedIsSelf()&&currentPermissions.has("approve_own_punch_corrections")}
+  function canApproveOwnTimecard(){return selectedIsSelf()&&currentPermissions.has("approve_own_timecard")}
   function actualPunchTimes(){
     const times=[];
     (currentData?.entries||[]).forEach(e=>{if(e.clock_in)times.push(e.clock_in);if(e.clock_out)times.push(e.clock_out)});
@@ -88,8 +90,8 @@
       const events=requestedEventsForRequest(r).map(e=>punchTimeLabel(e.ts));
       const day=punchDate(r.requested_clock_in||r.requested_clock_out||r.created_at);
       const text=isSinglePunchRequest(r)
-        ? `Punch request: ${localDateLabel(day)}${events.length?` — ${events[0]}`:""} — waiting for supervisor approval`
-        : `Punch change request: ${localDateLabel(day)}${events.length?` — ${events.join(" / ")}`:""} — waiting for supervisor approval`;
+        ? `Punch request: ${localDateLabel(day)}${events.length?` — ${events[0]}`:""} — waiting for approval`
+        : `Punch change request: ${localDateLabel(day)}${events.length?` — ${events.join(" / ")}`:""} — waiting for approval`;
       return{type:"change",id:r.id,text};
     });
     return [...leave,...changes];
@@ -100,7 +102,9 @@
     panel.classList.toggle("show",items.length>0);document.getElementById("pendingLegend").textContent=items.length?`${items.length} pending item${items.length===1?"":"s"}`:"";
     list.innerHTML=items.map(i=>{
       let actions="";
-      if(currentMode==="supervisor"){
+      if(i.type==="change"&&canApproveOwnPunch()){
+        actions=`<span><button class="btn pending-change-review" data-id="${Number(i.id)}" data-status="approved">Approve My Punch</button></span>`;
+      }else if(currentMode==="supervisor"){
         if(i.type==="leave"&&hasAny(["approve_timecard","edit_employee_time","edit_payroll_time","app_admin"]))actions=`<span><button class="btn pending-leave-review" data-id="${Number(i.id)}" data-status="approved">Approve</button><button class="btn pending-leave-review" data-id="${Number(i.id)}" data-status="denied">Deny</button></span>`;
         else if(i.type==="change"&&has("approve_punch_correction"))actions=`<span><button class="btn pending-change-review" data-id="${Number(i.id)}" data-status="approved">Approve</button><button class="btn pending-change-review" data-id="${Number(i.id)}" data-status="denied">Deny</button></span>`;
       }
@@ -113,12 +117,32 @@
   const originalReviewChange=reviewChange;
   reviewChange=async function(id,status){
     const request=allRequests().find(r=>Number(r.id)===Number(id));
-    if(status!=="approved"||!isSinglePunchRequest(request))return originalReviewChange(id,status);
-    const note=prompt("Supervisor note for approval (optional):")||"";
+    if(status!=="approved")return originalReviewChange(id,status);
+    const selfApproval=canApproveOwnPunch();
+    if(!selfApproval&&!isSinglePunchRequest(request))return originalReviewChange(id,status);
+    const note=prompt(selfApproval?"Note for your approval (optional):":"Supervisor note for approval (optional):")||"";
     try{
-      const data=await jsonOrError(await apiFetch(`${apiBase}/supervisor/approve-single-punch`,{method:"POST",body:JSON.stringify({request_id:Number(id),supervisor_note:note})}));
-      showMessage(data.message||"Punch request approved");await loadTimecard();
+      if(isSinglePunchRequest(request)){
+        const data=await jsonOrError(await apiFetch(`${apiBase}/supervisor/approve-single-punch`,{method:"POST",body:JSON.stringify({request_id:Number(id),supervisor_note:note})}));
+        showMessage(data.message||"Punch request approved");
+      }else{
+        const data=await jsonOrError(await apiFetch(`${apiBase}/supervisor/approve-change-request`,{method:"POST",body:JSON.stringify({request_id:Number(id),supervisor_note:note})}));
+        showMessage(data.message||"Punch change approved");
+      }
+      await loadTimecard();
     }catch(err){showMessage(err.message,"error")}
+  };
+
+  const originalRenderSignatures=renderSignatures;
+  renderSignatures=function(){
+    originalRenderSignatures();
+    const a=currentData?.approval;
+    if(canApproveOwnTimecard()&&a?.status==="employee_submitted"&&!a?.supervisor_approved_at){
+      const supBtn=document.getElementById("supervisorSignBtn");
+      supBtn.classList.remove("hidden");
+      supBtn.textContent="Approve My Timecard";
+      supBtn.title="This self-approval is enabled by your TimeClock access permission.";
+    }
   };
 
   function fieldBox(id){return document.getElementById(id)?.closest("div")}
