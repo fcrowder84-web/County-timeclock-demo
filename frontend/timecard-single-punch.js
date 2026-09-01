@@ -153,7 +153,28 @@
     setFieldLabel("entryInDate","Clock In Date");setFieldLabel("entryInTime","Clock In Time");setFieldLabel("entryOutDate","Clock Out Date");setFieldLabel("entryOutTime","Clock Out Time");
   }
   const originalOpenEntryModal=openEntryModal;
-  openEntryModal=function(mode,entry){restoreEntryFields();return originalOpenEntryModal(mode,entry)};
+  openEntryModal=function(mode,entry){
+    restoreEntryFields();
+    const result=originalOpenEntryModal(mode,entry);
+    if(mode!=="request")return result;
+
+    const kind=entry?.clickedKind==="out"?"out":"in";
+    const isOut=kind==="out";
+    document.getElementById("entryModalTitle").textContent=isOut?"Request Clock Out Change":"Request Clock In Change";
+
+    if(isOut){
+      setFieldLabel("entryOutDate","Clock Out Date");
+      setFieldLabel("entryOutTime","Requested Clock Out Time");
+      fieldBox("entryInDate")?.classList.add("hidden");
+      fieldBox("entryInTime")?.classList.add("hidden");
+    }else{
+      setFieldLabel("entryInDate","Clock In Date");
+      setFieldLabel("entryInTime","Requested Clock In Time");
+      fieldBox("entryOutDate")?.classList.add("hidden");
+      fieldBox("entryOutTime")?.classList.add("hidden");
+    }
+    return result;
+  };
 
   openAddEntry=function(day){
     restoreEntryFields();
