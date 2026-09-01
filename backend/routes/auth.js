@@ -131,7 +131,7 @@ function createAuthRouter({
       });
     }catch(err){
       console.error('Generate mobile pairing code error',err);
-      return res.status(500).json({error:'Unable to generate mobile login code'});
+      return res.status(500).json({error:'Unable to generate phone login code'});
     }
   });
 
@@ -187,8 +187,10 @@ function createAuthRouter({
       const token=sessionStore.create(synced.user.id,permissions,{app_admin_scope:synced.appAdminScope,auth_source:'portal'});
       const user=await getUserById(synced.user.id);
       delete user.pin;
-      await audit(user.id,'portal_sso_login','employee',user.id,{portal_user_id:payload.sub,permission_count:permissions.length});
-      return res.json({message:'Employee Portal login successful',token,user,permissions,app_admin_scope:synced.appAdminScope,auth_source:'portal'});
+      const trustDevice=req.body?.trust_device===true;
+      const deviceCredential=trustDevice?issueTrustedDeviceCredential(user.id):null;
+      await audit(user.id,'portal_sso_login','employee',user.id,{portal_user_id:payload.sub,permission_count:permissions.length,trusted_device:trustDevice});
+      return res.json({message:'Employee Portal login successful',token,device_credential:deviceCredential,user,permissions,app_admin_scope:synced.appAdminScope,auth_source:'portal'});
     }catch(err){
       console.error('Portal login error',err);
       const status=err.name==='TokenExpiredError'||/token|signature|issuer|audience|algorithm/i.test(err.message)?401:500;
