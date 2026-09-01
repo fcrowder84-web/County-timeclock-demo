@@ -18,7 +18,13 @@ function createSessionStore({ttlMs}){
     if(session.expires_at<=now){destroy(token);return null;}
     return session;
   }
-  return {create,get,getActive,destroy,size:()=>sessions.size};
+  function touch(token,now=Date.now()){
+    const session=getActive(token,now);
+    if(!session) return null;
+    session.expires_at=now+ttlMs;
+    return session;
+  }
+  return {create,get,getActive,touch,destroy,size:()=>sessions.size};
 }
 
 function getBearerToken(req){
