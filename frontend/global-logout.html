@@ -5,6 +5,7 @@
   const token=localStorage.getItem('timeclock_token');
   try{if(token)await fetch('/api/logout',{method:'POST',headers:{Authorization:`Bearer ${token}`}})}catch(_){}
   localStorage.removeItem('timeclock_token');
+  localStorage.removeItem('timeclock_device_credential');
   sessionStorage.clear();
   window.location.replace('https://employee.edgefieldcountysc.org/logout');
 })();
