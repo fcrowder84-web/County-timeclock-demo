@@ -35,10 +35,7 @@ const pool = new Pool({
   database: process.env.PGDATABASE || "county_timeclock",
   password: process.env.PGPASSWORD,
   port: Number(process.env.PGPORT || 5432),
-});
-
-pool.on("connect", async (client) => {
-  await client.query("SET TIME ZONE 'America/New_York'");
+  options: "-c timezone=America/New_York",
 });
 
 const SESSION_TTL_MS = Number(process.env.SESSION_TTL_HOURS || 8) * 60 * 60 * 1000;
