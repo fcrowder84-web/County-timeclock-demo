@@ -85,6 +85,22 @@ function createSupervisorRouter({
                  AND pending_leave.status='pending'
              ),0)::int AS pending_leave_count,
              COALESCE((
+               SELECT json_agg(
+                 json_build_object(
+                   'id', pending_leave.id,
+                   'leave_date', pending_leave.leave_date,
+                   'leave_type', pending_leave.leave_type,
+                   'hours', ROUND(pending_leave.quarter_hours / 4.0, 2),
+                   'note', pending_leave.note
+                 )
+                 ORDER BY pending_leave.leave_date, pending_leave.id
+               )
+               FROM leave_entries pending_leave
+               WHERE pending_leave.employee_id=e.id
+                 AND pending_leave.leave_date BETWEEN $1::date AND $2::date
+                 AND pending_leave.status='pending'
+             ), '[]'::json) AS pending_leave_entries,
+             COALESCE((
                SELECT COUNT(*)
                FROM time_change_requests pending_change
                LEFT JOIN time_entries change_entry ON change_entry.id=pending_change.time_entry_id
