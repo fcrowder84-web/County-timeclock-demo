@@ -231,9 +231,9 @@ function createLeaveRouter({ requireUser, pool, audit, canAccessEmployee, getReq
         const totals = await client.query(
           `SELECT
              COALESCE(
-               FLOOR(SUM(EXTRACT(EPOCH FROM (COALESCE(clock_out,NOW()) - clock_in)) / 900)
+               FLOOR(SUM(EXTRACT(EPOCH FROM (COALESCE(clock_out,NOW()) - clock_in)) / 900))
                + CASE
-                   WHEN MOD(ROUND(SUM(EXTRACT(EPOCH FROM (COALESCE(clock_out,NOW()) - clock_in)) / 60)::int, 15) > 5
+                   WHEN MOD(ROUND(SUM(EXTRACT(EPOCH FROM (COALESCE(clock_out,NOW()) - clock_in)) / 60))::int, 15) > 5
                    THEN 1 ELSE 0
                  END,
                0
