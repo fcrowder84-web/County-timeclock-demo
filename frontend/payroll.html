@@ -386,21 +386,11 @@
         }
 
         async function openEmployeeTimecard(employeeId) {
-            if (!employeeId) {
-                closePayrollTimecard();
-                return;
-            }
-
-            selectedEmployeeId = String(employeeId);
-            const selector = document.getElementById("payrollEmployeeSelect");
-            if (selector) selector.value = selectedEmployeeId;
-
-            const url = new URL(window.location.href);
-            url.searchParams.set("employeeId", selectedEmployeeId);
-            if (selectedPeriodStart) url.searchParams.set("periodStart", selectedPeriodStart);
-            window.history.replaceState({}, "", url);
-
-            await viewPayrollTimecard(selectedEmployeeId);
+            if (!employeeId) return;
+            const params = new URLSearchParams();
+            params.set("employeeId", employeeId);
+            if (selectedPeriodStart) params.set("periodStart", selectedPeriodStart);
+            window.location.href = `/timecard.html?${params.toString()}`;
         }
 
         function renderEmployeeSelector(rows) {
