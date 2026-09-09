@@ -729,7 +729,10 @@
 
                         <td>
                             ${Number(row.pending_leave_count || 0) > 0
-                                ? `<span class="leave-badge">${row.pending_leave_count} pending</span>`
+                                ? `<span class="leave-badge">${row.pending_leave_count} pending</span>
+                                   <button class="btn-primary" style="margin-left:8px" onclick="viewTimecard(${row.id})">
+                                       Review Leave
+                                   </button>`
                                 : "-"}
                         </td>
 
@@ -1209,7 +1212,7 @@
                     const leaveType = String(entry.leave_type || "")
                         .replaceAll("_", " ")
                         .replace(/\b\w/g, letter => letter.toUpperCase());
-                    const reviewingOwnLeave = Number(data.employee_id) === Number(currentUser?.id);
+                    const reviewingOwnLeave = Number(data.employee?.id) === Number(currentUser?.id);
                     const canReviewLeave = hasAnyPermission([
                         "view_assigned_employees", "view_department_time",
                         "edit_employee_time", "approve_timecard",
