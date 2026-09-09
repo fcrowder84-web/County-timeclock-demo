@@ -729,10 +729,24 @@
 
                         <td>
                             ${Number(row.pending_leave_count || 0) > 0
-                                ? `<span class="leave-badge">${row.pending_leave_count} pending</span>
-                                   <button class="btn-primary" style="margin-left:8px" onclick="viewTimecard(${row.id})">
-                                       Review Leave
-                                   </button>`
+                                ? (row.pending_leave_entries || []).map(entry => {
+                                    const leaveType = String(entry.leave_type || "")
+                                        .replaceAll("_", " ")
+                                        .replace(/\b\w/g, letter => letter.toUpperCase());
+                                    const reviewingOwnLeave = Number(row.id) === Number(currentUser?.id);
+                                    const canReviewLeave = hasAnyPermission([
+                                        "view_assigned_employees", "view_department_time",
+                                        "edit_employee_time", "approve_timecard",
+                                        "edit_payroll_time", "view_all_timeclock_records", "app_admin"
+                                    ]) || (reviewingOwnLeave && hasAnyPermission(["approve_own_timecard"]));
+                                    return `<div class="leave-row" style="margin-bottom:6px">
+                                        <span class="leave-badge">${leaveType} · ${Number(entry.hours || 0).toFixed(2)}h</span>
+                                        ${canReviewLeave
+                                            ? `<button class="btn-approve" style="margin-left:6px" onclick="reviewLeave(${entry.id}, 'approved')">Approve</button>
+                                               <button class="btn-return" onclick="reviewLeave(${entry.id}, 'denied')">Deny</button>`
+                                            : ""}
+                                    </div>`;
+                                }).join("")
                                 : "-"}
                         </td>
 
