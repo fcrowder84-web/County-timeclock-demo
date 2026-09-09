@@ -477,6 +477,13 @@
             }
         }
 
+        function openUnifiedTimecard(employeeId) {
+            const params = new URLSearchParams();
+            params.set("employeeId", employeeId);
+            if (selectedPeriodStart) params.set("periodStart", selectedPeriodStart);
+            window.location.href = `/timecard.html?${params.toString()}`;
+        }
+
         function addTimeForEmployee(employeeId) {
             const params = new URLSearchParams();
             params.set("employeeId", employeeId);
@@ -757,7 +764,7 @@
                         <td>
 
                             ${hasAnyPermission(["view_assigned_employees", "view_department_time", "view_payroll_records", "review_approved_timecards", "view_all_timeclock_records"]) ? `
-                            <button class="btn-primary" onclick="viewTimecard(${row.id})">
+                            <button class="btn-primary" onclick="openUnifiedTimecard(${row.id})">
                                 View Timecard
                             </button>` : ""}
 
