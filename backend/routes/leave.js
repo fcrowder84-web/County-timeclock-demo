@@ -342,12 +342,15 @@ function createLeaveRouter({ requireUser, pool, audit, canAccessEmployee, getReq
 
   router.post('/leave/:id/review', requireUser, async (req, res) => {
     try {
-      if (!isSupervisor(req.user)) {
+      const existing = await pool.query('SELECT * FROM leave_entries WHERE id=$1', [req.params.id]);
+      if (!existing.rows.length) return res.status(404).json({ error: 'Leave entry not found' });
+
+      const reviewingOwnLeave = Number(existing.rows[0].employee_id) === Number(req.user.id);
+      const canReviewOwnLeave = reviewingOwnLeave && userHasAnyPermission(req.user, ['approve_own_timecard']);
+      if (!isSupervisor(req.user) && !canReviewOwnLeave) {
         return res.status(403).json({ error: 'Supervisor access required' });
       }
 
-      const existing = await pool.query('SELECT * FROM leave_entries WHERE id=$1', [req.params.id]);
-      if (!existing.rows.length) return res.status(404).json({ error: 'Leave entry not found' });
       await assertAccess(req.user, existing.rows[0].employee_id);
 
       const status = String(req.body.status || '').toLowerCase();
