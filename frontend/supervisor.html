@@ -1209,11 +1209,12 @@
                     const leaveType = String(entry.leave_type || "")
                         .replaceAll("_", " ")
                         .replace(/\b\w/g, letter => letter.toUpperCase());
+                    const reviewingOwnLeave = Number(data.employee_id) === Number(currentUser?.id);
                     const canReviewLeave = hasAnyPermission([
                         "view_assigned_employees", "view_department_time",
                         "edit_employee_time", "approve_timecard",
                         "edit_payroll_time", "view_all_timeclock_records", "app_admin"
-                    ]);
+                    ]) || (reviewingOwnLeave && hasAnyPermission(["approve_own_timecard"]));
                     html += `
                         <tr class="leave-row">
                             <td>${entry.leave_date_display}</td>
