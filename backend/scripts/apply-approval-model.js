@@ -34,38 +34,47 @@ const a=`             $3::text IN ('admin','payroll')
                SELECT employee_id
                FROM supervisor_employee_assignments
                WHERE supervisor_employee_id=$4 AND active=TRUE
-             )`;
-const b=`             (COALESCE($4::boolean,FALSE)=TRUE)
-             OR e.id IN (
-               SELECT employee_id
-               FROM supervisor_employee_assignments
-               WHERE supervisor_employee_id=$3 AND active=TRUE
              )
              OR e.department_id IN (
                SELECT department_id
                FROM department_heads
-               WHERE employee_id=$3 AND active=TRUE
+               WHERE employee_id=$4 AND active=TRUE
+             )`;
+const b=`             (COALESCE($3::boolean,FALSE)=TRUE)
+             OR e.id IN (
+               SELECT employee_id
+               FROM supervisor_employee_assignments
+               WHERE supervisor_employee_id=$4 AND active=TRUE
+             )
+             OR e.department_id IN (
+               SELECT department_id
+               FROM department_heads
+               WHERE employee_id=$4 AND active=TRUE
              )`;
 if(!o.includes(a))throw new Error('status scope not found');
 o=o.replace(a,b);
-o=o.replace(`[period.pay_period_start, period.pay_period_end, req.user.role, req.user.id],`,`[period.pay_period_start, period.pay_period_end, req.user.id, userHasPermission(req.user, 'app_admin')],`);
+o=o.replace(`[period.pay_period_start, period.pay_period_end, req.user.role, req.user.id],`,`[period.pay_period_start, period.pay_period_end, userHasPermission(req.user, 'app_admin'), req.user.id],`);
 const c=`               $1::text IN ('admin','payroll')
                OR e.id IN (
                  SELECT employee_id FROM supervisor_employee_assignments
                  WHERE supervisor_employee_id=$2 AND active=TRUE
-               )`;
-const d=`               (COALESCE($2::boolean,FALSE)=TRUE)
-               OR e.id IN (
-                 SELECT employee_id FROM supervisor_employee_assignments
-                 WHERE supervisor_employee_id=$1 AND active=TRUE
                )
                OR e.department_id IN (
                  SELECT department_id FROM department_heads
-                 WHERE employee_id=$1 AND active=TRUE
+                 WHERE employee_id=$2 AND active=TRUE
+               )`;
+const d=`               (COALESCE($1::boolean,FALSE)=TRUE)
+               OR e.id IN (
+                 SELECT employee_id FROM supervisor_employee_assignments
+                 WHERE supervisor_employee_id=$2 AND active=TRUE
+               )
+               OR e.department_id IN (
+                 SELECT department_id FROM department_heads
+                 WHERE employee_id=$2 AND active=TRUE
                )`;
 if(!o.includes(c))throw new Error('request scope not found');
 o=o.replace(c,d);
-o=o.replace(`[req.user.role, req.user.id],`,`[req.user.id, userHasPermission(req.user, 'app_admin')],`);
+o=o.replace(`[req.user.role, req.user.id],`,`[userHasPermission(req.user, 'app_admin'), req.user.id],`);
 return o;});
 patch('routes/leave.js',s=>{const a=`      const reviewingOwnLeave = Number(existing.rows[0].employee_id) === Number(req.user.id);
       const canReviewOwnLeave = reviewingOwnLeave && userHasAnyPermission(req.user, ['approve_own_timecard']);
