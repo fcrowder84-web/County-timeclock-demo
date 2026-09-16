@@ -1,0 +1,14 @@
+{
+  "trusted_networks": [
+    {
+      "name": "EOC",
+      "ip": "64.139.245.9",
+      "enabled": true
+    },
+    {
+      "name": "County server",
+      "ip": "24.112.25.174",
+      "enabled": true
+    }
+  ]
+}

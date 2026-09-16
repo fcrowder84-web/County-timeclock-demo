@@ -760,11 +760,12 @@
                 html += `
                     <tr class="${dayClass} ${startClass}">
                         <td>${entry.entry_date}</td>
-                        <td>${entry.clock_in_display}</td>
+                        <td>${entry.pending_clock_in_display ? `<span style="color:#c0392b;font-weight:bold;" title="Awaiting supervisor approval">A${entry.pending_clock_in_display}</span>` : entry.clock_in_display}</td>
                         <td>
     ${
-                    entry.clock_out_display
-                    || '<span style="color:red;font-weight:bold;">MISSED CLOCK OUT</span>'
+                    entry.pending_clock_out_display
+                    ? `<span style="color:#c0392b;font-weight:bold;" title="Awaiting supervisor approval">A${entry.pending_clock_out_display}</span>`
+                    : (entry.clock_out_display || '<span style="color:red;font-weight:bold;">MISSED CLOCK OUT</span>')
     }
 </td>
                         <td>${formatExactDuration(entry.hours_worked)}</td>

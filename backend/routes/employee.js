@@ -164,13 +164,17 @@ function createEmployeeRouter({ requireUser, requireAnyPermission, pool, audit, 
            id,
            clock_in,
            clock_out,
+           pending_clock_in,
+           pending_clock_out,
            to_char(clock_in, 'YYYY-MM-DD') AS entry_date_iso,
            to_char(clock_in, 'MM/DD/YYYY') AS entry_date,
            to_char(clock_in, 'HH12:MI AM') AS clock_in_display,
            to_char(clock_in, 'HH24:MI') AS clock_in_24,
            CASE WHEN clock_out IS NULL THEN NULL ELSE to_char(clock_out, 'HH12:MI AM') END AS clock_out_display,
            CASE WHEN clock_out IS NULL THEN NULL ELSE to_char(clock_out, 'HH24:MI') END AS clock_out_24,
-           ROUND((EXTRACT(EPOCH FROM (COALESCE(clock_out, NOW()) - clock_in)) / 3600)::numeric, 2) AS hours_worked
+           CASE WHEN pending_clock_in IS NULL THEN NULL ELSE to_char(pending_clock_in, 'HH12:MI AM') END AS pending_clock_in_display,
+           CASE WHEN pending_clock_out IS NULL THEN NULL ELSE to_char(pending_clock_out, 'HH12:MI AM') END AS pending_clock_out_display,
+           ROUND((EXTRACT(EPOCH FROM (COALESCE(clock_out, pending_clock_out, NOW()) - COALESCE(clock_in, pending_clock_in))) / 3600)::numeric, 2) AS hours_worked
          FROM time_entries
         WHERE employee_id=$1
           AND deleted_at IS NULL
@@ -366,13 +370,41 @@ function createEmployeeRouter({ requireUser, requireAnyPermission, pool, audit, 
         );
         if (duplicate.rows.length) return res.status(409).json({ error: 'That punch request is already pending' });
 
-        const inserted = await pool.query(
-          `INSERT INTO time_change_requests(
-             employee_id,time_entry_id,requested_clock_in,requested_clock_out,employee_reason,status
-           ) VALUES($1,$2,$3,$4,$5,'pending')
-           RETURNING id`,
-          [req.user.id, entryId, requestedClockIn, requestedClockOut, reason],
-        );
+        const client = await pool.connect();
+        let inserted;
+        try {
+          await client.query('BEGIN');
+          inserted = await client.query(
+            `INSERT INTO time_change_requests(
+               employee_id,time_entry_id,requested_clock_in,requested_clock_out,employee_reason,status
+             ) VALUES($1,$2,$3,$4,$5,'pending')
+             RETURNING id`,
+            [req.user.id, entryId, requestedClockIn, requestedClockOut, reason],
+          );
+
+          if (entry && entry.clock_out == null && requestedClockOut) {
+            await client.query(
+              `UPDATE time_entries
+                  SET pending_clock_out=$1::timestamp
+                WHERE id=$2 AND employee_id=$3 AND deleted_at IS NULL AND clock_out IS NULL`,
+              [requestedClockOut, entry.id, req.user.id],
+            );
+          }
+          if (entry && entry.clock_in == null && requestedClockIn) {
+            await client.query(
+              `UPDATE time_entries
+                  SET pending_clock_in=$1::timestamp
+                WHERE id=$2 AND employee_id=$3 AND deleted_at IS NULL AND clock_in IS NULL`,
+              [requestedClockIn, entry.id, req.user.id],
+            );
+          }
+          await client.query('COMMIT');
+        } catch (err) {
+          await client.query('ROLLBACK').catch(() => {});
+          throw err;
+        } finally {
+          client.release();
+        }
         await audit(req.user.id, hasEntryId ? 'request_time_change' : 'request_missing_time', 'time_change_request', inserted.rows[0].id, {
           time_entry_id: entryId,
           requested_clock_in: requestedClockIn,

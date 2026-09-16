@@ -150,6 +150,7 @@ function createQuickPunchRouter({ requireUser, requireAnyPermission, pool, audit
             WHERE employee_id=$1
               AND deleted_at IS NULL
               AND clock_out IS NULL
+              AND pending_clock_out IS NULL
             ORDER BY clock_in DESC
             LIMIT 1`,
           [req.user.id],
@@ -423,14 +424,17 @@ function createQuickPunchRouter({ requireUser, requireAnyPermission, pool, audit
         `SELECT id,clock_in,
                 (clock_in::date < CURRENT_DATE OR clock_in <= NOW() - INTERVAL '23 hours') AS requires_correction
            FROM time_entries
-          WHERE employee_id=$1 AND deleted_at IS NULL AND clock_out IS NULL
+          WHERE employee_id=$1
+            AND deleted_at IS NULL
+            AND clock_out IS NULL
+            AND pending_clock_out IS NULL
           ORDER BY clock_in DESC LIMIT 1`,
         [req.user.id],
       );
       if (openEntry.rows.length) {
         if (openEntry.rows[0].requires_correction) {
           return res.status(409).json({
-            error: 'Your previous open punch must be corrected and approved before you can punch again.',
+            error: 'Your previous open punch must have a correction request submitted before you can punch again.',
             code: 'STALE_OPEN_PUNCH',time_entry_id: openEntry.rows[0].id,clock_in: openEntry.rows[0].clock_in,
           });
         }
@@ -467,7 +471,10 @@ function createQuickPunchRouter({ requireUser, requireAnyPermission, pool, audit
         `SELECT id,clock_in,
                 (clock_in::date < CURRENT_DATE OR clock_in <= NOW() - INTERVAL '23 hours') AS requires_correction
            FROM time_entries
-          WHERE employee_id=$1 AND deleted_at IS NULL AND clock_out IS NULL
+          WHERE employee_id=$1
+            AND deleted_at IS NULL
+            AND clock_out IS NULL
+            AND pending_clock_out IS NULL
           ORDER BY clock_in DESC LIMIT 1`,
         [req.user.id],
       );
@@ -475,7 +482,7 @@ function createQuickPunchRouter({ requireUser, requireAnyPermission, pool, audit
       const openEntry = openResult.rows[0];
       if (openEntry.requires_correction) {
         return res.status(409).json({
-          error: 'Your previous open punch must be corrected and approved before you can punch again.',
+          error: 'Your previous open punch must have a correction request submitted before you can punch again.',
           code: 'STALE_OPEN_PUNCH',time_entry_id: openEntry.id,clock_in: openEntry.clock_in,
         });
       }

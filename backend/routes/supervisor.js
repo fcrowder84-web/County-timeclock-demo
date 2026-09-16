@@ -304,6 +304,8 @@ function createSupervisorRouter({
             `UPDATE time_entries
                 SET clock_in=$1,
                     clock_out=$2,
+                    pending_clock_in=NULL,
+                    pending_clock_out=NULL,
                     status=CASE WHEN $2::timestamp IS NULL THEN 'open' ELSE 'closed' END
               WHERE id=$3
                 AND deleted_at IS NULL
@@ -498,7 +500,7 @@ function createSupervisorRouter({
           ),
           pool.query(
             `SELECT
-               id,clock_in,clock_out,
+               id,clock_in,clock_out,pending_clock_in,pending_clock_out,
                to_char(clock_in,'YYYY-MM-DD') AS entry_date_iso,
                to_char(clock_in,'MM/DD/YYYY') AS entry_date,
                to_char(clock_in,'HH12:MI AM') AS clock_in_time,
@@ -506,7 +508,9 @@ function createSupervisorRouter({
                CASE WHEN clock_out IS NULL THEN NULL ELSE to_char(clock_out,'HH12:MI AM') END AS clock_out_time,
                CASE WHEN clock_out IS NULL THEN NULL ELSE to_char(clock_out,'HH24:MI') END AS clock_out_time_24,
                CASE WHEN clock_out IS NULL THEN NULL ELSE to_char(clock_out,'YYYY-MM-DD') END AS clock_out_date_iso,
-               ROUND((EXTRACT(EPOCH FROM (COALESCE(clock_out,NOW())-clock_in))/3600)::numeric,2) AS hours_worked
+               CASE WHEN pending_clock_in IS NULL THEN NULL ELSE to_char(pending_clock_in,'HH12:MI AM') END AS pending_clock_in_time,
+               CASE WHEN pending_clock_out IS NULL THEN NULL ELSE to_char(pending_clock_out,'HH12:MI AM') END AS pending_clock_out_time,
+               ROUND((EXTRACT(EPOCH FROM (COALESCE(clock_out,pending_clock_out,NOW())-COALESCE(clock_in,pending_clock_in)))/3600)::numeric,2) AS hours_worked
              FROM time_entries
              WHERE employee_id=$1
                AND deleted_at IS NULL
