@@ -48,35 +48,88 @@
 
     global.TimecardSummaryUi = { render };
 
-    // The legacy supervisor dashboard posts every request to the full
-    // change-request approval endpoint. A new single Add Punch request has
-    // only one requested timestamp, so route just that request to the
-    // chronological punch-placement endpoint. All older correction requests
-    // retain their original approval path.
-    global.addEventListener('load', () => {
-        if (typeof global.approveRequest !== 'function' || typeof global.apiFetch !== 'function' || !document.getElementById('requestsBox')) return;
-        const originalApproveRequest = global.approveRequest;
-        global.approveRequest = async function approveRequestWithSinglePunch(requestId) {
-            try {
-                const listResponse = await global.apiFetch('/api/supervisor/change-requests');
-                const requests = await listResponse.json();
-                const request = (requests || []).find(item => Number(item.id) === Number(requestId));
-                const singlePunch = request
-                    && request.time_entry_id == null
-                    && Boolean(request.requested_clock_in) !== Boolean(request.requested_clock_out);
-                if (!singlePunch) return originalApproveRequest(requestId);
+    function requestDescription(request) {
+        const singlePunch = request.time_entry_id == null
+            && Boolean(request.requested_clock_in) !== Boolean(request.requested_clock_out);
+        if (singlePunch) {
+            const value = request.requested_clock_in_display || request.requested_clock_out_display || 'Requested punch';
+            return `<strong>Requested Punch:</strong><br>${value}`;
+        }
+        const parts = [];
+        if (request.requested_clock_in_display) parts.push(`<strong>Requested Clock In:</strong><br>${request.requested_clock_in_display}`);
+        if (request.requested_clock_out_display) parts.push(`<strong>Requested Clock Out:</strong><br>${request.requested_clock_out_display}`);
+        return parts.length ? parts.join('<br><br>') : '<strong>Punch correction requested</strong>';
+    }
 
-                const note = global.prompt('Supervisor note (optional):') || '';
-                const response = await global.apiFetch('/api/supervisor/approve-single-punch', {
-                    method: 'POST',
-                    body: JSON.stringify({ request_id: Number(requestId), supervisor_note: note }),
-                });
-                const data = await response.json();
-                global.showMessage(data.message || data.error, !!data.error);
-                global.loadDashboard();
-            } catch (err) {
-                if (err?.message !== 'Login required') global.showMessage(err?.message || 'Unable to approve punch request', true);
-            }
-        };
+    global.addEventListener('load', () => {
+        const requestsBox = document.getElementById('requestsBox');
+        const summaryBox = document.getElementById('summaryBox');
+        if (!requestsBox) return;
+
+        // Put actionable requests ahead of the employee timecards so a supervisor
+        // sees them without scrolling through the roster first.
+        if (summaryBox && requestsBox.parentNode === summaryBox.parentNode) {
+            summaryBox.parentNode.insertBefore(requestsBox, summaryBox);
+        }
+
+        if (typeof global.apiFetch === 'function') {
+            global.loadRequests = async function loadRequestsUpdated() {
+                const response = await global.apiFetch('/api/supervisor/change-requests');
+                const requests = await response.json();
+                let html = `<div class="card"><h2>Pending Change Requests</h2>`;
+                if (!requests.length) {
+                    html += '<p>No pending requests.</p>';
+                } else {
+                    html += `<table><thead><tr><th>Employee</th><th>Department</th><th>Requested Change</th><th>Reason</th><th>Actions</th></tr></thead><tbody>`;
+                    requests.forEach(request => {
+                        html += `<tr>
+                            <td>${request.first_name} ${request.last_name}</td>
+                            <td>${request.department || '-'}</td>
+                            <td>${requestDescription(request)}</td>
+                            <td>${request.employee_reason || '-'}</td>
+                            <td>
+                                <button class="btn-approve" onclick="approveRequest(${request.id})">Approve</button>
+                                <button class="btn-return" onclick="denyRequest(${request.id})">Deny</button>
+                            </td>
+                        </tr>`;
+                    });
+                    html += '</tbody></table>';
+                }
+                html += '</div>';
+                requestsBox.innerHTML = html;
+            };
+        }
+
+        // Single Add Punch requests use chronological punch placement rather than
+        // the legacy paired clock-in/clock-out change endpoint.
+        if (typeof global.approveRequest === 'function' && typeof global.apiFetch === 'function') {
+            const originalApproveRequest = global.approveRequest;
+            global.approveRequest = async function approveRequestWithSinglePunch(requestId) {
+                try {
+                    const listResponse = await global.apiFetch('/api/supervisor/change-requests');
+                    const requests = await listResponse.json();
+                    const request = (requests || []).find(item => Number(item.id) === Number(requestId));
+                    const singlePunch = request
+                        && request.time_entry_id == null
+                        && Boolean(request.requested_clock_in) !== Boolean(request.requested_clock_out);
+                    if (!singlePunch) return originalApproveRequest(requestId);
+
+                    const note = global.prompt('Supervisor note (optional):') || '';
+                    const response = await global.apiFetch('/api/supervisor/approve-single-punch', {
+                        method: 'POST',
+                        body: JSON.stringify({ request_id: Number(requestId), supervisor_note: note }),
+                    });
+                    const data = await response.json();
+                    global.showMessage(data.message || data.error, !!data.error);
+                    global.loadDashboard();
+                } catch (err) {
+                    if (err?.message !== 'Login required') global.showMessage(err?.message || 'Unable to approve punch request', true);
+                }
+            };
+        }
+
+        // loadDashboard may already have started before this compatibility layer
+        // was installed, so refresh just the request section with the new layout.
+        if (typeof global.loadRequests === 'function') global.loadRequests().catch(() => {});
     });
 })(window);
