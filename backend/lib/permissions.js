@@ -11,19 +11,17 @@ const EMPLOYEE_PERMISSIONS = [
 
 const SUPERVISOR_PERMISSIONS = [
   'view_assigned_employees',
-  'view_department_time',
   'view_live_status',
   'add_employee_entry',
   'edit_employee_time',
   'approve_punch_correction',
   'approve_timecard',
   'return_timecard',
-  'view_timeclock_audit',
-  'manage_employee_timeclock_settings',
-  'manage_supervisor_assignments',
 ];
 
-const DEPARTMENT_HEAD_SELF_PERMISSIONS = [
+const DEPARTMENT_HEAD_PERMISSIONS = [
+  ...SUPERVISOR_PERMISSIONS,
+  'view_department_time',
   'approve_own_punch_corrections',
   'approve_own_timecard',
 ];
@@ -46,13 +44,7 @@ const PAYROLL_PERMISSIONS = [
 const PERMISSION_GROUPS = Object.freeze({
   employee: Object.freeze([...EMPLOYEE_PERMISSIONS]),
   supervisor: Object.freeze([...SUPERVISOR_PERMISSIONS]),
-  // A department head has normal supervisor authority across the department,
-  // plus the two self-approval permissions. Department-head scope itself is
-  // still determined by the department_heads table, not by these permissions.
-  department_head: Object.freeze([
-    ...SUPERVISOR_PERMISSIONS,
-    ...DEPARTMENT_HEAD_SELF_PERMISSIONS,
-  ]),
+  department_head: Object.freeze([...DEPARTMENT_HEAD_PERMISSIONS]),
   payroll: Object.freeze([...PAYROLL_PERMISSIONS]),
   admin: Object.freeze(['app_admin']),
 });
@@ -63,31 +55,22 @@ function unique(values) {
 
 function legacyPermissionsForRole(role) {
   const normalized = String(role || 'employee').toLowerCase();
-  const permissions = [...PERMISSION_GROUPS.employee];
-
-  if (['supervisor', 'department_head', 'payroll', 'admin'].includes(normalized)) {
-    permissions.push(...PERMISSION_GROUPS.supervisor);
-  }
-  if (normalized === 'department_head') {
-    permissions.push(...DEPARTMENT_HEAD_SELF_PERMISSIONS);
-  }
-  if (['payroll', 'admin'].includes(normalized)) permissions.push(...PERMISSION_GROUPS.payroll);
-  if (normalized === 'admin') permissions.push(...PERMISSION_GROUPS.admin);
+  const permissions = [...EMPLOYEE_PERMISSIONS];
+  if (normalized === 'supervisor') permissions.push(...SUPERVISOR_PERMISSIONS);
+  if (normalized === 'department_head') permissions.push(...DEPARTMENT_HEAD_PERMISSIONS);
+  if (normalized === 'payroll') permissions.push(...PAYROLL_PERMISSIONS);
+  if (normalized === 'admin') permissions.push('app_admin');
   return unique(permissions);
 }
 
 function deriveLegacyRole(permissions) {
   const set = new Set(permissions || []);
-  if (set.has('app_admin')) return 'admin';
   if (['view_payroll_records','review_approved_timecards','edit_payroll_time','return_to_supervisor','reopen_timecard','finalize_timecard','finalize_pay_period','export_payroll','view_payroll_reports'].some(key => set.has(key))) return 'payroll';
-
-  // Department Head is intentionally identified by supervisor authority plus
-  // self-approval. This keeps Application Admin separate from the operational
-  // TimeClock hierarchy.
-  const hasSupervisorAuthority = ['view_assigned_employees','view_department_time','view_live_status','add_employee_entry','edit_employee_time','approve_punch_correction','approve_timecard','return_timecard'].some(key => set.has(key));
-  const hasDepartmentHeadSelfApproval = set.has('approve_own_punch_corrections') || set.has('approve_own_timecard');
-  if (hasSupervisorAuthority && hasDepartmentHeadSelfApproval) return 'department_head';
+  const hasSupervisorAuthority = SUPERVISOR_PERMISSIONS.some(key => set.has(key));
+  const hasDepartmentHeadAuthority = set.has('view_department_time') || set.has('approve_own_punch_corrections') || set.has('approve_own_timecard');
+  if (hasSupervisorAuthority && hasDepartmentHeadAuthority) return 'supervisor'; // DB role remains legacy; department_heads supplies structural role.
   if (hasSupervisorAuthority) return 'supervisor';
+  if (set.has('app_admin')) return 'admin';
   return 'employee';
 }
 
@@ -97,9 +80,7 @@ function userPermissionSet(user) {
 
 function userHasPermission(user, permissionKey) {
   const permissions = userPermissionSet(user);
-  if (permissions.has('app_admin') || permissions.has(permissionKey)) return true;
-  // Anyone granted TimeClock access must be able to view their own card.
-  // This is self-service only; it does not grant supervisor/payroll authority.
+  if (permissions.has(permissionKey)) return true;
   if (permissionKey === 'view_own_time' && permissions.has('access')) return true;
   return false;
 }
