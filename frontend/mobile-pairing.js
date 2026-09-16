@@ -68,9 +68,6 @@
     const actions=document.querySelector('.top-actions')||document.querySelector('#signedIn .actions');
     if(!actions||!getToken()||document.getElementById('pendingRequestAlertBtn'))return;
     try{
-      // This endpoint already applies the real approval scope: the user must have
-      // punch-approval permission and only requests for employees they may review
-      // are returned. A 403 therefore means no supervisor alert should be shown.
       const response=await fetch(`${apiBase}/supervisor/change-requests`,{headers:authHeaders()});
       if(!response.ok)return;
       const requests=await response.json().catch(()=>[]);
@@ -80,7 +77,7 @@
       button.textContent=`Pending Requests (${requests.length})`;
       button.title='Punch change requests waiting for your approval';
       button.style.background='#d97706';button.style.color='#fff';
-      button.addEventListener('click',()=>{window.location.href='/supervisor.html#pending-requests'});
+      button.addEventListener('click',()=>{window.location.href='/supervisor.html#requestsBox'});
       const phoneButton=document.getElementById('mobilePairingGenerateBtn');
       actions.insertBefore(button,phoneButton||actions.firstChild);
     }catch(_){}
