@@ -543,8 +543,7 @@ function createSupervisorRouter({
 
         const approval = approvalResult.rows[0] || null;
         const payrollCanEdit =
-          userHasPermission(req.user, 'edit_payroll_time') ||
-          req.user.role === 'payroll' || req.user.role === 'admin';
+          userHasPermission(req.user, 'edit_payroll_time');
         const supervisorCanEdit =
           userHasPermission(req.user, 'edit_employee_time') &&
           Boolean(approval?.employee_signed_at) &&
@@ -692,8 +691,7 @@ function createSupervisorRouter({
 
         const canReturnFromPayroll =
           userHasPermission(req.user, 'return_to_supervisor') ||
-          userHasPermission(req.user, 'edit_payroll_time') ||
-          req.user.role === 'payroll' || req.user.role === 'admin';
+          userHasPermission(req.user, 'edit_payroll_time');
         if (targetStage === 'supervisor' && !canReturnFromPayroll) {
           return res.status(403).json({ error: 'Only payroll can return a timecard to supervisor review' });
         }
@@ -804,8 +802,7 @@ function createSupervisorRouter({
         }
 
         const payrollOverride =
-          userHasPermission(req.user, 'edit_payroll_time') ||
-          req.user.role === 'payroll' || req.user.role === 'admin';
+          userHasPermission(req.user, 'edit_payroll_time');
         const approvalResult = await client.query(
           `SELECT * FROM pay_period_approvals
             WHERE employee_id=$1

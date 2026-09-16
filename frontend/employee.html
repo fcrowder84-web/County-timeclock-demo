@@ -382,8 +382,10 @@
     </div>
 
     <script src="/timecard-summary-ui.js"></script>
+    <script src="/safe-html.js"></script>
     <script>
         const apiBase = "/api";
+        const esc = SafeHtml.escape;
 
         let currentUser = null;
         let currentEntryId = null;
@@ -541,10 +543,10 @@
         function renderUserInfo() {
             document.getElementById("userInfo").innerHTML = `
                 Logged in as:
-                <strong>${currentUser.first_name} ${currentUser.last_name}</strong>
+                <strong>${esc(currentUser.first_name)} ${esc(currentUser.last_name)}</strong>
                 <br>
                 Department:
-                ${currentUser.department_name || currentUser.department || "-"}
+                ${esc(currentUser.department_name || currentUser.department || "-")}
             `;
         }
 
@@ -831,10 +833,10 @@
                     html += `
                         <tr class="leave-row">
                             <td>${entry.leave_date_display}</td>
-                            <td><span class="leave-badge">Leave · ${leaveType}</span></td>
+                            <td><span class="leave-badge">Leave · ${esc(leaveType)}</span></td>
                             <td>${Number(entry.hours || 0).toFixed(2)}</td>
-                            <td><span class="status-pill ${statusClass}">${entry.status}</span></td>
-                            <td>${entry.note || "-"}</td>
+                            <td><span class="status-pill ${statusClass}">${esc(entry.status)}</span></td>
+                            <td>${esc(entry.note || "-")}</td>
                         </tr>
                     `;
                 });
@@ -883,11 +885,11 @@
                             <td>${request.created_at_display}</td>
                             <td>
                                 <span class="status-pill ${statusClass}">
-                                    ${request.status}
+                                    ${esc(request.status)}
                                 </span>
                             </td>
-                            <td>${request.employee_reason}</td>
-                            <td>${request.supervisor_note || "-"}</td>
+                            <td>${esc(request.employee_reason)}</td>
+                            <td>${esc(request.supervisor_note || "-")}</td>
                         </tr>
                     `;
                 });
