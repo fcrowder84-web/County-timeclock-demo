@@ -7,43 +7,46 @@ function permissionSet(user) {
 }
 
 async function canReviewEmployee(pool, user, employeeId) {
-  const role = String(user?.role || '').toLowerCase();
   const permissions = permissionSet(user);
-  if (Number(user?.id) === Number(employeeId)) {
-    return permissions.has('approve_own_punch_corrections')
-      || permissions.has('approve_punch_correction')
-      || permissions.has('app_admin')
-      || role === 'payroll'
-      || role === 'admin';
-  }
-  if (permissions.has('app_admin') || permissions.has('view_all_timeclock_records') || role === 'payroll' || role === 'admin') {
-    return true;
-  }
-  if (!permissions.has('approve_punch_correction')) return false;
-
-  const result = await pool.query(
-    `SELECT 1
-       FROM employees target
-      WHERE target.id=$1
-        AND (
-          target.department_id=$2
-          OR EXISTS (
-            SELECT 1 FROM supervisor_employee_assignments sea
-             WHERE sea.employee_id=target.id
-               AND sea.supervisor_employee_id=$3
-               AND sea.active=TRUE
-          )
-          OR EXISTS (
-            SELECT 1 FROM department_heads dh
-             WHERE dh.department_id=target.department_id
-               AND dh.employee_id=$3
-               AND dh.active=TRUE
-          )
-        )
-      LIMIT 1`,
-    [employeeId, user.department_id, user.id],
+  const targetResult = await pool.query(
+    `SELECT department_id FROM employees WHERE id=$1 LIMIT 1`,
+    [employeeId],
   );
-  return result.rows.length > 0;
+  if (!targetResult.rows.length) return false;
+  const targetDepartmentId = targetResult.rows[0].department_id;
+
+  const departmentHeadResult = await pool.query(
+    `SELECT 1 FROM department_heads
+      WHERE employee_id=$1 AND department_id=$2 AND active=TRUE
+      LIMIT 1`,
+    [user.id, targetDepartmentId],
+  );
+  const isTargetDepartmentHead = departmentHeadResult.rows.length > 0;
+  const isSelf = Number(user?.id) === Number(employeeId);
+
+  // Department heads are the only operational role allowed to approve their
+  // own punch corrections. The structural department_heads assignment is the
+  // authority; Application Admin is deliberately not an approval role.
+  if (isSelf) {
+    return isTargetDepartmentHead && permissions.has('approve_own_punch_corrections');
+  }
+
+  // Department heads have backup approval authority for everyone in their
+  // department, including employees assigned to subordinate supervisors.
+  if (isTargetDepartmentHead) {
+    return permissions.has('approve_punch_correction');
+  }
+
+  // Ordinary supervisors may approve only employees explicitly assigned to
+  // them. Same-department membership alone is not sufficient.
+  if (!permissions.has('approve_punch_correction')) return false;
+  const assignment = await pool.query(
+    `SELECT 1 FROM supervisor_employee_assignments
+      WHERE employee_id=$1 AND supervisor_employee_id=$2 AND active=TRUE
+      LIMIT 1`,
+    [employeeId, user.id],
+  );
+  return assignment.rows.length > 0;
 }
 
 function punchTimestamp(request) {
@@ -90,13 +93,6 @@ function createApproveSinglePunchHandler({ pool, audit }) {
       }
 
       const punchAt = punchTimestamp(request);
-
-      // A historical day can have two independent pending punches (for example
-      // 8:00 AM and 4:30 PM) while the employee is currently clocked in today.
-      // Inserting the first one by itself would temporarily create a second open
-      // row and trip the database's one-open-punch safeguard. If the historical
-      // day is empty and has a matching pending punch, approve the pair as one
-      // closed entry atomically. The safeguard remains intact for real conflicts.
       const existingDay = await client.query(
         `SELECT id FROM time_entries
           WHERE employee_id=$1 AND deleted_at IS NULL
