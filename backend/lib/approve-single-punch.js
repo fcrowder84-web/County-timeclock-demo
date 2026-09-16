@@ -28,15 +28,13 @@ async function canReviewEmployee(pool, user, employeeId) {
         AND (
           target.department_id=$2
           OR EXISTS (
-            SELECT 1
-              FROM supervisor_employee_assignments sea
+            SELECT 1 FROM supervisor_employee_assignments sea
              WHERE sea.employee_id=target.id
                AND sea.supervisor_employee_id=$3
                AND sea.active=TRUE
           )
           OR EXISTS (
-            SELECT 1
-              FROM department_heads dh
+            SELECT 1 FROM department_heads dh
              WHERE dh.department_id=target.department_id
                AND dh.employee_id=$3
                AND dh.active=TRUE
@@ -46,6 +44,10 @@ async function canReviewEmployee(pool, user, employeeId) {
     [employeeId, user.department_id, user.id],
   );
   return result.rows.length > 0;
+}
+
+function punchTimestamp(request) {
+  return request.requested_clock_in || request.requested_clock_out || null;
 }
 
 function createApproveSinglePunchHandler({ pool, audit }) {
@@ -58,30 +60,21 @@ function createApproveSinglePunchHandler({ pool, audit }) {
 
     const preview = await pool.query(
       `SELECT employee_id,time_entry_id,requested_clock_in,requested_clock_out,status
-         FROM time_change_requests
-        WHERE id=$1`,
+         FROM time_change_requests WHERE id=$1`,
       [requestId],
     );
     if (!preview.rows.length) return res.status(404).json({ error: 'Request not found' });
     const target = preview.rows[0];
     const isSinglePunch = target.time_entry_id == null
       && Boolean(target.requested_clock_in) !== Boolean(target.requested_clock_out);
-    if (!isSinglePunch) {
-      return res.status(409).json({
-        error: 'This is not a single-punch request',
-        code: 'NOT_SINGLE_PUNCH',
-      });
-    }
+    if (!isSinglePunch) return res.status(409).json({ error: 'This is not a single-punch request', code: 'NOT_SINGLE_PUNCH' });
     if (target.status !== 'pending') return res.status(409).json({ error: 'This punch request has already been reviewed' });
     if (!(await canReviewEmployee(pool, req.user, target.employee_id))) return res.status(403).json({ error: 'Access denied' });
 
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
-      const lockedResult = await client.query(
-        `SELECT * FROM time_change_requests WHERE id=$1 FOR UPDATE`,
-        [requestId],
-      );
+      const lockedResult = await client.query(`SELECT * FROM time_change_requests WHERE id=$1 FOR UPDATE`, [requestId]);
       const request = lockedResult.rows[0] || null;
       if (!request) {
         await client.query('ROLLBACK');
@@ -96,7 +89,97 @@ function createApproveSinglePunchHandler({ pool, audit }) {
         return res.status(409).json({ error: 'This is not a single-punch request', code: 'NOT_SINGLE_PUNCH' });
       }
 
-      const punchAt = request.requested_clock_in || request.requested_clock_out;
+      const punchAt = punchTimestamp(request);
+
+      // A historical day can have two independent pending punches (for example
+      // 8:00 AM and 4:30 PM) while the employee is currently clocked in today.
+      // Inserting the first one by itself would temporarily create a second open
+      // row and trip the database's one-open-punch safeguard. If the historical
+      // day is empty and has a matching pending punch, approve the pair as one
+      // closed entry atomically. The safeguard remains intact for real conflicts.
+      const existingDay = await client.query(
+        `SELECT id FROM time_entries
+          WHERE employee_id=$1 AND deleted_at IS NULL
+            AND clock_in::date=$2::timestamp::date
+          LIMIT 1 FOR UPDATE`,
+        [request.employee_id, punchAt],
+      );
+
+      if (!existingDay.rows.length) {
+        const companionResult = await client.query(
+          `SELECT *
+             FROM time_change_requests
+            WHERE employee_id=$1
+              AND id<>$2
+              AND status='pending'
+              AND time_entry_id IS NULL
+              AND (requested_clock_in IS NULL) <> (requested_clock_out IS NULL)
+              AND COALESCE(requested_clock_in,requested_clock_out)::date=$3::timestamp::date
+            ORDER BY ABS(EXTRACT(EPOCH FROM (COALESCE(requested_clock_in,requested_clock_out)-$3::timestamp)))
+            LIMIT 1
+            FOR UPDATE`,
+          [request.employee_id, requestId, punchAt],
+        );
+        const companion = companionResult.rows[0] || null;
+        if (companion) {
+          const companionAt = punchTimestamp(companion);
+          const firstAt = new Date(punchAt) <= new Date(companionAt) ? punchAt : companionAt;
+          const secondAt = new Date(punchAt) <= new Date(companionAt) ? companionAt : punchAt;
+          if (new Date(secondAt) <= new Date(firstAt)) {
+            await client.query('ROLLBACK');
+            return res.status(400).json({ error: 'The requested punches are not in a valid order' });
+          }
+
+          const inserted = await client.query(
+            `INSERT INTO time_entries(employee_id,clock_in,clock_out,notes,status)
+             VALUES($1,$2,$3,$4,'closed') RETURNING *`,
+            [request.employee_id, firstAt, secondAt, `Created from approved punch requests #${request.id} and #${companion.id}`],
+          );
+          await client.query(
+            `INSERT INTO time_entry_audit(
+               time_entry_id,changed_by_employee_id,old_clock_in,old_clock_out,new_clock_in,new_clock_out,reason
+             ) VALUES($1,$2,NULL,NULL,$3,$4,$5)`,
+            [inserted.rows[0].id, req.user.id, firstAt, secondAt, `${request.employee_reason || ''}${companion.employee_reason ? ` | ${companion.employee_reason}` : ''}`],
+          );
+
+          const invalidated = await client.query(
+            `UPDATE pay_period_approvals
+                SET supervisor_approved_at=NULL,supervisor_employee_id=NULL,
+                    payroll_finalized_at=NULL,payroll_finalized_by=NULL,
+                    status=CASE WHEN employee_signed_at IS NULL THEN 'open' ELSE 'employee_submitted' END
+              WHERE employee_id=$1
+                AND $2::timestamp >= pay_period_start
+                AND $2::timestamp < (pay_period_end + INTERVAL '1 day')
+              RETURNING id`,
+            [request.employee_id, firstAt],
+          );
+
+          const reviewed = await client.query(
+            `UPDATE time_change_requests
+                SET status='approved',supervisor_id=$1,supervisor_note=$2,reviewed_at=NOW()
+              WHERE id=ANY($3::int[]) AND status='pending'
+              RETURNING id`,
+            [req.user.id, supervisorNote, [request.id, companion.id]],
+          );
+          if (reviewed.rows.length !== 2) throw new Error('Punch requests changed while they were being approved');
+
+          await client.query('COMMIT');
+          await audit(req.user.id, 'approve_paired_single_punch_requests', 'time_entry', inserted.rows[0].id, {
+            employee_id: request.employee_id,
+            request_ids: [request.id, companion.id],
+            clock_in: firstAt,
+            clock_out: secondAt,
+            self_approved: Number(req.user.id) === Number(request.employee_id),
+            invalidated_approval_ids: invalidated.rows.map((row) => row.id),
+          });
+          return res.json({
+            message: 'Both pending punches for this work period were approved',
+            paired_request_ids: [request.id, companion.id],
+            entry: inserted.rows[0],
+          });
+        }
+      }
+
       const placed = await insertPunchIntoSequence({
         client,
         employeeId: request.employee_id,
@@ -108,10 +191,8 @@ function createApproveSinglePunchHandler({ pool, audit }) {
 
       const invalidated = await client.query(
         `UPDATE pay_period_approvals
-            SET supervisor_approved_at=NULL,
-                supervisor_employee_id=NULL,
-                payroll_finalized_at=NULL,
-                payroll_finalized_by=NULL,
+            SET supervisor_approved_at=NULL,supervisor_employee_id=NULL,
+                payroll_finalized_at=NULL,payroll_finalized_by=NULL,
                 status=CASE WHEN employee_signed_at IS NULL THEN 'open' ELSE 'employee_submitted' END
           WHERE employee_id=$1
             AND $2::timestamp >= pay_period_start
@@ -123,8 +204,7 @@ function createApproveSinglePunchHandler({ pool, audit }) {
       const reviewed = await client.query(
         `UPDATE time_change_requests
             SET status='approved',supervisor_id=$1,supervisor_note=$2,reviewed_at=NOW()
-          WHERE id=$3 AND status='pending'
-          RETURNING id`,
+          WHERE id=$3 AND status='pending' RETURNING id`,
         [req.user.id, supervisorNote, requestId],
       );
       if (!reviewed.rows.length) throw new Error('Punch request changed while it was being approved');
