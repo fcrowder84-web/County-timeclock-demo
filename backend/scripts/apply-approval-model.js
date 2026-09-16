@@ -55,7 +55,13 @@ patch('routes/supervisor.js',s=>{let o=s;const a=`             $3::text IN ('adm
                OR e.department_id IN (
                  SELECT department_id FROM department_heads
                  WHERE employee_id=$2 AND active=TRUE
-               )`;if(!o.includes(c))throw new Error('request scope not found');o=o.replace(c,d);o=o.replace(`[req.user.role, req.user.id],`,`[req.user.role, req.user.id, userHasPermission(req.user, 'app_admin')],`);return o;});
+               )`;if(!o.includes(c))throw new Error('request scope not found');o=o.replace(c,d);o=o.replace(`[req.user.role, req.user.id],`,`[req.user.role, req.user.id, userHasPermission(req.user, 'app_admin')],`);
+// The original role parameters are no longer referenced after the scope rewrite. PostgreSQL cannot infer a type for an unused bound parameter, so remove them and renumber the remaining placeholders.
+o=o.replace(/\$4\b/g,'$3').replace(/\$5::boolean/g,'$4::boolean');
+o=o.replace(`[period.pay_period_start, period.pay_period_end, req.user.role, req.user.id, userHasPermission(req.user, 'app_admin')],`,`[period.pay_period_start, period.pay_period_end, req.user.id, userHasPermission(req.user, 'app_admin')],`);
+o=o.replace(/\$2\b/g,'$1').replace(/\$3::boolean/g,'$2::boolean');
+o=o.replace(`[req.user.role, req.user.id, userHasPermission(req.user, 'app_admin')],`,`[req.user.id, userHasPermission(req.user, 'app_admin')],`);
+return o;});
 patch('routes/leave.js',s=>{const a=`      const reviewingOwnLeave = Number(existing.rows[0].employee_id) === Number(req.user.id);
       const canReviewOwnLeave = reviewingOwnLeave && userHasAnyPermission(req.user, ['approve_own_timecard']);
       if (!isSupervisor(req.user) && !canReviewOwnLeave) {
