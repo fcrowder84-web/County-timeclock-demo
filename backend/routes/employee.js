@@ -1,6 +1,7 @@
 'use strict';
 
 const express = require('express');
+const { canEditPunch, hasPayrollOverride } = require('../lib/punch-edit-authority');
 const { summarizeTimecard } = require('../lib/timecard-summary');
 const { insertPunchIntoSequence } = require('../lib/punch-sequence');
 const { createApproveSinglePunchHandler } = require('../lib/approve-single-punch');
@@ -17,43 +18,11 @@ function permissionSet(user) {
 
 function hasPermission(user, key) {
   const permissions = permissionSet(user);
-  return permissions.has('app_admin') || permissions.has(key);
+  return permissions.has(key);
 }
 
 async function canDirectEditEmployee(pool, user, employeeId) {
-  if (Number(user?.id) === Number(employeeId)) return false;
-  const role = String(user?.role || '').toLowerCase();
-  const permissions = permissionSet(user);
-  if (permissions.has('app_admin') || permissions.has('edit_payroll_time') || role === 'payroll' || role === 'admin') {
-    return true;
-  }
-  if (!permissions.has('add_employee_entry') && !permissions.has('edit_employee_time')) return false;
-
-  const result = await pool.query(
-    `SELECT 1
-       FROM employees target
-      WHERE target.id=$1
-        AND (
-          target.department_id=$2
-          OR EXISTS (
-            SELECT 1
-              FROM supervisor_employee_assignments sea
-             WHERE sea.employee_id=target.id
-               AND sea.supervisor_employee_id=$3
-               AND sea.active=TRUE
-          )
-          OR EXISTS (
-            SELECT 1
-              FROM department_heads dh
-             WHERE dh.department_id=target.department_id
-               AND dh.employee_id=$3
-               AND dh.active=TRUE
-          )
-        )
-      LIMIT 1`,
-    [employeeId, user.department_id, user.id],
-  );
-  return result.rows.length > 0;
+  return canEditPunch(pool, user, employeeId, 'add');
 }
 
 async function approvalForTimestamp(db, employeeId, timestamp, lock = false) {
@@ -427,7 +396,7 @@ function createEmployeeRouter({ requireUser, requireAnyPermission, pool, audit, 
   router.post(
     '/supervisor/add-time-entry',
     requireUser,
-    requireAnyPermission('add_employee_entry', 'edit_employee_time', 'edit_payroll_time', 'app_admin'),
+    requireAnyPermission('add_employee_entry', 'edit_employee_time', 'edit_payroll_time'),
     async (req, res) => {
       const employeeId = Number(req.body?.employee_id);
       const punchAt = req.body?.punch_at || null;
@@ -440,7 +409,7 @@ function createEmployeeRouter({ requireUser, requireAnyPermission, pool, audit, 
       if (reason.length > 500) return res.status(400).json({ error: 'Reason must be 500 characters or less' });
       if (!(await canDirectEditEmployee(pool, req.user, employeeId))) return res.status(403).json({ error: 'Access denied' });
 
-      const payrollOverride = hasPermission(req.user, 'edit_payroll_time') || ['payroll','admin'].includes(String(req.user.role || '').toLowerCase());
+      const payrollOverride = hasPayrollOverride(req.user);
       const primaryTimestamp = punchAt || legacyClockIn;
       if (!validDate(primaryTimestamp)) return res.status(400).json({ error: 'Valid punch date and time are required' });
 
@@ -449,6 +418,10 @@ function createEmployeeRouter({ requireUser, requireAnyPermission, pool, audit, 
         await client.query('BEGIN');
         const approvalResult = await approvalForTimestamp(client, employeeId, primaryTimestamp, true);
         const approval = approvalResult.rows[0] || null;
+        if (payrollOverride && approval?.payroll_finalized_at && !permissionSet(req.user).has('reopen_timecard')) {
+          await client.query('ROLLBACK');
+          return res.status(403).json({ error: 'Reopen permission is required for a finalized timecard.' });
+        }
         if (!payrollOverride) {
           const supervisorUnlocked = approval?.employee_signed_at && !approval?.supervisor_approved_at && !approval?.payroll_finalized_at && approval?.status === 'employee_submitted';
           if (!supervisorUnlocked) {

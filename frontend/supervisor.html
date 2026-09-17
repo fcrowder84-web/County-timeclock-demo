@@ -345,9 +345,11 @@
     </div>
 
     <script src="/timecard-summary-ui.js"></script>
+    <script src="/safe-html.js"></script>
     <script>
 
         const apiBase = "/api";
+        const esc = SafeHtml.escape;
 
         let currentUser = null;
         let currentPermissions = new Set();
@@ -609,12 +611,12 @@
             document.getElementById("userInfo").innerHTML = `
                 Logged in as:
                 <strong>
-                    ${currentUser.first_name}
-                    ${currentUser.last_name}
+                    ${esc(currentUser.first_name)}
+                    ${esc(currentUser.last_name)}
                 </strong>
                 <br>
                 Department:
-                ${currentUser.department_name || currentUser.department || "-"}
+                ${esc(currentUser.department_name || currentUser.department || "-")}
             `;
         }
 
@@ -720,12 +722,12 @@
                     <tr>
 
                         <td>
-                            ${row.first_name}
-                            ${row.last_name}
+                            ${esc(row.first_name)}
+                            ${esc(row.last_name)}
                         </td>
 
                         <td>
-                            ${row.department || "-"}
+                            ${esc(row.department || "-")}
                         </td>
 
                         <td>
@@ -747,7 +749,7 @@
                                         "edit_payroll_time", "view_all_timeclock_records", "app_admin"
                                     ]) || (reviewingOwnLeave && hasAnyPermission(["approve_own_timecard"]));
                                     return `<div class="leave-row" style="margin-bottom:6px">
-                                        <span class="leave-badge">${leaveType} · ${Number(entry.hours || 0).toFixed(2)}h</span>
+                                        <span class="leave-badge">${esc(leaveType)} · ${Number(entry.hours || 0).toFixed(2)}h</span>
                                         ${canReviewLeave
                                             ? `<button class="btn-approve" style="margin-left:6px" onclick="reviewLeave(${entry.id}, 'approved')">Approve</button>
                                                <button class="btn-return" onclick="reviewLeave(${entry.id}, 'denied')">Deny</button>`
@@ -850,12 +852,12 @@
                         <tr>
 
                             <td>
-                                ${request.first_name}
-                                ${request.last_name}
+                                ${esc(request.first_name)}
+                                ${esc(request.last_name)}
                             </td>
 
                             <td>
-                                ${request.department || "-"}
+                                ${esc(request.department || "-")}
                             </td>
 
                             <td>
@@ -875,7 +877,7 @@
                             </td>
 
                             <td>
-                                ${request.employee_reason}
+                                ${esc(request.employee_reason)}
                             </td>
 
                             <td>
@@ -1090,14 +1092,14 @@
 
             document.getElementById("modalTitle")
                 .innerText =
-                `${data.employee.first_name} ${data.employee.last_name}`;
+                `${esc(data.employee.first_name)} ${esc(data.employee.last_name)}`;
 
             let html = `
                 <div class="summary-row">
 
                     <div class="summary-box">
                         <strong>Department</strong><br>
-                        ${data.employee.department || "-"}
+                        ${esc(data.employee.department || "-")}
                     </div>
 
                     <div class="summary-box">
@@ -1242,10 +1244,10 @@
                     html += `
                         <tr class="leave-row">
                             <td>${entry.leave_date_display}</td>
-                            <td><span class="leave-badge">Leave · ${leaveType}</span></td>
+                            <td><span class="leave-badge">Leave · ${esc(leaveType)}</span></td>
                             <td>${Number(entry.hours || 0).toFixed(2)}</td>
-                            <td>${entry.status}</td>
-                            <td>${entry.note || "-"}</td>
+                            <td>${esc(entry.status)}</td>
+                            <td>${esc(entry.note || "-")}</td>
                             <td>
                                 ${entry.status === "pending" && canReviewLeave
                                     ? `<button class="btn-approve" onclick="reviewLeave(${entry.id}, 'approved')">Approve</button>
@@ -1291,7 +1293,7 @@
                         <tr>
 
                             <td>
-                                ${request.status}
+                                ${esc(request.status)}
                             </td>
 
                             <td>
@@ -1299,11 +1301,11 @@
                             </td>
 
                             <td>
-                                ${request.employee_reason}
+                                ${esc(request.employee_reason)}
                             </td>
 
                             <td>
-                                ${request.supervisor_note || "-"}
+                                ${esc(request.supervisor_note || "-")}
                             </td>
 
                         </tr>
@@ -1455,8 +1457,8 @@
                         <tr>
 
                             <td>
-                                ${item.changed_by_first_name || ""}
-                                ${item.changed_by_last_name || ""}
+                                ${esc(item.changed_by_first_name || "")}
+                                ${esc(item.changed_by_last_name || "")}
                             </td>
 
                             <td>
@@ -1476,7 +1478,7 @@
                             </td>
 
                             <td>
-                                ${item.reason || "-"}
+                                ${esc(item.reason || "-")}
                             </td>
 
                             <td>
@@ -1519,7 +1521,7 @@
             let teamStructureData = null;
 
             function employeeName(person) {
-                return `${person.first_name} ${person.last_name}`;
+                return `${esc(person.first_name)} ${esc(person.last_name)}`;
             }
 
             async function loadTeamStructure() {
@@ -1560,7 +1562,7 @@
 
                     html += `
                     <div class="card">
-                        <h2>${department.name}</h2>
+                        <h2>${esc(department.name)}</h2>
                         <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:16px;align-items:end;margin-bottom:18px;">
                             <div>
                                 <label><strong>Department Head</strong></label>
@@ -1570,7 +1572,7 @@
                                     ${headOptions}
                                 </select>
                                 <button style="margin-top:8px" onclick="saveDepartmentHead(${department.id})">Save Department Head</button>` : `
-                                <div style="margin-top:8px">${department.department_head_first_name ? `${department.department_head_first_name} ${department.department_head_last_name}` : "Not assigned"}</div>`}
+                                <div style="margin-top:8px">${department.department_head_first_name ? `${esc(department.department_head_first_name)} ${esc(department.department_head_last_name)}` : "Not assigned"}</div>`}
                             </div>
                             <div>
                                 <label><strong>Assign employee to supervisor</strong></label>
@@ -1597,7 +1599,7 @@
                             <div style="border:1px solid #d5dbe3;border-radius:10px;padding:14px;">
                                 <h3 style="margin-top:0">Supervisor: ${employeeName(supervisor)}</h3>
                                 ${assignedEmployees.length ? `<ul style="padding-left:18px">${assignedEmployees.map(item => `
-                                    <li style="margin-bottom:8px">${item.employee_first_name} ${item.employee_last_name}
+                                    <li style="margin-bottom:8px">${esc(item.employee_first_name)} ${esc(item.employee_last_name)}
                                     <button style="margin-left:8px;padding:4px 8px" onclick="unassignEmployee(${item.employee_id},${department.id})">Remove</button></li>`).join("")}</ul>` : `<p>No employees assigned.</p>`}
                             </div>`;
                         });

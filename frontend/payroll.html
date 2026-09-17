@@ -331,8 +331,10 @@
     </div>
 
     <script src="/timecard-summary-ui.js"></script>
+    <script src="/safe-html.js"></script>
     <script>
         const apiBase = "/api";
+        const esc = SafeHtml.escape;
 
         let currentUser = null;
         let payrollRows = [];
@@ -402,7 +404,7 @@
                     <p class="muted">Select one employee to view or edit that employee's timecard, then use the pay-period controls to move through history.</p>
                     <select id="payrollEmployeeSelect" onchange="openEmployeeTimecard(this.value)" style="max-width:420px;">
                         <option value="">Select an employee...</option>
-                        ${employees.map(row => `<option value="${row.id}" ${String(row.id) === String(selectedEmployeeId || "") ? "selected" : ""}>${row.last_name}, ${row.first_name} - ${row.department || "Unassigned"}</option>`).join("")}
+                        ${employees.map(row => `<option value="${row.id}" ${String(row.id) === String(selectedEmployeeId || "") ? "selected" : ""}>${esc(row.last_name)}, ${esc(row.first_name)} - ${esc(row.department || "Unassigned")}</option>`).join("")}
                     </select>
                 </div>`;
         }
@@ -518,11 +520,11 @@
         function renderUserInfo() {
             document.getElementById("userInfo").innerHTML = `
                 Logged in as:
-                <strong>${currentUser.first_name} ${currentUser.last_name}</strong>
-                <span class="role-badge">${currentUser.role}</span>
+                <strong>${esc(currentUser.first_name)} ${esc(currentUser.last_name)}</strong>
+                <span class="role-badge">${esc(currentUser.role)}</span>
                 <br>
                 Department:
-                ${currentUser.department_name || currentUser.department || "-"}
+                ${esc(currentUser.department_name || currentUser.department || "-")}
             `;
         }
 
@@ -678,7 +680,7 @@
 
             Object.keys(grouped).sort().forEach(department => {
                 html += `
-                    <h3 class="department-header">${department}</h3>
+                    <h3 class="department-header">${esc(department)}</h3>
 
                     <table>
                         <thead>
@@ -700,11 +702,11 @@
                     html += `
                         <tr>
                             <td>
-                                ${row.first_name} ${row.last_name}
+                                ${esc(row.first_name)} ${esc(row.last_name)}
                             </td>
 
                             <td>
-                                ${row.role || "employee"}
+                                ${esc(row.role || "employee")}
                             </td>
 
                             <td>
@@ -765,13 +767,13 @@
             }
 
             document.getElementById("payrollModalTitle").innerText =
-                `${data.employee.first_name} ${data.employee.last_name} - Payroll Timecard`;
+                `${esc(data.employee.first_name)} ${esc(data.employee.last_name)} - Payroll Timecard`;
 
             let html = `
                 <div class="summary-row">
                     <div class="summary-box">
                         <strong>Department</strong><br>
-                        ${data.employee.department || "-"}
+                        ${esc(data.employee.department || "-")}
                     </div>
                     <div class="summary-box">
                         <strong>Pay Period</strong><br>
@@ -857,10 +859,10 @@
                             <tbody>
                                 ${data.change_requests.map(request => `
                                     <tr>
-                                        <td>${request.status}</td>
+                                        <td>${esc(request.status)}</td>
                                         <td>${request.created_at_display}</td>
-                                        <td>${request.employee_reason}</td>
-                                        <td>${request.supervisor_note || "-"}</td>
+                                        <td>${esc(request.employee_reason)}</td>
+                                        <td>${esc(request.supervisor_note || "-")}</td>
                                     </tr>
                                 `).join("")}
                             </tbody>

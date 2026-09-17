@@ -1,6 +1,7 @@
 'use strict';
 
 const express = require('express');
+const { canEditPunch } = require('../lib/punch-edit-authority');
 const { summarizeTimecard } = require('../lib/timecard-summary');
 
 function parsePositiveInt(value, label) {
@@ -543,8 +544,7 @@ function createSupervisorRouter({
 
         const approval = approvalResult.rows[0] || null;
         const payrollCanEdit =
-          userHasPermission(req.user, 'edit_payroll_time') ||
-          req.user.role === 'payroll' || req.user.role === 'admin';
+          userHasPermission(req.user, 'edit_payroll_time');
         const supervisorCanEdit =
           userHasPermission(req.user, 'edit_employee_time') &&
           Boolean(approval?.employee_signed_at) &&
@@ -692,8 +692,7 @@ function createSupervisorRouter({
 
         const canReturnFromPayroll =
           userHasPermission(req.user, 'return_to_supervisor') ||
-          userHasPermission(req.user, 'edit_payroll_time') ||
-          req.user.role === 'payroll' || req.user.role === 'admin';
+          userHasPermission(req.user, 'edit_payroll_time');
         if (targetStage === 'supervisor' && !canReturnFromPayroll) {
           return res.status(403).json({ error: 'Only payroll can return a timecard to supervisor review' });
         }
@@ -782,15 +781,6 @@ function createSupervisorRouter({
           if (parsedOut <= parsedIn) return res.status(400).json({ error: 'Clock out must be after clock in' });
         }
 
-        const target = await pool.query(
-          `SELECT employee_id FROM time_entries WHERE id=$1 AND deleted_at IS NULL`,
-          [timeEntryId],
-        );
-        if (!target.rows.length) return res.status(404).json({ error: 'Time entry not found' });
-        if (!(await canAccessEmployee(req.user, target.rows[0].employee_id))) {
-          return res.status(403).json({ error: 'Access denied' });
-        }
-
         client = await pool.connect();
         await client.query('BEGIN');
         const existingResult = await client.query(
@@ -803,18 +793,40 @@ function createSupervisorRouter({
           return res.status(404).json({ error: 'Time entry not found' });
         }
 
+        if (!(await canEditPunch(client, req.user, existing.employee_id))) {
+          await client.query('ROLLBACK');
+          return res.status(403).json({ error: 'Access denied' });
+        }
+
         const payrollOverride =
-          userHasPermission(req.user, 'edit_payroll_time') ||
-          req.user.role === 'payroll' || req.user.role === 'admin';
+          userHasPermission(req.user, 'edit_payroll_time');
+        // Lock both source and destination cards before any audit or mutation.
         const approvalResult = await client.query(
-          `SELECT * FROM pay_period_approvals
-            WHERE employee_id=$1
-              AND $2::timestamp >= pay_period_start
-              AND $2::timestamp < (pay_period_end + INTERVAL '1 day')
-            ORDER BY id DESC LIMIT 1 FOR UPDATE`,
-          [existing.employee_id, existing.clock_in],
+          `SELECT *,
+                  ($2::timestamp >= pay_period_start AND $2::timestamp < (pay_period_end + INTERVAL '1 day')) AS source_period,
+                  ($3::timestamp >= pay_period_start AND $3::timestamp < (pay_period_end + INTERVAL '1 day')) AS destination_period
+             FROM pay_period_approvals
+            WHERE employee_id=$1 AND (
+              ($2::timestamp >= pay_period_start AND $2::timestamp < (pay_period_end + INTERVAL '1 day'))
+              OR ($3::timestamp >= pay_period_start AND $3::timestamp < (pay_period_end + INTERVAL '1 day')))
+            ORDER BY id FOR UPDATE`,
+          [existing.employee_id, existing.clock_in, newClockIn],
         );
-        const approval = approvalResult.rows[0] || null;
+        const cards = approvalResult.rows;
+        const approval = cards.find(card => card.source_period) || null;
+        const finalized = cards.filter(card => card.payroll_finalized_at || card.status === 'payroll_finalized');
+        if (finalized.length && (!payrollOverride || !userHasPermission(req.user, 'reopen_timecard'))) {
+          await client.query('ROLLBACK');
+          return res.status(403).json({ error: 'Payroll edit and reopen permissions are required for a finalized timecard.' });
+        }
+        if (payrollOverride && (
+          !approval || !cards.some(card => card.destination_period)
+          || cards.some(card => !card.employee_signed_at || !card.supervisor_approved_at
+            || !['supervisor_approved', 'payroll_finalized'].includes(card.status))
+        )) {
+          await client.query('ROLLBACK');
+          return res.status(409).json({ error: 'Payroll editing requires the authorized supervisory approval on every affected timecard.' });
+        }
 
         if (!payrollOverride) {
           const supervisorUnlocked =
@@ -877,7 +889,7 @@ function createSupervisorRouter({
           payrollOverride ? 'payroll_edit_time_entry' : 'supervisor_edit_time_entry',
           'time_entry',
           timeEntryId,
-          { reason, invalidated_approval_ids: invalidated.rows.map((row) => row.id) },
+          { reason, invalidated_approval_ids: invalidated.rows.map((row) => row.id), reopened_finalized_card_ids: finalized.map(card => card.id) },
         );
         return res.json({ message: 'Time entry updated', entry: result.rows[0] });
       } catch (err) {

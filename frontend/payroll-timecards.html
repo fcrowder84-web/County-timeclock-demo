@@ -196,8 +196,10 @@
 
     <div id="timecardsContainer"></div>
 
+    <script src="/safe-html.js"></script>
     <script>
         const apiBase = "/api";
+        const esc = SafeHtml.escape;
         const selectedPeriodStart = new URLSearchParams(window.location.search).get("periodStart") || null;
         let loadedPeriodStart = selectedPeriodStart;
 
@@ -454,24 +456,24 @@
 
                             <div class="info-box">
                                 <strong>Employee</strong><br>
-                                ${employee.first_name}
-                                ${employee.last_name}
+                                ${esc(employee.first_name)}
+                                ${esc(employee.last_name)}
                             </div>
 
                             <div class="info-box">
                                 <strong>Employee Number</strong><br>
-                                ${employee.employee_number}
+                                ${esc(employee.employee_number)}
                             </div>
 
                             <div class="info-box">
                                 <strong>Department</strong><br>
-                                ${employee.department || "-"}
+                                ${esc(employee.department || "-")}
                             </div>
 
                             <div class="info-box">
                                 <strong>Status</strong><br>
                                 <span class="${getStatusClass(employee.approval_status)}">
-                                    ${employee.approval_status || "pending"}
+                                    ${esc(employee.approval_status || "pending")}
                                 </span>
                             </div>
 

@@ -64,7 +64,7 @@ function compact(sql) { return String(sql).replace(/\s+/g, ' ').trim(); }
   assert.strictEqual(res.body.last_punch_at, '2026-08-20T17:42:09Z');
 
   res = makeRes();
-  await handlerFor(router, 'post', '/delete-punch')({ user: { id: 7, permissions: [] }, body: { time_entry_id: 9, reason: 'Accidental punch' } }, res);
+  await handlerFor(router, 'post', '/delete-punch')({ user: { id: 7, permissions: ['edit_own_pending_entry'] }, body: { time_entry_id: 9, reason: 'Accidental punch' } }, res);
   assert.strictEqual(res.statusCode, 200);
   assert.match(res.body.message, /audit trail/i);
   assert.strictEqual(audits.length, 1);

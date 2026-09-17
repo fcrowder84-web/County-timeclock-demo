@@ -1,6 +1,7 @@
 'use strict';
 
 const express = require('express');
+const { canEditPunch, hasPayrollOverride } = require('../lib/punch-edit-authority');
 const { recordPunchMetadata } = require('../lib/punch-metadata');
 
 function createQuickPunchRouter({ requireUser, requireAnyPermission, pool, audit }) {
@@ -11,14 +12,6 @@ function createQuickPunchRouter({ requireUser, requireAnyPermission, pool, audit
     return new Set(Array.isArray(user?.permissions) ? user.permissions : []);
   }
 
-  function hasPayrollOverride(user) {
-    const permissions = permissionSet(user);
-    return permissions.has('view_all_timeclock_records')
-      || permissions.has('edit_payroll_time')
-      || (permissions.has('app_admin') && user.app_admin_scope === 'all')
-      || user.role === 'payroll'
-      || user.role === 'admin';
-  }
 
   async function currentTimecardLock(employeeId, db = pool) {
     const result = await db.query(
@@ -41,78 +34,14 @@ function createQuickPunchRouter({ requireUser, requireAnyPermission, pool, audit
   }
 
   async function canDeleteEntry(user, entry, db = pool) {
-    if (Number(user.id) === Number(entry.employee_id)) return true;
-
-    const permissions = permissionSet(user);
-    if (permissions.has('view_all_timeclock_records') || permissions.has('edit_payroll_time')) return true;
-    if (permissions.has('app_admin') && user.app_admin_scope === 'all') return true;
-    if (!permissions.has('edit_employee_time') && !permissions.has('app_admin')) return false;
-
-    const scope = await db.query(
-      `SELECT 1
-         FROM employees target
-        WHERE target.id=$1
-          AND (
-            target.department_id=$2
-            OR EXISTS(
-              SELECT 1
-                FROM supervisor_employee_assignments sea
-               WHERE sea.employee_id=target.id
-                 AND sea.supervisor_employee_id=$3
-                 AND sea.active=TRUE
-            )
-            OR EXISTS(
-              SELECT 1
-                FROM department_heads dh
-               WHERE dh.employee_id=$3
-                 AND dh.department_id=target.department_id
-                 AND dh.active=TRUE
-            )
-          )
-        LIMIT 1`,
-      [entry.employee_id, user.department_id, user.id],
-    );
-    return scope.rows.length > 0;
+    if (Number(user.id) === Number(entry.employee_id)) {
+      return permissionSet(user).has('edit_own_pending_entry');
+    }
+    return canEditPunch(db, user, entry.employee_id, 'edit');
   }
 
   async function canAddEntryForEmployee(user, employeeId, db = pool) {
-    if (hasPayrollOverride(user)) return true;
-
-    const permissions = permissionSet(user);
-    if (Number(user.id) === Number(employeeId)) return false;
-    if (
-      !permissions.has('add_employee_entry')
-      && !permissions.has('edit_employee_time')
-      && !permissions.has('app_admin')
-    ) {
-      return false;
-    }
-
-    const scope = await db.query(
-      `SELECT 1
-         FROM employees target
-        WHERE target.id=$1
-          AND (
-            target.department_id=$2
-            OR EXISTS(
-              SELECT 1
-                FROM supervisor_employee_assignments sea
-               WHERE sea.employee_id=target.id
-                 AND sea.supervisor_employee_id=$3
-                 AND sea.active=TRUE
-            )
-            OR EXISTS(
-              SELECT 1
-                FROM department_heads dh
-               WHERE dh.employee_id=$3
-                 AND dh.department_id=target.department_id
-                 AND dh.active=TRUE
-            )
-          )
-        LIMIT 1`,
-      [employeeId, user.department_id, user.id],
-    );
-    return scope.rows.length > 0;
+    return canEditPunch(db, user, employeeId, 'add');
   }
 
   function parseTimestamp(value, label) {
@@ -262,6 +191,17 @@ function createQuickPunchRouter({ requireUser, requireAnyPermission, pool, audit
         });
       }
 
+      if (Number(req.user.id) !== Number(entry.employee_id)) {
+        const payroll = hasPayrollOverride(req.user);
+        const supervisorStage = approval?.status === 'employee_submitted'
+          && approval.employee_signed_at && !approval.supervisor_approved_at && !approval.payroll_finalized_at;
+        if ((!payroll && !supervisorStage)
+            || (payroll && approval?.payroll_finalized_at && !permissionSet(req.user).has('reopen_timecard'))) {
+          await client.query('ROLLBACK');
+          return res.status(409).json({ error: 'Return the timecard to the authorized editing stage before deleting a punch.' });
+        }
+      }
+
       const deleted = await client.query(
         `UPDATE time_entries
             SET deleted_at=NOW(),deleted_by_employee_id=$2,deletion_reason=$3
@@ -358,6 +298,11 @@ function createQuickPunchRouter({ requireUser, requireAnyPermission, pool, audit
           [employeeId, req.body.clock_in],
         );
         const approval = approvalResult.rows[0] || null;
+        if (payrollOverride && approval?.payroll_finalized_at && !permissionSet(req.user).has('reopen_timecard')) {
+          await client.query('ROLLBACK');
+          return res.status(403).json({ error: 'Reopen permission is required for a finalized timecard.' });
+        }
+
         if (!payrollOverride) {
           const supervisorUnlocked = approval?.employee_signed_at && !approval?.supervisor_approved_at
             && !approval?.payroll_finalized_at && approval?.status === 'employee_submitted';
