@@ -13,7 +13,10 @@ assert(PERMISSION_GROUPS.employee.includes('clock_in_out'));
 assert.deepStrictEqual(unique(['a','a','b',null]),['a','b']);
 assert(!legacyPermissionsForRole('employee').includes('app_admin'));
 assert(legacyPermissionsForRole('admin').includes('app_admin'));
-assert(legacyPermissionsForRole('payroll').includes('approve_timecard'));
+// Payroll is a post-supervisory review/finalization role. It must not receive
+// supervisory approval authority from the legacy compatibility mapping.
+assert(!legacyPermissionsForRole('payroll').includes('approve_timecard'));
+assert(legacyPermissionsForRole('payroll').includes('review_approved_timecards'));
 assert.strictEqual(deriveLegacyRole(['view_payroll_records']),'payroll');
 assert.strictEqual(deriveLegacyRole(['approve_timecard']),'supervisor');
 assert.strictEqual(deriveLegacyRole(['view_own_time']),'employee');
