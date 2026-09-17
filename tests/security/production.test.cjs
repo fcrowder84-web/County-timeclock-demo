@@ -24,6 +24,13 @@ test('production approval transform preserves one supervisory stage and head sel
  assert.equal(await check({id:1,permissions:['approve_timecard'],assigned:true},1,['approve_timecard']),false);
  assert.equal(await check({id:1,permissions:['app_admin'],head:false},2,['approve_timecard']),false);
  assert.equal(await check({id:1,permissions:['edit_payroll_time'],head:false},2,['approve_timecard']),false);
+ const supervisor=fs.readFileSync(path.join(temp,'routes/supervisor.js'),'utf8');
+ const start=supervisor.indexOf("'/supervisor/employee-timecard/:employeeId'");
+ const end=supervisor.indexOf("'/supervisor/approve-timecard'",start);
+ const timecardRoute=supervisor.slice(start,end);
+ assert.match(timecardRoute,/userHasPermission\(req\.user, 'view_all_timeclock_records'\)/);
+ assert.match(timecardRoute,/userHasPermission\(req\.user, 'app_admin'\) && req\.user\.app_admin_scope === 'all'/);
+ assert.match(timecardRoute,/if \(!countywideRead && !\(await canAccessEmployee\(req\.user, employeeId\)\)\)/);
  })();
 });
 test('deployed frontend inline scripts parse and load escaping helper first',()=>{

@@ -75,13 +75,15 @@ const d=`               (COALESCE($1::boolean,FALSE)=TRUE)
 if(!o.includes(c))throw new Error('request scope not found');
 o=o.replace(c,d);
 o=o.replace(`[req.user.role, req.user.id],`,`[userHasPermission(req.user, 'app_admin'), req.user.id],`);
+const timecardMarker=`  router.get(\n    '/supervisor/employee-timecard/:employeeId',`;
+const markerIndex=o.indexOf(timecardMarker);
+if(markerIndex<0)throw new Error('employee timecard route not found');
+const beforeTimecard=o.slice(0,markerIndex);
+let timecardTail=o.slice(markerIndex);
+const oldAccess=`        if (!(await canAccessEmployee(req.user, employeeId))) {\n          return res.status(403).json({ error: 'Access denied' });\n        }`;
+const newAccess=`        const countywideRead =\n          userHasPermission(req.user, 'view_all_timeclock_records') ||\n          (userHasPermission(req.user, 'app_admin') && req.user.app_admin_scope === 'all');\n        if (!countywideRead && !(await canAccessEmployee(req.user, employeeId))) {\n          return res.status(403).json({ error: 'Access denied' });\n        }`;
+if(!timecardTail.includes(oldAccess))throw new Error('employee timecard access check not found');
+timecardTail=timecardTail.replace(oldAccess,newAccess);
+o=beforeTimecard+timecardTail;
 return o;});
-patch('routes/leave.js',s=>{const a=`      const reviewingOwnLeave = Number(existing.rows[0].employee_id) === Number(req.user.id);
-      const canReviewOwnLeave = reviewingOwnLeave && userHasAnyPermission(req.user, ['approve_own_timecard']);
-      if (!isSupervisor(req.user) && !canReviewOwnLeave) {
-        return res.status(403).json({ error: 'Supervisor access required' });
-      }
-
-      await assertAccess(req.user, existing.rows[0].employee_id);`;const b=`      if (!(await canAccessEmployee(req.user, existing.rows[0].employee_id, ['approve_timecard']))) {
-        return res.status(403).json({ error: 'You cannot review leave for this employee' });
-      }`;if(!s.includes(a))throw new Error('leave review block not found');return s.replace(a,b);});
+patch('routes/leave.js',s=>{const a=`      const reviewingOwnLeave = Number(existing.rows[0].employee_id) === Number(req.user.id);\n      const canReviewOwnLeave = reviewingOwnLeave && userHasAnyPermission(req.user, ['approve_own_timecard']);\n      if (!isSupervisor(req.user) && !canReviewOwnLeave) {\n        return res.status(403).json({ error: 'Supervisor access required' });\n      }\n\n      await assertAccess(req.user, existing.rows[0].employee_id);`;const b=`      if (!(await canAccessEmployee(req.user, existing.rows[0].employee_id, ['approve_timecard']))) {\n        return res.status(403).json({ error: 'You cannot review leave for this employee' });\n      }`;if(!s.includes(a))throw new Error('leave review block not found');return s.replace(a,b);});
