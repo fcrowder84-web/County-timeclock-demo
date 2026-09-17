@@ -6,7 +6,7 @@ const cp=require('node:child_process');
 const root=path.resolve(__dirname,'../..');
 function source(file){
   return process.env.SECURITY_BASELINE === '1'
-    ? cp.execFileSync('git',['show','997dfa60f74e7ceed33969cfdb255db7ce6bfc32:'+file],{cwd:root,encoding:'utf8',stdio:['ignore','pipe','pipe']})
+    ? cp.execFileSync('git',['show',(process.env.SECURITY_BASELINE_REF || '997dfa60f74e7ceed33969cfdb255db7ce6bfc32')+':'+file],{cwd:root,encoding:'utf8',stdio:['ignore','pipe','pipe']})
     : fs.readFileSync(path.join(root,file),'utf8');
 }
 function load(file,mocks={},cache={}){

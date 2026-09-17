@@ -34,3 +34,19 @@ POSIX shell:
 node --test tests/security/*.test.cjs
 SECURITY_BASELINE=1 node --test tests/security/regressions.test.cjs
 ```
+
+## Second-review blockers
+
+Second-review blockers 2–4: the external timecard-summary-ui.js compatibility renderer escapes reason, name, department and date/summary text through SafeHtml.escape; action IDs are numeric. Displayed information is preserved.
+
+The supervisor edit endpoint uses canEditPunch on the locked employee entry. Self-edits are denied even for Department Heads. Assigned Supervisors and department-head backups retain employee_submitted-stage edits. Payroll requires employee signature plus one supervisory approval and supervisor_approved/payroll_finalized status. Finalized source or destination cards require both edit_payroll_time and reopen_timecard. Both affected cards are locked and checked before writes. Deliberate reopening includes finalized card IDs in the existing audit event. Existing post-edit approval invalidation and re-review behavior is preserved.
+
+Added 18 targeted tests in second-review.test.cjs, covering every requested positive/negative edit case, destination-period bypasses and the actual external renderer with malicious content. Full security/build suite: 47/47 pass. All 13 other existing test scripts pass. permissions.test.js retains its pre-existing failure expecting Payroll to have approve_timecard; the test and permissions implementation are unchanged. Docker transformation/self-approval compatibility checks pass.
+
+Before/after reproduction against the first PR revision:
+```sh
+SECURITY_BASELINE=1 SECURITY_BASELINE_REF=59fa50b6ed1793c1548607f23c5c1679e80b77e6 node --test tests/security/second-review.test.cjs
+node --test tests/security/*.test.cjs
+```
+
+Database calls are mocked. No live production/database writes, deployments, or changes to Finance/FOIA were performed.

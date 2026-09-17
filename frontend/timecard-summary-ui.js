@@ -1,4 +1,5 @@
 (function (global) {
+    const esc = value => global.SafeHtml.escape(value);
     function hours(value) {
         return Number(value || 0).toFixed(2);
     }
@@ -11,7 +12,7 @@
 
     function leaveText(map) {
         const rows = Object.entries(map || {}).filter(([, value]) => Number(value) > 0);
-        return rows.length ? rows.map(([type, value]) => `${label(type)} ${hours(value)}`).join(' · ') : 'None';
+        return rows.length ? rows.map(([type, value]) => `${esc(label(type))} ${hours(value)}`).join(' · ') : 'None';
     }
 
     function render(summary) {
@@ -19,7 +20,7 @@
         const p = summary.period;
         const weekRows = (summary.weeks || []).map(week => `
             <tr>
-                <td><strong>Week ${week.week_number}</strong><br><small>${week.start_date} through ${week.end_date}</small></td>
+                <td><strong>Week ${esc(week.week_number)}</strong><br><small>${esc(week.start_date)} through ${esc(week.end_date)}</small></td>
                 <td>${hours(week.regular_worked_hours)}</td>
                 <td><strong>${hours(week.overtime_hours)}</strong></td>
                 <td>${hours(week.total_worked_hours)}</td>
@@ -53,11 +54,11 @@
             && Boolean(request.requested_clock_in) !== Boolean(request.requested_clock_out);
         if (singlePunch) {
             const value = request.requested_clock_in_display || request.requested_clock_out_display || 'Requested punch';
-            return `<strong>Requested Punch:</strong><br>${value}`;
+            return `<strong>Requested Punch:</strong><br>${esc(value)}`;
         }
         const parts = [];
-        if (request.requested_clock_in_display) parts.push(`<strong>Requested Clock In:</strong><br>${request.requested_clock_in_display}`);
-        if (request.requested_clock_out_display) parts.push(`<strong>Requested Clock Out:</strong><br>${request.requested_clock_out_display}`);
+        if (request.requested_clock_in_display) parts.push(`<strong>Requested Clock In:</strong><br>${esc(request.requested_clock_in_display)}`);
+        if (request.requested_clock_out_display) parts.push(`<strong>Requested Clock Out:</strong><br>${esc(request.requested_clock_out_display)}`);
         return parts.length ? parts.join('<br><br>') : '<strong>Punch correction requested</strong>';
     }
 
@@ -83,13 +84,13 @@
                     html += `<table><thead><tr><th>Employee</th><th>Department</th><th>Requested Change</th><th>Reason</th><th>Actions</th></tr></thead><tbody>`;
                     requests.forEach(request => {
                         html += `<tr>
-                            <td>${request.first_name} ${request.last_name}</td>
-                            <td>${request.department || '-'}</td>
+                            <td>${esc(request.first_name)} ${esc(request.last_name)}</td>
+                            <td>${esc(request.department || '-')}</td>
                             <td>${requestDescription(request)}</td>
-                            <td>${request.employee_reason || '-'}</td>
+                            <td>${esc(request.employee_reason || '-')}</td>
                             <td>
-                                <button class="btn-approve" onclick="approveRequest(${request.id})">Approve</button>
-                                <button class="btn-return" onclick="denyRequest(${request.id})">Deny</button>
+                                <button class="btn-approve" onclick="approveRequest(${Number(request.id)})">Approve</button>
+                                <button class="btn-return" onclick="denyRequest(${Number(request.id)})">Deny</button>
                             </td>
                         </tr>`;
                     });
