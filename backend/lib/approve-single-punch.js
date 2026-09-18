@@ -24,11 +24,17 @@ async function canReviewEmployee(pool, user, employeeId) {
   const isTargetDepartmentHead = departmentHeadResult.rows.length > 0;
   const isSelf = Number(user?.id) === Number(employeeId);
 
-  // Department heads are the only operational role allowed to approve their
-  // own punch corrections. The structural department_heads assignment is the
-  // authority; Application Admin is deliberately not an approval role.
+  // Department heads may approve their own punch corrections. The structural
+  // department_heads assignment is the authority; Application Admin alone is
+  // deliberately not an approval role. Accept the normal punch-approval grant
+  // as well as the legacy explicit self-approval grant so Portal-managed
+  // department heads are not blocked when their operational permissions are
+  // represented by approve_punch_correction.
   if (isSelf) {
-    return isTargetDepartmentHead && permissions.has('approve_own_punch_corrections');
+    return isTargetDepartmentHead && (
+      permissions.has('approve_own_punch_corrections') ||
+      permissions.has('approve_punch_correction')
+    );
   }
 
   // Department heads have backup approval authority for everyone in their
