@@ -1,6 +1,25 @@
 'use strict';
 const test=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),os=require('node:os'),path=require('node:path'),cp=require('node:child_process'),vm=require('node:vm');
 const {root}=require('./helpers.cjs');
+
+test('single-punch approval allows department-head self-approval with normal approval grant',async()=>{
+ const source=fs.readFileSync(path.join(root,'backend/lib/approve-single-punch.js'),'utf8');
+ const start=source.indexOf('async function canReviewEmployee(');
+ const end=source.indexOf('\nfunction punchTimestamp',start);
+ assert.ok(start>=0&&end>start,'canReviewEmployee source');
+ const fn=source.slice(start,end);
+ const check=vm.runInNewContext(fn+';canReviewEmployee');
+ const headPool={query:async(sql,params)=>{
+   if(/SELECT department_id FROM employees/.test(sql))return{rows:[{department_id:1}]};
+   if(/FROM department_heads/.test(sql))return{rows:[{one:1}]};
+   if(/FROM supervisor_employee_assignments/.test(sql))return{rows:[]};
+   throw new Error('Unexpected query: '+sql);
+ }};
+ assert.equal(await check(headPool,{id:2,permissions:['approve_punch_correction']},2),true);
+ assert.equal(await check(headPool,{id:2,permissions:['approve_own_punch_corrections']},2),true);
+ assert.equal(await check(headPool,{id:2,permissions:['app_admin']},2),false);
+});
+
 test('production approval transform preserves one supervisory stage and head self-approval',()=>{
  const temp=fs.mkdtempSync(path.join(os.tmpdir(),'timeclock-build-check-'));
  // Reproduce the Docker transform on disposable copies, never source files.
