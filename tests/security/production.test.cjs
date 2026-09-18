@@ -8,7 +8,7 @@ test('single-punch approval allows department-head self-approval with normal app
  const end=source.indexOf('\nfunction punchTimestamp',start);
  assert.ok(start>=0&&end>start,'canReviewEmployee source');
  const fn=source.slice(start,end);
- const check=vm.runInNewContext(fn+';canReviewEmployee');
+ const check=vm.runInNewContext(fn+';canReviewEmployee',{permissionSet:u=>new Set(Array.isArray(u?.permissions)?u.permissions:[])});
  const headPool={query:async(sql,params)=>{
    if(/SELECT department_id FROM employees/.test(sql))return{rows:[{department_id:1}]};
    if(/FROM department_heads/.test(sql))return{rows:[{one:1}]};
