@@ -5,6 +5,7 @@ const { canEditPunch, hasPayrollOverride } = require('../lib/punch-edit-authorit
 const { summarizeTimecard } = require('../lib/timecard-summary');
 const { insertPunchIntoSequence } = require('../lib/punch-sequence');
 const { createApproveSinglePunchHandler } = require('../lib/approve-single-punch');
+const { getForcedLunchContext } = require('../lib/forced-lunch');
 
 function validDate(value) {
   if (!value) return null;
@@ -183,21 +184,31 @@ function createEmployeeRouter({ requireUser, requireAnyPermission, pool, audit, 
         [req.user.id],
       );
 
+      const lunchContext = await getForcedLunchContext(
+        pool,
+        req.user.id,
+        period.pay_period_start,
+        period.pay_period_end,
+      );
       const approval = approvalResult.rows[0] || null;
       const canEditEntries = !approval?.employee_signed_at || approval?.status === 'returned_to_employee';
 
       return res.json({
-        employee: req.user,
+        employee: { ...req.user, ...lunchContext.settings },
         pay_period_start: period.pay_period_start,
         pay_period_end: period.pay_period_end,
         approval,
         can_edit_entries: canEditEntries,
         entries: entriesResult.rows,
         leave_entries: leaveResult.rows,
+        forced_lunch_waivers: lunchContext.waivers,
+        lunch_waiver_requests: lunchContext.requests,
         timecard_summary: summarizeTimecard({
           entries: entriesResult.rows,
           leaveEntries: leaveResult.rows,
           payPeriodStart: period.pay_period_start,
+          forcedLunchMinutes: lunchContext.forcedLunchMinutes,
+          lunchWaivers: lunchContext.waivers,
         }),
         requests: requestsResult.rows,
       });
