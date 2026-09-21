@@ -134,6 +134,52 @@ function createLeaveRouter({ requireUser, pool, audit, canAccessEmployee, getReq
     }
   }
 
+  async function invalidateApprovalsForDates(client,user,employeeId,dates){
+    const uniqueDates=[...new Set((dates||[]).filter(Boolean))];
+    if(!uniqueDates.length) return [];
+
+    const approvals=await client.query(
+      `SELECT *
+         FROM pay_period_approvals ppa
+        WHERE ppa.employee_id=$1
+          AND EXISTS (
+            SELECT 1
+              FROM unnest($2::date[]) AS affected(day)
+             WHERE affected.day BETWEEN ppa.pay_period_start AND ppa.pay_period_end
+          )
+        ORDER BY ppa.id
+        FOR UPDATE`,
+      [employeeId,uniqueDates],
+    );
+
+    const finalized=approvals.rows.filter(row=>row.payroll_finalized_at||row.status==='payroll_finalized');
+    if(finalized.length){
+      const canReopen=
+        userHasAnyPermission(user,['reopen_timecard'])
+        && await canAccessEmployee(user,employeeId,['reopen_timecard']);
+      if(!canReopen){
+        const error=new Error('Reopen permission is required before changing leave in a payroll-finalized timecard.');
+        error.statusCode=403;
+        throw error;
+      }
+    }
+
+    const ids=approvals.rows.map(row=>row.id);
+    if(ids.length){
+      await client.query(
+        `UPDATE pay_period_approvals
+            SET supervisor_approved_at=NULL,
+                supervisor_employee_id=NULL,
+                payroll_finalized_at=NULL,
+                payroll_finalized_by=NULL,
+                status=CASE WHEN employee_signed_at IS NULL THEN 'open' ELSE 'employee_submitted' END
+          WHERE id=ANY($1::int[])`,
+        [ids],
+      );
+    }
+    return ids;
+  }
+
   router.get('/leave/types', requireUser, (_req, res) => res.json({ leave_types: LEAVE_TYPES }));
 
   router.get('/leave/holiday-calendar', requireUser, (req, res) => {
@@ -215,6 +261,9 @@ function createLeaveRouter({ requireUser, pool, audit, canAccessEmployee, getReq
       }
 
       await client.query('BEGIN');
+      const invalidatedApprovalIds=await invalidateApprovalsForDates(
+        client,req.user,employeeId,dates,
+      );
 
       if (type === 'floating_holiday') {
         const year = holidayYear(dates[0]);
@@ -330,6 +379,7 @@ function createLeaveRouter({ requireUser, pool, audit, canAccessEmployee, getReq
           daily_hours_override: dailyChecks.length > 0,
           override_reason: overrideReason || null,
           daily_checks: dailyChecks,
+          invalidated_approval_ids: invalidatedApprovalIds,
         },
       );
 
@@ -351,55 +401,95 @@ function createLeaveRouter({ requireUser, pool, audit, canAccessEmployee, getReq
   });
 
   router.post('/leave/:id/review', requireUser, async (req, res) => {
+    const client=await pool.connect();
     try {
-      const existing = await pool.query('SELECT * FROM leave_entries WHERE id=$1', [req.params.id]);
-      if (!existing.rows.length) return res.status(404).json({ error: 'Leave entry not found' });
-
-      if (existing.rows[0].status !== 'pending') {
+      await client.query('BEGIN');
+      const existing = await client.query(
+        'SELECT * FROM leave_entries WHERE id=$1 FOR UPDATE',
+        [req.params.id],
+      );
+      if (!existing.rows.length) {
+        await client.query('ROLLBACK');
+        return res.status(404).json({ error: 'Leave entry not found' });
+      }
+      const entry=existing.rows[0];
+      if (entry.status !== 'pending') {
+        await client.query('ROLLBACK');
         return res.status(409).json({ error: 'Only pending leave requests can be reviewed' });
       }
 
-      const reviewingOwnLeave = Number(existing.rows[0].employee_id) === Number(req.user.id);
+      const reviewingOwnLeave = Number(entry.employee_id) === Number(req.user.id);
       if (reviewingOwnLeave) {
         requireCapability(req.user, 'approve_own_leave', 'Approve Own Leave permission required');
+        if (!(await canAccessEmployee(req.user,entry.employee_id,['approve_leave']))) {
+          const error=new Error('You cannot approve your own leave with the current role');
+          error.statusCode=403;
+          throw error;
+        }
       } else {
-        await requireScopedCapability(req.user, existing.rows[0].employee_id, 'approve_leave');
+        await requireScopedCapability(req.user, entry.employee_id, 'approve_leave');
       }
 
       const status = String(req.body.status || '').toLowerCase();
       if (!['approved', 'denied'].includes(status)) {
+        await client.query('ROLLBACK');
         return res.status(400).json({ error: 'Status must be approved or denied' });
       }
 
+      let invalidatedApprovalIds=[];
+      if(status==='approved'){
+        invalidatedApprovalIds=await invalidateApprovalsForDates(
+          client,req.user,entry.employee_id,[entry.leave_date],
+        );
+      }
+
       const note = String(req.body.review_note || '').trim() || null;
-      const result = await pool.query(
+      const result = await client.query(
         `UPDATE leave_entries
             SET status=$1,
                 review_note=$2,
                 reviewed_by_employee_id=$3,
                 reviewed_at=NOW(),
                 updated_at=NOW()
-          WHERE id=$4
+          WHERE id=$4 AND status='pending'
           RETURNING *, ROUND(quarter_hours / 4.0, 2) AS hours`,
         [status, note, req.user.id, req.params.id],
       );
+      if(!result.rows.length){
+        await client.query('ROLLBACK');
+        return res.status(409).json({error:'Leave request was reviewed by another request'});
+      }
 
+      await client.query('COMMIT');
       await audit(req.user.id, `leave_${status}`, 'leave_entry', req.params.id, {
-        employee_id: existing.rows[0].employee_id,
+        employee_id: entry.employee_id,
         review_note: note,
+        invalidated_approval_ids:invalidatedApprovalIds,
       });
       return res.json({ message: `Leave ${status}`, leave_entry: result.rows[0] });
     } catch (err) {
+      await client.query('ROLLBACK').catch(()=>{});
       return res.status(err.statusCode || 500).json({ error: err.message || 'Leave review failed' });
+    } finally {
+      client.release();
     }
   });
 
   router.delete('/leave/:id', requireUser, async (req, res) => {
+    const client=await pool.connect();
     try {
-      const existing = await pool.query('SELECT * FROM leave_entries WHERE id=$1', [req.params.id]);
-      if (!existing.rows.length) return res.status(404).json({ error: 'Leave entry not found' });
+      await client.query('BEGIN');
+      const existing = await client.query(
+        'SELECT * FROM leave_entries WHERE id=$1 FOR UPDATE',
+        [req.params.id],
+      );
+      if (!existing.rows.length) {
+        await client.query('ROLLBACK');
+        return res.status(404).json({ error: 'Leave entry not found' });
+      }
       const entry=existing.rows[0];
       if (['withdrawn','voided'].includes(entry.status)) {
+        await client.query('ROLLBACK');
         return res.status(409).json({ error: 'Leave entry is already archived' });
       }
 
@@ -409,6 +499,7 @@ function createLeaveRouter({ requireUser, pool, audit, canAccessEmployee, getReq
       if(ownEntry){
         requireCapability(req.user,'withdraw_own_pending_request','Withdraw Pending Request permission required');
         if(entry.status!=='pending'){
+          await client.query('ROLLBACK');
           return res.status(409).json({ error: 'Only a pending leave request can be withdrawn by the employee' });
         }
         archivedStatus='withdrawn';
@@ -419,31 +510,49 @@ function createLeaveRouter({ requireUser, pool, audit, canAccessEmployee, getReq
         auditAction='void_leave';
       }
 
+      let invalidatedApprovalIds=[];
+      if(entry.status==='approved'){
+        invalidatedApprovalIds=await invalidateApprovalsForDates(
+          client,req.user,entry.employee_id,[entry.leave_date],
+        );
+      }
+
       const reason=String(req.body?.reason||'').trim()||null;
-      const result=await pool.query(
+      const result=await client.query(
         `UPDATE leave_entries
             SET status=$1,archived_at=NOW(),archived_by_employee_id=$2,
                 archive_reason=$3,updated_at=NOW()
-          WHERE id=$4
+          WHERE id=$4 AND status=$5
           RETURNING *,ROUND(quarter_hours / 4.0,2) AS hours`,
-        [archivedStatus,req.user.id,reason,req.params.id],
+        [archivedStatus,req.user.id,reason,req.params.id,entry.status],
       );
+      if(!result.rows.length){
+        await client.query('ROLLBACK');
+        return res.status(409).json({error:'Leave entry changed while it was being archived'});
+      }
+
+      await client.query('COMMIT');
       await audit(req.user.id,auditAction,'leave_entry',req.params.id,{
         employee_id:entry.employee_id,
         previous_status:entry.status,
         status:archivedStatus,
         reason,
+        invalidated_approval_ids:invalidatedApprovalIds,
       });
       return res.json({
         message: ownEntry ? 'Leave request withdrawn' : 'Leave entry voided',
         leave_entry:result.rows[0],
       });
     } catch (err) {
+      await client.query('ROLLBACK').catch(()=>{});
       return res.status(err.statusCode || 500).json({ error: err.message || 'Leave archive failed' });
+    } finally {
+      client.release();
     }
   });
 
   router.post('/leave/submit-timecard-on-behalf', requireUser, async (req, res) => {
+    let client=null;
     try {
       const employeeId = Number(req.body.employee_id);
       if (!employeeId || employeeId === Number(req.user.id)) {
@@ -452,7 +561,32 @@ function createLeaveRouter({ requireUser, pool, audit, canAccessEmployee, getReq
 
       await requireScopedCapability(req.user, employeeId, 'submit_employee_timecard');
       const period = await getRequestedPayPeriod(req);
-      const open = await pool.query(
+      client=await pool.connect();
+      await client.query('BEGIN');
+
+      const approvalResult=await client.query(
+        `SELECT *
+           FROM pay_period_approvals
+          WHERE employee_id=$1
+            AND pay_period_start=$2::date
+            AND pay_period_end=$3::date
+          ORDER BY id DESC
+          LIMIT 1
+          FOR UPDATE`,
+        [employeeId,period.pay_period_start,period.pay_period_end],
+      );
+      const existingApproval=approvalResult.rows[0]||null;
+      if(existingApproval?.payroll_finalized_at||existingApproval?.status==='payroll_finalized'){
+        const canReopen=
+          userHasAnyPermission(req.user,['reopen_timecard'])
+          && await canAccessEmployee(req.user,employeeId,['reopen_timecard']);
+        if(!canReopen){
+          await client.query('ROLLBACK');
+          return res.status(403).json({error:'Reopen permission is required for a payroll-finalized timecard.'});
+        }
+      }
+
+      const open = await client.query(
         `SELECT id
            FROM time_entries
           WHERE employee_id=$1
@@ -463,10 +597,11 @@ function createLeaveRouter({ requireUser, pool, audit, canAccessEmployee, getReq
         [employeeId, period.pay_period_start, period.pay_period_end],
       );
       if (open.rows.length) {
+        await client.query('ROLLBACK');
         return res.status(400).json({ error: 'Clock out the employee before completing the timecard' });
       }
 
-      const result = await pool.query(
+      const result = await client.query(
         `INSERT INTO pay_period_approvals(
            employee_id,pay_period_start,pay_period_end,employee_signed_at,status
          ) VALUES($1,$2,$3,NOW(),'employee_submitted')
@@ -481,16 +616,21 @@ function createLeaveRouter({ requireUser, pool, audit, canAccessEmployee, getReq
         [employeeId, period.pay_period_start, period.pay_period_end],
       );
 
+      await client.query('COMMIT');
       await audit(req.user.id, 'submit_timecard_on_behalf', 'employee', employeeId, {
         ...period,
         reason: String(req.body.reason || '').trim() || null,
+        reopened_finalized_timecard:Boolean(existingApproval?.payroll_finalized_at),
       });
       return res.json({
         message: 'Timecard completed on behalf of employee and sent for supervisor review',
         approval: result.rows[0],
       });
     } catch (err) {
+      if(client) await client.query('ROLLBACK').catch(()=>{});
       return res.status(err.statusCode || 500).json({ error: err.message || 'Timecard completion failed' });
+    } finally {
+      if(client) client.release();
     }
   });
 
