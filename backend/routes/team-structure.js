@@ -43,7 +43,9 @@ function createTeamStructureRouter({
       try {
         const role=String(req.user.role||'employee').toLowerCase();
         const permissions=userPermissionSet(req.user);
-        const countywide=permissions.has('app_admin')||role==='timeclock_manager'||role==='payroll';
+        const countywide=(permissions.has('app_admin')&&req.user.app_admin_scope==='all')
+          || role==='timeclock_manager'||role==='payroll';
+        const departmentScopedAdmin=permissions.has('app_admin')&&req.user.app_admin_scope!=='all';
         const result = await pool.query(
           `SELECT e.id,e.employee_number,e.first_name,e.last_name,e.department,e.department_id,
                   d.name AS department_name,e.role,e.active,e.must_change_pin,
@@ -53,13 +55,14 @@ function createTeamStructureRouter({
             WHERE (
               $1::boolean=TRUE
               OR ($2::text='department_head' AND e.department_id=$3)
+              OR ($5::boolean=TRUE AND e.department_id=$3)
               OR e.id IN (
                 SELECT employee_id FROM supervisor_employee_assignments
                 WHERE supervisor_employee_id=$4 AND active=TRUE
               )
             )
             ORDER BY d.name,e.active DESC,e.last_name,e.first_name`,
-          [countywide,role,req.user.department_id,req.user.id],
+          [countywide,role,req.user.department_id,req.user.id,departmentScopedAdmin],
         );
         return res.json(result.rows);
       } catch (err) {
@@ -100,20 +103,23 @@ function createTeamStructureRouter({
       try {
         const role=String(req.user.role||'employee').toLowerCase();
         const permissions=userPermissionSet(req.user);
-        const countywide=permissions.has('app_admin')||role==='timeclock_manager'||role==='payroll';
+        const countywide=(permissions.has('app_admin')&&req.user.app_admin_scope==='all')
+          || role==='timeclock_manager'||role==='payroll';
+        const departmentScopedAdmin=permissions.has('app_admin')&&req.user.app_admin_scope!=='all';
         const result = await pool.query(
           `SELECT d.id,d.name
              FROM departments d
             WHERE (
               $1::boolean=TRUE
               OR ($2::text='department_head' AND d.id=$3)
+              OR ($5::boolean=TRUE AND d.id=$3)
               OR d.id IN (
                 SELECT department_id FROM supervisor_employee_assignments
                 WHERE supervisor_employee_id=$4 AND active=TRUE
               )
             )
             ORDER BY d.name`,
-          [countywide,role,req.user.department_id,req.user.id],
+          [countywide,role,req.user.department_id,req.user.id,departmentScopedAdmin],
         );
         return res.json(result.rows);
       } catch (err) {
@@ -134,7 +140,7 @@ function createTeamStructureRouter({
         }
         const structurePermissions = userPermissionSet(req.user);
         const structureRole = String(req.user.role || '').toLowerCase();
-        const canManageAll = structurePermissions.has('app_admin')
+        const canManageAll = (structurePermissions.has('app_admin')&&req.user.app_admin_scope==='all')
           || structureRole === 'timeclock_manager'
           || structureRole === 'payroll';
 
