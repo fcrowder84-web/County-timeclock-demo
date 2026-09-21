@@ -951,7 +951,8 @@
                 "Clock In",
                 "Clock Out",
                 "Exact Duration",
-                "Rounded Daily Hours",
+                "Forced Lunch Deduction",
+                "Credited Daily Hours",
                 "Timecard Status"
             ];
 
@@ -961,13 +962,39 @@
 
             const dailyGroups = {};
             rows.forEach((row, index) => {
-                const key = `${row.employee_number || row.employee_id}|${row.work_date}`;
-                if (!dailyGroups[key]) dailyGroups[key] = { minutes: 0, firstIndex: index };
-                dailyGroups[key].minutes += durationMinutes(row.hours_worked);
+                const key = `${row.employee_number || row.employee_id}|${row.work_date_iso || row.work_date}`;
+                if (!dailyGroups[key]) dailyGroups[key] = {
+                    minutes: 0,
+                    firstIndex: index,
+                    firstIn: null,
+                    lastOut: null,
+                    forcedEnabled: false,
+                    lunchMinutes: 0,
+                    waived: false
+                };
+                const group = dailyGroups[key];
+                group.minutes += durationMinutes(row.hours_worked);
+                const inMs = row.clock_in_raw ? new Date(row.clock_in_raw).getTime() : NaN;
+                const outMs = row.clock_out_raw ? new Date(row.clock_out_raw).getTime() : NaN;
+                if (Number.isFinite(inMs)) group.firstIn = group.firstIn == null ? inMs : Math.min(group.firstIn, inMs);
+                if (Number.isFinite(outMs)) group.lastOut = group.lastOut == null ? outMs : Math.max(group.lastOut, outMs);
+                group.forcedEnabled = row.forced_lunch_enabled === true || String(row.forced_lunch_enabled) === "true";
+                group.lunchMinutes = Math.max(group.lunchMinutes, Number(row.forced_lunch_minutes || 0));
+                group.waived = group.waived || row.lunch_waived === true || String(row.lunch_waived) === "true";
             });
-            const roundedHoursByFirstRow = {};
+            const creditedHoursByFirstRow = {};
+            const lunchDeductionByFirstRow = {};
             Object.values(dailyGroups).forEach(group => {
-                roundedHoursByFirstRow[group.firstIndex] = (roundDailyMinutes(group.minutes) / 60).toFixed(2);
+                const grossMinutes = roundDailyMinutes(group.minutes);
+                const spanMinutes = group.firstIn != null && group.lastOut != null
+                    ? Math.max(grossMinutes, Math.round((group.lastOut - group.firstIn) / 60000))
+                    : grossMinutes;
+                const existingBreakMinutes = Math.max(0, spanMinutes - grossMinutes);
+                const deductionMinutes = group.forcedEnabled && !group.waived
+                    ? Math.min(grossMinutes, Math.max(0, group.lunchMinutes - existingBreakMinutes))
+                    : 0;
+                creditedHoursByFirstRow[group.firstIndex] = ((grossMinutes - deductionMinutes) / 60).toFixed(2);
+                lunchDeductionByFirstRow[group.firstIndex] = deductionMinutes ? (deductionMinutes / 60).toFixed(2) : "";
             });
 
             rows.forEach((row, index) => {
@@ -980,7 +1007,8 @@
                     csvValue(row.clock_in),
                     csvValue(row.clock_out),
                     csvValue(formatExactDuration(row.hours_worked)),
-                    csvValue(roundedHoursByFirstRow[index] || ""),
+                    csvValue(lunchDeductionByFirstRow[index] || ""),
+                    csvValue(creditedHoursByFirstRow[index] || ""),
                     csvValue(row.timecard_status)
                 ].join(","));
             });

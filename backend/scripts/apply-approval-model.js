@@ -14,6 +14,7 @@ patch('server.js',s=>{const p=/async function canAccessEmployee\(user,\s*employe
   }
 
   const isSelf=Number(user.id)===Number(employeeId);
+  if(permissions.has("app_admin")&&user.app_admin_scope==="all")return true;
   const requested=actionPermissions.length?actionPermissions:["view_assigned_employees","view_department_time","view_payroll_records","review_approved_timecards","edit_employee_time","edit_payroll_time","approve_punch_correction","approve_timecard","return_timecard","return_to_supervisor"];
   const approvalKind=requested.includes("approve_punch_correction")?"punch":(requested.includes("approve_timecard")?"timecard":null);
   const target=await pool.query(\`SELECT department_id FROM employees WHERE id=$1 LIMIT 1\`,[employeeId]);

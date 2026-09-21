@@ -1,6 +1,50 @@
+function lunchDaySummary(day){return(currentData?.timecard_summary?.days||[]).find(item=>dateOnly(item.work_date)===day)||null}
+function lunchRequestForDay(day){return(currentData?.lunch_requests||[]).find(item=>dateOnly(item.work_date_iso||item.work_date)===day&&item.status==="pending")||null}
+function lunchStatusHtml(day){
+  const info=lunchDaySummary(day);
+  if(!info||!currentData?.timecard_summary?.forced_lunch_enabled||num(info.gross_worked_hours)<=0)return"";
+  if(info.lunch_waived)return`<div style="margin-top:5px;font-size:.82em"><strong>Lunch waived</strong>${info.lunch_waiver_reason?` — ${esc(info.lunch_waiver_reason)}`:""}</div>`;
+  const deduction=num(info.forced_lunch_deduction_hours);
+  if(deduction<=0)return`<div style="margin-top:5px;font-size:.82em">Lunch satisfied by clocked break</div>`;
+  const pending=lunchRequestForDay(day);
+  let action="";
+  if(selectedIsSelf()&&currentMode==="employee"){
+    action=pending?'<span style="margin-left:6px">Removal pending</span>':` <button type="button" class="btn lunch-request" data-date="${day}" style="padding:3px 7px;font-size:.82em">Request removal</button>`;
+  }else if(currentMode==="supervisor"&&!selectedIsSelf()&&hasAny(["approve_timecard","edit_employee_time","edit_payroll_time"])){
+    action=` <button type="button" class="btn lunch-waive" data-date="${day}" style="padding:3px 7px;font-size:.82em">Remove lunch</button>`;
+  }
+  return`<div style="margin-top:5px;font-size:.82em"><strong>Forced Lunch −${deduction.toFixed(2)} hr</strong>${action}</div>`;
+}
+async function requestLunchWaiver(day){
+  const reason=prompt("Reason the forced lunch should be removed for this date:");
+  if(!reason)return;
+  try{
+    await jsonOrError(await apiFetch(`${apiBase}/employee/request-lunch-waiver`,{method:"POST",body:JSON.stringify({work_date:day,reason})}));
+    showMessage("Lunch removal request submitted");
+    await loadTimecard();
+  }catch(err){showMessage(err.message,"error")}
+}
+async function waiveForcedLunch(day){
+  const reason=prompt("Reason for removing the forced lunch for this date:");
+  if(!reason)return;
+  try{
+    await jsonOrError(await apiFetch(`${apiBase}/supervisor/lunch-waiver`,{method:"POST",body:JSON.stringify({employee_id:selectedEmployeeId,work_date:day,reason})}));
+    showMessage("Forced lunch removed for this date");
+    await loadTimecard();
+  }catch(err){showMessage(err.message,"error")}
+}
+async function reviewLunchRequest(id,status){
+  const note=prompt(`Supervisor note for ${status==="approved"?"approval":"denial"} (optional):`)||"";
+  try{
+    await jsonOrError(await apiFetch(`${apiBase}/supervisor/review-lunch-waiver-request`,{method:"POST",body:JSON.stringify({request_id:Number(id),status,review_note:note})}));
+    showMessage(status==="approved"?"Forced lunch removed":"Lunch removal request denied");
+    await loadTimecard();
+  }catch(err){showMessage(err.message,"error")}
+}
 function renderTimecard(){
-  const data=currentData,employee=data.employee||currentUser,entries=data.entries||[],start=dateOnly(data.pay_period_start||selectedPeriodStart),summary=data.timecard_summary||{weeks:[],period:{}};
-  const days=Array.from({length:14},(_,i)=>{const date=addDays(start,i),dayEntries=entries.filter(e=>dateOnly(e.entry_date_iso||e.clock_in)===date);return{date,entries:dayEntries,worked:dailyWorked(dayEntries)}}),allocated=allocateDailyWork(days);
+  const data=currentData,employee=data.employee||currentUser,entries=data.entries||[],start=dateOnly(data.pay_period_start||selectedPeriodStart),summary=data.timecard_summary||{weeks:[],period:{},days:[]};
+  const summaryDays=new Map((summary.days||[]).map(item=>[dateOnly(item.work_date),item]));
+  const days=Array.from({length:14},(_,i)=>{const date=addDays(start,i),dayEntries=entries.filter(e=>dateOnly(e.entry_date_iso||e.clock_in)===date),daySummary=summaryDays.get(date);return{date,entries:dayEntries,worked:daySummary?num(daySummary.total_worked_hours):dailyWorked(dayEntries)}}),allocated=allocateDailyWork(days);
   const today=new Date().toLocaleDateString("en-CA",{timeZone:"America/New_York"});
   let html="";
   days.forEach((d,i)=>{
@@ -13,12 +57,12 @@ function renderTimecard(){
     const punchEnabled=employeePunchRequestEnabled||supervisorPunchEnabled;
     const punchTitle=employeePunchRequestEnabled?"Request missing time for this date":supervisorPunchEnabled?"Add punch entry":"Punch request not available for this date";
     const leaveEnabled=(employeeCanModify&&ownTimecard)||elevatedCanModify;
-    html+=`<tr class="${leavePresent?"leave-day":""}"><td class="left"><div class="datecell"><button class="icon-button day-punch" data-date="${d.date}" ${punchEnabled?"":"disabled"} title="${punchTitle}">${punchSvg}</button><button class="icon-button leave day-leave" data-date="${d.date}" ${leaveEnabled?"":"disabled"} title="Add leave">${leaveSvg}</button><span class="date-label"><strong>${esc(dayName(d.date))}</strong> ${esc(localDateLabel(d.date))}</span></div></td>${punchCells(d.date,d.entries)}<td>${fmt(work.regular)}</td><td>${fmt(work.ot)}</td>${leaveCell(d.date,"holiday")}${leaveCell(d.date,"vacation")}${leaveCell(d.date,"sick")}${leaveCell(d.date,"floating_holiday")}${leaveCell(d.date,"other")}<td><strong>${fmt(dailyTotal)}</strong></td></tr>`;
+    html+=`<tr class="${leavePresent?"leave-day":""}"><td class="left"><div class="datecell"><button class="icon-button day-punch" data-date="${d.date}" ${punchEnabled?"":"disabled"} title="${punchTitle}">${punchSvg}</button><button class="icon-button leave day-leave" data-date="${d.date}" ${leaveEnabled?"":"disabled"} title="Add leave">${leaveSvg}</button><span class="date-label"><strong>${esc(dayName(d.date))}</strong> ${esc(localDateLabel(d.date))}${lunchStatusHtml(d.date)}</span></div></td>${punchCells(d.date,d.entries)}<td>${fmt(work.regular)}</td><td>${fmt(work.ot)}</td>${leaveCell(d.date,"holiday")}${leaveCell(d.date,"vacation")}${leaveCell(d.date,"sick")}${leaveCell(d.date,"floating_holiday")}${leaveCell(d.date,"other")}<td><strong>${fmt(dailyTotal)}</strong></td></tr>`;
     if(i===6)html+=totalRow("Week 1 Total",summary.weeks?.[0],"week-total");
     if(i===13)html+=totalRow("Week 2 Total",summary.weeks?.[1],"week-total");
   });
   html+=totalRow("Pay Period Total",summary.period,"period-total");document.getElementById("timeRows").innerHTML=html;
-  document.getElementById("employeeNumber").textContent=employee.employee_number||"—";document.getElementById("departmentName").textContent=employee.department_name||employee.department||"—";document.getElementById("timecardStatus").textContent=statusLabel(data.approval);document.getElementById("workedRule").textContent=`${fmt(summary.period?.total_worked_hours)||"0.00"} worked / OT after ${fmt(summary.overtime_threshold_hours)||"40.00"} worked hrs/week`;document.getElementById("periodLabel").textContent=`${localDateLabel(data.pay_period_start)} – ${localDateLabel(data.pay_period_end)}`;document.getElementById("modeLabel").textContent=selectedIsSelf()?"Viewing your own timecard":currentMode==="supervisor"?`Viewing as ${payrollView()?"Payroll / Admin":"Supervisor"}`:"Viewing your own timecard";
+  document.getElementById("employeeNumber").textContent=employee.employee_number||"—";document.getElementById("departmentName").textContent=employee.department_name||employee.department||"—";document.getElementById("timecardStatus").textContent=statusLabel(data.approval);document.getElementById("workedRule").textContent=`${fmt(summary.period?.total_worked_hours)||"0.00"} worked${num(summary.period?.forced_lunch_hours)>0?` after ${fmt(summary.period.forced_lunch_hours)} forced lunch`:``} / OT after ${fmt(summary.overtime_threshold_hours)||"40.00"} worked hrs/week`;document.getElementById("periodLabel").textContent=`${localDateLabel(data.pay_period_start)} – ${localDateLabel(data.pay_period_end)}`;document.getElementById("modeLabel").textContent=selectedIsSelf()?"Viewing your own timecard":currentMode==="supervisor"?`Viewing as ${payrollView()?"Payroll / Admin":"Supervisor"}`:"Viewing your own timecard";
   renderSignatures();renderPending();bindRowActions();syncNavButtons();
 }
 function statusLabel(a){if(!a)return"In Progress";return({open:"In Progress",employee_submitted:"Employee Submitted",returned_to_employee:"Returned to Employee",supervisor_approved:"Supervisor Approved",payroll_finalized:"Payroll Finalized"})[a.status]||String(a.status||"In Progress").replaceAll("_"," ")}
@@ -43,18 +87,32 @@ function pendingItems(){
       : (r.created_at_display?` — ${r.created_at_display}`:"");
     return{type:"change",id:r.id,text:missing?`Missing time request: ${requested}`:`Punch change request${requested}`};
   });
-  return [...leave,...changes];
+  const lunches=(currentData.lunch_requests||[]).filter(r=>r.status==="pending").filter(r=>{const d=dateOnly(r.work_date_iso||r.work_date);return d>=start&&d<=end}).map(r=>({type:"lunch",id:r.id,text:`${localDateLabel(r.work_date_iso||r.work_date)} — Forced lunch removal: ${r.reason||"No reason provided"}`}));
+  return [...leave,...changes,...lunches];
 }
 function renderPending(){
-  const items=pendingItems(),panel=document.getElementById("pendingPanel"),list=document.getElementById("pendingList");panel.classList.toggle("show",items.length>0);document.getElementById("pendingLegend").textContent=items.length?`${items.length} pending item${items.length===1?"":"s"}`:"";
-  list.innerHTML=items.map(i=>`<div class="pending-item"><span>${esc(i.text)}</span>${currentMode==="supervisor"?(i.type==="leave"&&hasAny(["approve_timecard","edit_employee_time","edit_payroll_time","app_admin"])?`<span><button class="btn pending-leave-review" data-id="${Number(i.id)}" data-status="approved">Approve</button><button class="btn pending-leave-review" data-id="${Number(i.id)}" data-status="denied">Deny</button></span>`:i.type==="change"&&has("approve_punch_correction")?`<span><button class="btn pending-change-review" data-id="${Number(i.id)}" data-status="approved">Approve</button><button class="btn pending-change-review" data-id="${Number(i.id)}" data-status="denied">Deny</button></span>`:""):""}</div>`).join("");
+  const items=pendingItems(),panel=document.getElementById("pendingPanel"),list=document.getElementById("pendingList");
+  panel.classList.toggle("show",items.length>0);
+  document.getElementById("pendingLegend").textContent=items.length?`${items.length} pending item${items.length===1?"":"s"}`:"";
+  list.innerHTML=items.map(i=>{
+    let actions="";
+    if(currentMode==="supervisor"){
+      if(i.type==="leave"&&hasAny(["approve_timecard","edit_employee_time","edit_payroll_time","app_admin"]))actions=`<span><button class="btn pending-leave-review" data-id="${Number(i.id)}" data-status="approved">Approve</button><button class="btn pending-leave-review" data-id="${Number(i.id)}" data-status="denied">Deny</button></span>`;
+      if(i.type==="change"&&has("approve_punch_correction"))actions=`<span><button class="btn pending-change-review" data-id="${Number(i.id)}" data-status="approved">Approve</button><button class="btn pending-change-review" data-id="${Number(i.id)}" data-status="denied">Deny</button></span>`;
+      if(i.type==="lunch"&&hasAny(["approve_timecard","edit_employee_time","edit_payroll_time"]))actions=`<span><button class="btn pending-lunch-review" data-id="${Number(i.id)}" data-status="approved">Approve</button><button class="btn pending-lunch-review" data-id="${Number(i.id)}" data-status="denied">Deny</button></span>`;
+    }
+    return`<div class="pending-item"><span>${esc(i.text)}</span>${actions}</div>`;
+  }).join("");
   list.querySelectorAll(".pending-leave-review").forEach(b=>b.addEventListener("click",()=>reviewLeave(b.dataset.id,b.dataset.status)));
   list.querySelectorAll(".pending-change-review").forEach(b=>b.addEventListener("click",()=>reviewChange(b.dataset.id,b.dataset.status)));
+  list.querySelectorAll(".pending-lunch-review").forEach(b=>b.addEventListener("click",()=>reviewLunchRequest(b.dataset.id,b.dataset.status)));
 }
 function bindRowActions(){
   document.querySelectorAll(".punch").forEach(el=>el.addEventListener("click",ev=>openPunchMenu(ev,Number(el.dataset.entryId),el.dataset.kind)));
   document.querySelectorAll(".day-punch:not(:disabled)").forEach(b=>b.addEventListener("click",()=>openAddEntry(b.dataset.date)));
   document.querySelectorAll(".day-leave:not(:disabled)").forEach(b=>b.addEventListener("click",()=>openLeave(b.dataset.date)));
+  document.querySelectorAll(".lunch-request").forEach(b=>b.addEventListener("click",()=>requestLunchWaiver(b.dataset.date)));
+  document.querySelectorAll(".lunch-waive").forEach(b=>b.addEventListener("click",()=>waiveForcedLunch(b.dataset.date)));
 }
 function findEntry(id){return(currentData.entries||[]).find(e=>Number(e.id)===Number(id))}
 function openPunchMenu(ev,id,kind){

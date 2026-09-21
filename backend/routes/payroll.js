@@ -65,9 +65,20 @@ function createPayrollRouter({ requireUser, requireAnyPermission, pool, getReque
              e.last_name,
              d.name AS department,
              to_char(te.clock_in,'MM/DD/YYYY') AS work_date,
+             to_char(te.clock_in,'YYYY-MM-DD') AS work_date_iso,
+             te.clock_in AS clock_in_raw,
+             te.clock_out AS clock_out_raw,
              to_char(te.clock_in,'HH12:MI AM') AS clock_in,
              CASE WHEN te.clock_out IS NULL THEN '' ELSE to_char(te.clock_out,'HH12:MI AM') END AS clock_out,
              ROUND((EXTRACT(EPOCH FROM (COALESCE(te.clock_out,NOW())-te.clock_in))/3600)::numeric,2) AS hours_worked,
+             e.forced_lunch_enabled,
+             e.forced_lunch_minutes,
+             EXISTS(
+               SELECT 1 FROM forced_lunch_waivers flw
+                WHERE flw.employee_id=e.id
+                  AND flw.work_date=te.clock_in::date
+                  AND flw.active=TRUE
+             ) AS lunch_waived,
              COALESCE(ppa.status,'pending') AS timecard_status
            FROM time_entries te
            JOIN employees e ON e.id=te.employee_id
@@ -109,9 +120,20 @@ function createPayrollRouter({ requireUser, requireAnyPermission, pool, getReque
              ppa.supervisor_approved_at,
              te.id AS time_entry_id,
              to_char(te.clock_in,'MM/DD/YYYY') AS work_date,
+             to_char(te.clock_in,'YYYY-MM-DD') AS work_date_iso,
+             te.clock_in AS clock_in_raw,
+             te.clock_out AS clock_out_raw,
              to_char(te.clock_in,'HH12:MI AM') AS clock_in,
              CASE WHEN te.clock_out IS NULL THEN '' ELSE to_char(te.clock_out,'HH12:MI AM') END AS clock_out,
-             ROUND((EXTRACT(EPOCH FROM (COALESCE(te.clock_out,NOW())-te.clock_in))/3600)::numeric,2) AS hours_worked
+             ROUND((EXTRACT(EPOCH FROM (COALESCE(te.clock_out,NOW())-te.clock_in))/3600)::numeric,2) AS hours_worked,
+             e.forced_lunch_enabled,
+             e.forced_lunch_minutes,
+             EXISTS(
+               SELECT 1 FROM forced_lunch_waivers flw
+                WHERE flw.employee_id=e.id
+                  AND flw.work_date=te.clock_in::date
+                  AND flw.active=TRUE
+             ) AS lunch_waived
            FROM employees e
            LEFT JOIN departments d ON d.id=e.department_id
            LEFT JOIN pay_period_approvals ppa

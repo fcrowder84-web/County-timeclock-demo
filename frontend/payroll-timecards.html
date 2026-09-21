@@ -285,14 +285,38 @@
         }
 
         function roundedDailyHours(entries, dateField) {
-            const minutesByDay = {};
+            const days = {};
             entries.forEach(entry => {
                 const day = entry[dateField] || "";
-                minutesByDay[day] = (minutesByDay[day] || 0) + durationMinutes(entry.hours_worked);
+                if (!days[day]) days[day] = {
+                    minutes: 0,
+                    firstIn: null,
+                    lastOut: null,
+                    forcedEnabled: false,
+                    lunchMinutes: 0,
+                    waived: false
+                };
+                const item = days[day];
+                item.minutes += durationMinutes(entry.hours_worked);
+                const inMs = entry.clock_in_raw ? new Date(entry.clock_in_raw).getTime() : NaN;
+                const outMs = entry.clock_out_raw ? new Date(entry.clock_out_raw).getTime() : NaN;
+                if (Number.isFinite(inMs)) item.firstIn = item.firstIn == null ? inMs : Math.min(item.firstIn, inMs);
+                if (Number.isFinite(outMs)) item.lastOut = item.lastOut == null ? outMs : Math.max(item.lastOut, outMs);
+                item.forcedEnabled = entry.forced_lunch_enabled === true || String(entry.forced_lunch_enabled) === "true";
+                item.lunchMinutes = Math.max(item.lunchMinutes, Number(entry.forced_lunch_minutes || 0));
+                item.waived = item.waived || entry.lunch_waived === true || String(entry.lunch_waived) === "true";
             });
-            return Object.values(minutesByDay).reduce((total, minutes) => {
-                const completedQuarters = Math.floor(minutes / 15) * 15;
-                return total + completedQuarters + (minutes % 15 > 5 ? 15 : 0);
+            return Object.values(days).reduce((total, item) => {
+                const completedQuarters = Math.floor(item.minutes / 15) * 15;
+                const grossMinutes = completedQuarters + (item.minutes % 15 > 5 ? 15 : 0);
+                const spanMinutes = item.firstIn != null && item.lastOut != null
+                    ? Math.max(grossMinutes, Math.round((item.lastOut - item.firstIn) / 60000))
+                    : grossMinutes;
+                const existingBreakMinutes = Math.max(0, spanMinutes - grossMinutes);
+                const deductionMinutes = item.forcedEnabled && !item.waived
+                    ? Math.min(grossMinutes, Math.max(0, item.lunchMinutes - existingBreakMinutes))
+                    : 0;
+                return total + grossMinutes - deductionMinutes;
             }, 0) / 60;
         }
 
