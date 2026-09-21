@@ -3,6 +3,7 @@
 const express = require('express');
 const { canEditPunch } = require('../lib/punch-edit-authority');
 const { summarizeTimecard } = require('../lib/timecard-summary');
+const { getForcedLunchContext } = require('../lib/forced-lunch');
 
 function parsePositiveInt(value, label) {
   const parsed = Number(value);
@@ -61,13 +62,45 @@ function createSupervisorRouter({
              ROUND(
                COALESCE((
                  SELECT SUM(
-                   FLOOR(daily.day_minutes / 15.0) * 15
-                   + CASE WHEN MOD(daily.day_minutes, 15) > 5 THEN 15 ELSE 0 END
+                   daily.rounded_minutes
+                   - CASE
+                       WHEN e.forced_lunch_enabled
+                        AND NOT EXISTS (
+                          SELECT 1
+                            FROM forced_lunch_waivers flw
+                           WHERE flw.employee_id=e.id
+                             AND flw.work_date=daily.work_date
+                        )
+                       THEN LEAST(
+                         daily.rounded_minutes,
+                         GREATEST(
+                           0,
+                           e.forced_lunch_minutes
+                           - GREATEST(0,daily.span_minutes-daily.raw_minutes)
+                         )
+                       )
+                       ELSE 0
+                     END
                  ) / 60.0
                  FROM (
-                   SELECT ROUND(SUM(
-                     EXTRACT(EPOCH FROM (COALESCE(day_entry.clock_out,NOW()) - day_entry.clock_in)) / 60
-                   ))::int AS day_minutes
+                   SELECT
+                     day_entry.clock_in::date AS work_date,
+                     ROUND(SUM(
+                       EXTRACT(EPOCH FROM (COALESCE(day_entry.clock_out,NOW()) - day_entry.clock_in)) / 60
+                     ))::int AS raw_minutes,
+                     (
+                       FLOOR(ROUND(SUM(
+                         EXTRACT(EPOCH FROM (COALESCE(day_entry.clock_out,NOW()) - day_entry.clock_in)) / 60
+                       ))::int / 15.0) * 15
+                       + CASE WHEN MOD(ROUND(SUM(
+                         EXTRACT(EPOCH FROM (COALESCE(day_entry.clock_out,NOW()) - day_entry.clock_in)) / 60
+                       ))::int,15) > 5 THEN 15 ELSE 0 END
+                     )::int AS rounded_minutes,
+                     ROUND(
+                       EXTRACT(EPOCH FROM (
+                         MAX(COALESCE(day_entry.clock_out,NOW())) - MIN(day_entry.clock_in)
+                       )) / 60
+                     )::int AS span_minutes
                    FROM time_entries day_entry
                    WHERE day_entry.employee_id=e.id
                      AND day_entry.deleted_at IS NULL
@@ -101,6 +134,28 @@ function createSupervisorRouter({
                  AND pending_leave.leave_date BETWEEN $1::date AND $2::date
                  AND pending_leave.status='pending'
              ), '[]'::json) AS pending_leave_entries,
+             COALESCE((
+               SELECT COUNT(*)
+               FROM forced_lunch_waiver_requests pending_lunch
+               WHERE pending_lunch.employee_id=e.id
+                 AND pending_lunch.work_date BETWEEN $1::date AND $2::date
+                 AND pending_lunch.status='pending'
+             ),0)::int AS pending_lunch_count,
+             COALESCE((
+               SELECT json_agg(
+                 json_build_object(
+                   'id', pending_lunch.id,
+                   'work_date', to_char(pending_lunch.work_date,'YYYY-MM-DD'),
+                   'reason', pending_lunch.reason,
+                   'configured_lunch_minutes', pending_lunch.configured_lunch_minutes
+                 )
+                 ORDER BY pending_lunch.work_date,pending_lunch.id
+               )
+               FROM forced_lunch_waiver_requests pending_lunch
+               WHERE pending_lunch.employee_id=e.id
+                 AND pending_lunch.work_date BETWEEN $1::date AND $2::date
+                 AND pending_lunch.status='pending'
+             ),'[]'::json) AS pending_lunch_entries,
              COALESCE((
                SELECT COUNT(*)
                FROM time_change_requests pending_change
@@ -146,6 +201,7 @@ function createSupervisorRouter({
              )
            )
            GROUP BY e.id,e.first_name,e.last_name,d.name,e.role,
+                    e.forced_lunch_enabled,e.forced_lunch_minutes,
                     ppa.status,ppa.employee_signed_at,ppa.supervisor_approved_at
            ORDER BY d.name,e.last_name`,
           [period.pay_period_start, period.pay_period_end, req.user.role, req.user.id],
@@ -477,7 +533,8 @@ function createSupervisorRouter({
         const period = await getRequestedPayPeriod(req);
 
         const employeeResult = await pool.query(
-          `SELECT e.id,e.employee_number,e.first_name,e.last_name,d.name AS department,e.role
+          `SELECT e.id,e.employee_number,e.first_name,e.last_name,d.name AS department,e.role,
+                    e.forced_lunch_enabled,e.forced_lunch_minutes
              FROM employees e
              LEFT JOIN departments d ON d.id=e.department_id
             WHERE e.id=$1`,
@@ -542,6 +599,12 @@ function createSupervisorRouter({
           ),
         ]);
 
+        const lunchContext = await getForcedLunchContext(
+          pool,
+          employeeId,
+          period.pay_period_start,
+          period.pay_period_end,
+        );
         const approval = approvalResult.rows[0] || null;
         const payrollCanEdit =
           userHasPermission(req.user, 'edit_payroll_time');
@@ -553,13 +616,15 @@ function createSupervisorRouter({
           approval?.status === 'employee_submitted';
 
         return res.json({
-          employee: employeeResult.rows[0],
+          employee: { ...employeeResult.rows[0], ...lunchContext.settings },
           approval,
           can_edit_entries: payrollCanEdit || supervisorCanEdit,
           edit_mode: payrollCanEdit ? 'payroll' : (supervisorCanEdit ? 'supervisor' : 'locked'),
           correction_requests: correctionResult.rows,
           change_requests: requestsResult.rows,
           leave_entries: leaveResult.rows,
+          forced_lunch_waivers: lunchContext.waivers,
+          lunch_waiver_requests: lunchContext.requests,
           pay_period_start: period.pay_period_start,
           pay_period_end: period.pay_period_end,
           entries: entriesResult.rows,
@@ -567,6 +632,8 @@ function createSupervisorRouter({
             entries: entriesResult.rows,
             leaveEntries: leaveResult.rows,
             payPeriodStart: period.pay_period_start,
+            forcedLunchMinutes: lunchContext.forcedLunchMinutes,
+            lunchWaivers: lunchContext.waivers,
           }),
         });
       } catch (err) {
@@ -612,7 +679,7 @@ function createSupervisorRouter({
           return res.status(409).json({ error: 'Timecard is already payroll-finalized' });
         }
 
-        const [openPunches, pendingLeave, pendingChanges] = await Promise.all([
+        const [openPunches, pendingLeave, pendingChanges, pendingLunch] = await Promise.all([
           client.query(
             `SELECT id FROM time_entries
               WHERE employee_id=$1 AND deleted_at IS NULL
@@ -638,15 +705,23 @@ function createSupervisorRouter({
                 )`,
             [employeeId, period.pay_period_start, period.pay_period_end],
           ),
+          client.query(
+            `SELECT id FROM forced_lunch_waiver_requests
+              WHERE employee_id=$1
+                AND work_date BETWEEN $2::date AND $3::date
+                AND status='pending'`,
+            [employeeId, period.pay_period_start, period.pay_period_end],
+          ),
         ]);
 
-        if (openPunches.rows.length || pendingLeave.rows.length || pendingChanges.rows.length) {
+        if (openPunches.rows.length || pendingLeave.rows.length || pendingChanges.rows.length || pendingLunch.rows.length) {
           await client.query('ROLLBACK');
           return res.status(409).json({
-            error: 'Resolve open punches and pending leave/change requests before approving the timecard',
+            error: 'Resolve open punches and pending leave/change/lunch requests before approving the timecard',
             open_punch_count: openPunches.rows.length,
             pending_leave_count: pendingLeave.rows.length,
             pending_change_count: pendingChanges.rows.length,
+            pending_lunch_count: pendingLunch.rows.length,
           });
         }
 
