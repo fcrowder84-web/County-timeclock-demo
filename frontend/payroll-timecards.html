@@ -285,15 +285,35 @@
         }
 
         function roundedDailyHours(entries, dateField) {
-            const minutesByDay = {};
+            const creditedByDay = {};
+            const rawMinutesByDay = {};
             entries.forEach(entry => {
                 const day = entry[dateField] || "";
-                minutesByDay[day] = (minutesByDay[day] || 0) + durationMinutes(entry.hours_worked);
+                if (!day) return;
+                if (entry.credited_daily_hours !== null && entry.credited_daily_hours !== undefined) {
+                    if (!(day in creditedByDay)) creditedByDay[day] = Number(entry.credited_daily_hours || 0);
+                } else {
+                    rawMinutesByDay[day] = (rawMinutesByDay[day] || 0) + durationMinutes(entry.hours_worked);
+                }
             });
-            return Object.values(minutesByDay).reduce((total, minutes) => {
-                const completedQuarters = Math.floor(minutes / 15) * 15;
-                return total + completedQuarters + (minutes % 15 > 5 ? 15 : 0);
-            }, 0) / 60;
+            const creditedMinutes = Object.values(creditedByDay).reduce((total, hours) => total + Math.round(hours * 60), 0);
+            const fallbackMinutes = Object.entries(rawMinutesByDay)
+                .filter(([day]) => !(day in creditedByDay))
+                .reduce((total, [, minutes]) => {
+                    const completedQuarters = Math.floor(minutes / 15) * 15;
+                    return total + completedQuarters + (minutes % 15 > 5 ? 15 : 0);
+                }, 0);
+            return (creditedMinutes + fallbackMinutes) / 60;
+        }
+
+        function forcedLunchHours(entries, dateField) {
+            const lunchByDay = {};
+            entries.forEach(entry => {
+                const day = entry[dateField] || "";
+                if (!day || day in lunchByDay) return;
+                lunchByDay[day] = Number(entry.forced_lunch_deducted_hours || 0);
+            });
+            return Object.values(lunchByDay).reduce((total, hours) => total + hours, 0);
         }
 
         function getWeekNumber(dateString) {
@@ -318,6 +338,7 @@
 
         function renderWeekTable(title, entries, colorOffset) {
             const totalHours = roundedDailyHours(entries, "work_date");
+            const lunchHours = forcedLunchHours(entries, "work_date");
             let rowsHtml = "";
             let previousDate = null;
             let dayIndex = colorOffset;
@@ -356,6 +377,7 @@
                         Regular: ${totals.regular.toFixed(2)}
                         <br>
                         OT: ${totals.overtime.toFixed(2)}
+                        ${lunchHours > 0 ? `<br>Forced Lunch Deducted: ${lunchHours.toFixed(2)}` : ""}
                     </td>
                 </tr>
             `;
@@ -382,6 +404,7 @@
                     </div>
                 `,
                 totalHours,
+                forcedLunch: lunchHours,
                 regular: totals.regular,
                 overtime: totals.overtime
             };
