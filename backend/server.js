@@ -6,6 +6,8 @@ const {
   normalizePermissions,
   legacyPermissionsForRole,
   deriveLegacyRole,
+  currentAuthorizationForUser,
+  roleCanSelfApprove,
   userPermissionSet,
   userHasPermission,
   userHasAnyPermission,
@@ -37,17 +39,6 @@ async function getPayPeriod(requestedStart = null) { const config = await getPay
 async function getCurrentPayPeriod() { return getPayPeriod(); }
 async function getRequestedPayPeriod(req) { return getPayPeriod(req.query?.period_start || req.body?.period_start || null); }
 async function getUserById(id) { const result = await pool.query(`SELECT e.*, d.name AS department_name FROM employees e LEFT JOIN departments d ON d.id=e.department_id WHERE e.id=$1`, [id]); return result.rows[0] || null; }
-function storedPermissionsForUser(user,fallback=[]){
-  const source=String(user?.auth_source||'').toLowerCase();
-  if(source==='portal'){
-    if(Array.isArray(user?.portal_permissions)) return normalizePermissions(user.portal_permissions);
-    if(user?.portal_permissions&&typeof user.portal_permissions==='object'){
-      return normalizePermissions(Object.keys(user.portal_permissions).filter(key=>user.portal_permissions[key]));
-    }
-    return [];
-  }
-  return normalizePermissions(fallback||[]);
-}
 async function requireUser(req,res,next) {
   try {
     const token=getBearerToken(req);
@@ -65,26 +56,24 @@ async function requireUser(req,res,next) {
     // The bearer session identifies the employee; authorization comes from the
     // current employee record so Portal role/permission/scope reductions take
     // effect on the very next request instead of waiting for session expiry.
-    const permissions=storedPermissionsForUser(user,session.permissions);
+    const authorization=currentAuthorizationForUser(
+      user,session.permissions,session.app_admin_scope,
+    );
     if(String(user.auth_source||'').toLowerCase()==='portal'
-      && !permissions.includes('access')
-      && !permissions.includes('app_admin')){
+      && !authorization.permissions.includes('access')
+      && !authorization.permissions.includes('app_admin')){
       sessionStore.destroy(token);
       return res.status(403).json({error:"TimeClock access has been removed"});
     }
-    user.permissions=permissions;
-    user.app_admin_scope=permissions.includes('app_admin')&&user.app_admin_scope==='all'?'all':'own';
+    user.permissions=authorization.permissions;
+    user.app_admin_scope=authorization.appAdminScope;
     req.user=user;
     req.sessionToken=token;
     next();
   } catch(err){next(err);}
 }
-function selfApprovalRoleAllowed(user){
-  const role=String(user?.role||'employee').toLowerCase();
-  return ['department_head','payroll','timeclock_manager','admin'].includes(role);
-}
 function selfApprovalRouteAllowed(req,keys){
-  if(String(req.method||"").toUpperCase()!=="POST"||!selfApprovalRoleAllowed(req.user)) return false;
+  if(String(req.method||"").toUpperCase()!=="POST"||!roleCanSelfApprove(req.user)) return false;
   const path=String(req.originalUrl||req.url||"").split("?")[0];
   if(keys.includes("approve_punch_correction")
     && userHasPermission(req.user,"approve_own_punch_corrections")
@@ -138,19 +127,19 @@ async function canAccessEmployee(user,employeeId,actionPermissions=[]){
   // eligible to perform self-approval. Supervisor and Employee remain barred
   // even if someone accidentally/customarily grants a self-approval tick.
   if(isSelf&&requested.includes('approve_punch_correction')){
-    return selfApprovalRoleAllowed(user)
+    return roleCanSelfApprove(user)
       && userHasPermission(user,'approve_own_punch_corrections');
   }
   if(isSelf&&requested.includes('approve_timecard')){
-    return selfApprovalRoleAllowed(user)
+    return roleCanSelfApprove(user)
       && userHasPermission(user,'approve_own_timecard');
   }
   if(isSelf&&requested.includes('approve_leave')){
-    return selfApprovalRoleAllowed(user)
+    return roleCanSelfApprove(user)
       && userHasPermission(user,'approve_own_leave');
   }
   if(isSelf&&requested.includes('approve_lunch_waiver')){
-    return selfApprovalRoleAllowed(user)
+    return roleCanSelfApprove(user)
       && userHasPermission(user,'approve_own_lunch_waiver');
   }
 
