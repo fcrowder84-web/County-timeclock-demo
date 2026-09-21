@@ -1,6 +1,43 @@
 'use strict';
 
 const express = require('express');
+const { summarizeTimecard } = require('../lib/timecard-summary');
+const { getForcedLunchContext } = require('../lib/forced-lunch');
+
+async function annotatePayrollRows(pool, rows, payPeriodStart, payPeriodEnd) {
+  const grouped = new Map();
+  for (const row of rows) {
+    const employeeId = Number(row.employee_id);
+    if (!Number.isInteger(employeeId) || employeeId <= 0 || !row.entry_date_iso) continue;
+    if (!grouped.has(employeeId)) grouped.set(employeeId, []);
+    grouped.get(employeeId).push(row);
+  }
+
+  await Promise.all(Array.from(grouped.entries()).map(async ([employeeId, employeeRows]) => {
+    const lunchContext = await getForcedLunchContext(pool, employeeId, payPeriodStart, payPeriodEnd);
+    const summary = summarizeTimecard({
+      entries: employeeRows.map(row => ({
+        entry_date_iso: row.entry_date_iso,
+        clock_in: row.clock_in_value,
+        clock_out: row.clock_out_value,
+        hours_worked: row.hours_worked,
+      })),
+      leaveEntries: [],
+      payPeriodStart,
+      forcedLunchMinutes: lunchContext.forcedLunchMinutes,
+      lunchWaivers: lunchContext.waivers,
+    });
+
+    for (const row of employeeRows) {
+      const day = summary.daily?.[row.entry_date_iso] || {};
+      row.credited_daily_hours = Number(day.credited_worked_hours || 0);
+      row.forced_lunch_deducted_hours = Number(day.forced_lunch_deducted_hours || 0);
+      row.forced_lunch_waived = Boolean(day.forced_lunch_waived);
+    }
+  }));
+
+  return rows;
+}
 
 function createPayrollRouter({ requireUser, requireAnyPermission, pool, getRequestedPayPeriod }) {
   const router = express.Router();
@@ -60,10 +97,15 @@ function createPayrollRouter({ requireUser, requireAnyPermission, pool, getReque
         const period = await getRequestedPayPeriod(req);
         const result = await pool.query(
           `SELECT
+             e.id AS employee_id,
              e.employee_number,
              e.first_name,
              e.last_name,
              d.name AS department,
+             te.id AS time_entry_id,
+             te.clock_in AS clock_in_value,
+             te.clock_out AS clock_out_value,
+             to_char(te.clock_in,'YYYY-MM-DD') AS entry_date_iso,
              to_char(te.clock_in,'MM/DD/YYYY') AS work_date,
              to_char(te.clock_in,'HH12:MI AM') AS clock_in,
              CASE WHEN te.clock_out IS NULL THEN '' ELSE to_char(te.clock_out,'HH12:MI AM') END AS clock_out,
@@ -82,7 +124,13 @@ function createPayrollRouter({ requireUser, requireAnyPermission, pool, getReque
            ORDER BY d.name,e.last_name,te.clock_in`,
           [period.pay_period_start, period.pay_period_end],
         );
-        return res.json(result.rows);
+        const rows = await annotatePayrollRows(
+          pool,
+          result.rows,
+          period.pay_period_start,
+          period.pay_period_end,
+        );
+        return res.json(rows);
       } catch (err) {
         console.error(err);
         return res.status(err.statusCode || 500).json({ error: err.message || 'Payroll export error' });
@@ -108,6 +156,9 @@ function createPayrollRouter({ requireUser, requireAnyPermission, pool, getReque
              ppa.employee_signed_at,
              ppa.supervisor_approved_at,
              te.id AS time_entry_id,
+             te.clock_in AS clock_in_value,
+             te.clock_out AS clock_out_value,
+             to_char(te.clock_in,'YYYY-MM-DD') AS entry_date_iso,
              to_char(te.clock_in,'MM/DD/YYYY') AS work_date,
              to_char(te.clock_in,'HH12:MI AM') AS clock_in,
              CASE WHEN te.clock_out IS NULL THEN '' ELSE to_char(te.clock_out,'HH12:MI AM') END AS clock_out,
@@ -138,10 +189,16 @@ function createPayrollRouter({ requireUser, requireAnyPermission, pool, getReque
            ORDER BY d.name,e.last_name,e.first_name,te.clock_in`,
           [period.pay_period_start, period.pay_period_end],
         );
+        const rows = await annotatePayrollRows(
+          pool,
+          result.rows,
+          period.pay_period_start,
+          period.pay_period_end,
+        );
         return res.json({
           pay_period_start: period.pay_period_start,
           pay_period_end: period.pay_period_end,
-          rows: result.rows,
+          rows,
         });
       } catch (err) {
         console.error(err);
