@@ -139,4 +139,31 @@ assert.strictEqual(continuousOddMinutePunch.days.length, 1);
 assert.strictEqual(continuousOddMinutePunch.days[0].existing_break_hours, 0);
 assert.strictEqual(continuousOddMinutePunch.days[0].forced_lunch_deduction_hours, 0.5);
 
+const effectiveDatedLunch = summarizeTimecard({
+  payPeriodStart: '2026-09-14',
+  forcedLunchSettings: [
+    { effective_date_iso: '2026-09-21', enabled: true, minutes: 30 },
+  ],
+  entries: [
+    { entry_date_iso: '2026-09-20', clock_in: '2026-09-20T08:00:00-04:00', clock_out: '2026-09-20T17:00:00-04:00', hours_worked: 9 },
+    { entry_date_iso: '2026-09-21', clock_in: '2026-09-21T08:00:00-04:00', clock_out: '2026-09-21T17:00:00-04:00', hours_worked: 9 },
+  ],
+});
+assert.strictEqual(effectiveDatedLunch.days.find(day => day.work_date === '2026-09-20').forced_lunch_deduction_hours, 0);
+assert.strictEqual(effectiveDatedLunch.days.find(day => day.work_date === '2026-09-21').forced_lunch_deduction_hours, 0.5);
+
+const changedLunchDuration = summarizeTimecard({
+  payPeriodStart: '2026-09-28',
+  forcedLunchSettings: [
+    { effective_date_iso: '2026-09-01', enabled: true, minutes: 30 },
+    { effective_date_iso: '2026-10-05', enabled: true, minutes: 60 },
+  ],
+  entries: [
+    { entry_date_iso: '2026-10-04', clock_in: '2026-10-04T08:00:00-04:00', clock_out: '2026-10-04T17:00:00-04:00', hours_worked: 9 },
+    { entry_date_iso: '2026-10-05', clock_in: '2026-10-05T08:00:00-04:00', clock_out: '2026-10-05T17:00:00-04:00', hours_worked: 9 },
+  ],
+});
+assert.strictEqual(changedLunchDuration.days.find(day => day.work_date === '2026-10-04').forced_lunch_deduction_hours, 0.5);
+assert.strictEqual(changedLunchDuration.days.find(day => day.work_date === '2026-10-05').forced_lunch_deduction_hours, 1);
+
 console.log("timecard summary tests passed");
