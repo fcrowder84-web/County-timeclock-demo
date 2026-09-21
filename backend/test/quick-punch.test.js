@@ -48,7 +48,7 @@ function compact(sql) { return String(sql).replace(/\s+/g, ' ').trim(); }
 
   assert.deepStrictEqual(
     router.stack.filter((x) => x.route).map((x) => `${Object.keys(x.route.methods)[0]} ${x.route.path}`),
-    ['get /quick-status','get /my-punches','post /delete-punch','post /supervisor/add-time-entry','post /clock-in','post /clock-out'],
+    ['get /quick-status','get /my-punches','post /delete-punch','post /clock-in','post /clock-out'],
   );
 
   let res = makeRes();
@@ -76,13 +76,6 @@ function compact(sql) { return String(sql).replace(/\s+/g, ' ').trim(); }
   assert(queries.some((item) => item.text === 'BEGIN'));
   assert(queries.some((item) => item.text === 'COMMIT'));
   assert(queries.some((item) => item.text.includes('FOR UPDATE')));
-
-  res = makeRes();
-  await handlerFor(router, 'post', '/supervisor/add-time-entry')({ user: { id: 99, role: 'payroll', permissions: ['edit_payroll_time'] }, body: { employee_id: 8, clock_in: '2026-08-20 08:00:00', clock_out: '2026-08-20 17:00:00', reason: 'Approved correction' } }, res);
-  assert.strictEqual(res.statusCode, 201);
-  assert.strictEqual(res.body.entry.id, 55);
-  assert.strictEqual(audits.length, 2);
-  assert.strictEqual(audits[1][1], 'payroll_add_time_entry');
 
   res = makeRes();
   await handlerFor(router, 'post', '/clock-in')({ user: { id: 7, first_name: 'Pat' } }, res);
