@@ -161,6 +161,8 @@ function defaultAddEntryDate(){const start=dateOnly(currentData?.pay_period_star
 document.getElementById("addTimeBtn").addEventListener("click",()=>openAddEntry(defaultAddEntryDate()));
 function timestamp(date,time){return date&&time?`${date} ${time}:00`:null}
 document.getElementById("entrySubmitBtn").addEventListener("click",async()=>{
+  // Single-punch modes are handled exclusively by timecard-single-punch.js.
+  if(entryModalMode==="add-punch"||entryModalMode==="request-punch")return;
   const inDate=document.getElementById("entryInDate").value,inTime=document.getElementById("entryInTime").value,outDate=document.getElementById("entryOutDate").value,outTime=document.getElementById("entryOutTime").value,reason=document.getElementById("entryReason").value.trim();
   clearEntryModalMessage();
   try{
