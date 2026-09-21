@@ -951,7 +951,8 @@
                 "Clock In",
                 "Clock Out",
                 "Exact Duration",
-                "Rounded Daily Hours",
+                "Credited Daily Hours",
+                "Forced Lunch Deducted",
                 "Timecard Status"
             ];
 
@@ -962,12 +963,19 @@
             const dailyGroups = {};
             rows.forEach((row, index) => {
                 const key = `${row.employee_number || row.employee_id}|${row.work_date}`;
-                if (!dailyGroups[key]) dailyGroups[key] = { minutes: 0, firstIndex: index };
-                dailyGroups[key].minutes += durationMinutes(row.hours_worked);
+                if (!dailyGroups[key]) {
+                    dailyGroups[key] = {
+                        creditedHours: Number(row.credited_daily_hours || 0),
+                        lunchHours: Number(row.forced_lunch_deducted_hours || 0),
+                        firstIndex: index
+                    };
+                }
             });
-            const roundedHoursByFirstRow = {};
+            const creditedHoursByFirstRow = {};
+            const lunchHoursByFirstRow = {};
             Object.values(dailyGroups).forEach(group => {
-                roundedHoursByFirstRow[group.firstIndex] = (roundDailyMinutes(group.minutes) / 60).toFixed(2);
+                creditedHoursByFirstRow[group.firstIndex] = group.creditedHours.toFixed(2);
+                lunchHoursByFirstRow[group.firstIndex] = group.lunchHours > 0 ? group.lunchHours.toFixed(2) : "";
             });
 
             rows.forEach((row, index) => {
@@ -980,7 +988,8 @@
                     csvValue(row.clock_in),
                     csvValue(row.clock_out),
                     csvValue(formatExactDuration(row.hours_worked)),
-                    csvValue(roundedHoursByFirstRow[index] || ""),
+                    csvValue(creditedHoursByFirstRow[index] || ""),
+                    csvValue(lunchHoursByFirstRow[index] || ""),
                     csvValue(row.timecard_status)
                 ].join(","));
             });
