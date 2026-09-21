@@ -959,6 +959,10 @@
                 showMessage("A reason is required when denying a punch request", true);
                 return;
             }
+            if (note.length > 1000) {
+                showMessage("Denial reason must be 1000 characters or less", true);
+                return;
+            }
 
             const response =
                 await apiFetch(
