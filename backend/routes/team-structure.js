@@ -43,7 +43,8 @@ function createTeamStructureRouter({
       try {
         const result = await pool.query(
           `SELECT e.id,e.employee_number,e.first_name,e.last_name,e.department,e.department_id,
-                  d.name AS department_name,e.role,e.active,e.must_change_pin
+                  d.name AS department_name,e.role,e.active,e.must_change_pin,
+                  e.forced_lunch_enabled,e.forced_lunch_minutes
              FROM employees e
              LEFT JOIN departments d ON d.id=e.department_id
             WHERE (
@@ -161,7 +162,7 @@ function createTeamStructureRouter({
 
         const employees = await pool.query(
           `SELECT e.id,e.employee_number,e.first_name,e.last_name,e.department_id,
-                  d.name AS department_name,e.active,
+                  d.name AS department_name,e.active,e.forced_lunch_enabled,e.forced_lunch_minutes,
                   EXISTS(SELECT 1 FROM department_heads dh WHERE dh.employee_id=e.id AND dh.active=TRUE) AS is_department_head,
                   EXISTS(SELECT 1 FROM supervisor_employee_assignments sea WHERE sea.supervisor_employee_id=e.id AND sea.active=TRUE) AS is_supervisor
              FROM employees e
