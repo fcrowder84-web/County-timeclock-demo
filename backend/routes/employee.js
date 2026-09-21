@@ -1,7 +1,7 @@
 'use strict';
 
 const express = require('express');
-const { canEditPunch, hasPayrollOverride } = require('../lib/punch-edit-authority');
+const { canEditPunch, hasPayrollOverride, hasPunchPermission } = require('../lib/punch-edit-authority');
 const { summarizeTimecard } = require('../lib/timecard-summary');
 const { insertPunchIntoSequence } = require('../lib/punch-sequence');
 const { createApproveSinglePunchHandler } = require('../lib/approve-single-punch');
@@ -17,8 +17,7 @@ function permissionSet(user) {
 }
 
 function hasPermission(user, key) {
-  const permissions = permissionSet(user);
-  return permissions.has(key);
+  return hasPunchPermission(user, key);
 }
 
 async function canDirectEditEmployee(pool, user, employeeId) {
@@ -611,7 +610,7 @@ function createEmployeeRouter({ requireUser, requireAnyPermission, pool, audit, 
         await client.query('BEGIN');
         const approvalResult = await approvalForTimestamp(client, employeeId, primaryTimestamp, true);
         const approval = approvalResult.rows[0] || null;
-        if (payrollOverride && approval?.payroll_finalized_at && !permissionSet(req.user).has('reopen_timecard')) {
+        if (payrollOverride && approval?.payroll_finalized_at && !hasPermission(req.user, 'reopen_timecard')) {
           await client.query('ROLLBACK');
           return res.status(403).json({ error: 'Reopen permission is required for a finalized timecard.' });
         }
