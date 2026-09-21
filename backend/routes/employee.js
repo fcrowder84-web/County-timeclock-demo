@@ -328,6 +328,16 @@ function createEmployeeRouter({ requireUser, requireAnyPermission, pool, audit, 
               OR (a.target_type='forced_lunch_waiver_request' AND EXISTS (
                 SELECT 1 FROM forced_lunch_waiver_requests flr WHERE flr.id::text=a.target_id AND flr.employee_id=$1
               ))
+              OR (
+                a.target_type='pay_period'
+                AND EXISTS (
+                  SELECT 1
+                    FROM jsonb_array_elements_text(
+                      COALESCE(a.details->'finalized_employee_ids','[]'::jsonb)
+                    ) AS affected(employee_id)
+                   WHERE affected.employee_id=$1::text
+                )
+              )
             )
           ORDER BY a.created_at DESC,a.id DESC
           LIMIT $2`,
