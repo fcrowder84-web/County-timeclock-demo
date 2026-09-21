@@ -37,8 +37,67 @@ async function getPayPeriod(requestedStart = null) { const config = await getPay
 async function getCurrentPayPeriod() { return getPayPeriod(); }
 async function getRequestedPayPeriod(req) { return getPayPeriod(req.query?.period_start || req.body?.period_start || null); }
 async function getUserById(id) { const result = await pool.query(`SELECT e.*, d.name AS department_name FROM employees e LEFT JOIN departments d ON d.id=e.department_id WHERE e.id=$1`, [id]); return result.rows[0] || null; }
-async function requireUser(req,res,next) { try { const token=getBearerToken(req); const session=sessionStore.getActive(token); if(!session||session.expires_at<=Date.now()){if(token)sessionStore.destroy(token);return res.status(401).json({error:"Login required"});} const user=await getUserById(session.employee_id); if(!user||!user.active||user.is_active===false){sessionStore.destroy(token);return res.status(401).json({error:"Invalid session"});} user.permissions=session.permissions; user.app_admin_scope=session.app_admin_scope; user.auth_source=session.auth_source; req.user=user; req.sessionToken=token; next(); } catch(err){next(err);} }
-function selfApprovalRouteAllowed(req,keys){if(String(req.method||"").toUpperCase()!=="POST")return false;const path=String(req.originalUrl||req.url||"").split("?")[0];const permissions=userPermissionSet(req.user);if(keys.includes("approve_punch_correction")&&permissions.has("approve_own_punch_corrections")&&(path.endsWith("/supervisor/approve-change-request")||path.endsWith("/supervisor/approve-single-punch")))return true;if(keys.includes("approve_timecard")&&permissions.has("approve_own_timecard")&&path.endsWith("/supervisor/approve-timecard"))return true;return false;}
+function storedPermissionsForUser(user,fallback=[]){
+  const source=String(user?.auth_source||'').toLowerCase();
+  if(source==='portal'){
+    if(Array.isArray(user?.portal_permissions)) return normalizePermissions(user.portal_permissions);
+    if(user?.portal_permissions&&typeof user.portal_permissions==='object'){
+      return normalizePermissions(Object.keys(user.portal_permissions).filter(key=>user.portal_permissions[key]));
+    }
+    return [];
+  }
+  return normalizePermissions(fallback||[]);
+}
+async function requireUser(req,res,next) {
+  try {
+    const token=getBearerToken(req);
+    const session=sessionStore.getActive(token);
+    if(!session||session.expires_at<=Date.now()){
+      if(token)sessionStore.destroy(token);
+      return res.status(401).json({error:"Login required"});
+    }
+    const user=await getUserById(session.employee_id);
+    if(!user||!user.active||user.is_active===false){
+      sessionStore.destroy(token);
+      return res.status(401).json({error:"Invalid session"});
+    }
+
+    // The bearer session identifies the employee; authorization comes from the
+    // current employee record so Portal role/permission/scope reductions take
+    // effect on the very next request instead of waiting for session expiry.
+    const permissions=storedPermissionsForUser(user,session.permissions);
+    if(String(user.auth_source||'').toLowerCase()==='portal'
+      && !permissions.includes('access')
+      && !permissions.includes('app_admin')){
+      sessionStore.destroy(token);
+      return res.status(403).json({error:"TimeClock access has been removed"});
+    }
+    user.permissions=permissions;
+    user.app_admin_scope=permissions.includes('app_admin')&&user.app_admin_scope==='all'?'all':'own';
+    req.user=user;
+    req.sessionToken=token;
+    next();
+  } catch(err){next(err);}
+}
+function selfApprovalRoleAllowed(user){
+  const role=String(user?.role||'employee').toLowerCase();
+  return ['department_head','payroll','timeclock_manager','admin'].includes(role);
+}
+function selfApprovalRouteAllowed(req,keys){
+  if(String(req.method||"").toUpperCase()!=="POST"||!selfApprovalRoleAllowed(req.user)) return false;
+  const path=String(req.originalUrl||req.url||"").split("?")[0];
+  if(keys.includes("approve_punch_correction")
+    && userHasPermission(req.user,"approve_own_punch_corrections")
+    && (
+      path.endsWith("/supervisor/approve-change-request")
+      || path.endsWith("/supervisor/deny-change-request")
+      || path.endsWith("/supervisor/approve-single-punch")
+    )) return true;
+  if(keys.includes("approve_timecard")
+    && userHasPermission(req.user,"approve_own_timecard")
+    && path.endsWith("/supervisor/approve-timecard")) return true;
+  return false;
+}
 function requireAnyPermission(...permissionKeys){const keys=permissionKeys.flat();return(req,res,next)=>{if(userHasAnyPermission(req.user,keys)||selfApprovalRouteAllowed(req,keys))return next();return res.status(403).json({error:`Permission required: ${keys.join(" or ")}`,required_permissions:keys});};}
 function requireSupervisor(req,res,next){if(userHasAnyPermission(req.user,PERMISSION_GROUPS.supervisor))return next();return res.status(403).json({error:"Supervisor permission required"});}
 function requirePayroll(req,res,next){if(userHasAnyPermission(req.user,PERMISSION_GROUPS.payroll))return next();return res.status(403).json({error:"Payroll permission required"});}
@@ -75,44 +134,37 @@ async function canAccessEmployee(user,employeeId,actionPermissions=[]){
   const requested=Array.isArray(actionPermissions)?actionPermissions.filter(Boolean):[];
   const isSelf=Number(user.id)===Number(employeeId);
 
-  // Self-approval is intentionally separate from ordinary approval authority.
+  // Self approval requires both the dedicated capability and a role that is
+  // eligible to perform self-approval. Supervisor and Employee remain barred
+  // even if someone accidentally/customarily grants a self-approval tick.
   if(isSelf&&requested.includes('approve_punch_correction')){
-    return userHasPermission(user,'approve_own_punch_corrections');
+    return selfApprovalRoleAllowed(user)
+      && userHasPermission(user,'approve_own_punch_corrections');
   }
   if(isSelf&&requested.includes('approve_timecard')){
-    return userHasPermission(user,'approve_own_timecard');
+    return selfApprovalRoleAllowed(user)
+      && userHasPermission(user,'approve_own_timecard');
   }
   if(isSelf&&requested.includes('approve_leave')){
-    return userHasPermission(user,'approve_own_leave');
+    return selfApprovalRoleAllowed(user)
+      && userHasPermission(user,'approve_own_leave');
   }
   if(isSelf&&requested.includes('approve_lunch_waiver')){
-    return userHasPermission(user,'approve_own_lunch_waiver');
+    return selfApprovalRoleAllowed(user)
+      && userHasPermission(user,'approve_own_lunch_waiver');
   }
 
-  // When the caller specifies an action, capability is checked before scope.
-  // Structural role/assignment may narrow WHO, but never grants WHAT.
   if(requested.length&&!userHasAnyPermission(user,requested)) return false;
 
-  // App Admin is the master capability grant, but employee scope is separate.
-  // scope=all is countywide; scope=own is limited to the admin's home department.
   if(userHasPermission(user,'app_admin')&&user.app_admin_scope==='all') return true;
 
-  // Only true employee self-service capabilities automatically apply to the
-  // signed-in employee. Management/payroll capabilities still need role scope,
-  // so a Supervisor cannot accidentally operate on themselves merely because
-  // a management checkbox was granted.
   const selfServicePermissions=new Set([
     'access','clock_in_out','view_own_time','request_punch_correction',
     'request_leave','request_lunch_waiver','void_own_unapproved_punch',
     'withdraw_own_pending_request','submit_timecard',
   ]);
-  if(isSelf&&(
-    requested.length===0
-    || requested.every(key=>selfServicePermissions.has(key))
-  )) return true;
+  if(isSelf&&(requested.length===0||requested.every(key=>selfServicePermissions.has(key)))) return true;
 
-  // Countywide roles provide countywide scope only. The permission check above
-  // still decides which actions the person may actually perform.
   if(role==='timeclock_manager'||role==='payroll') return true;
 
   const target=await pool.query(
@@ -121,21 +173,24 @@ async function canAccessEmployee(user,employeeId,actionPermissions=[]){
   );
   if(!target.rows.length) return false;
   const targetDepartment=target.rows[0].department_id;
+  const sameDepartment=
+    Number(user.department_id)>0
+    && Number(user.department_id)===Number(targetDepartment);
 
-  if(userHasPermission(user,'app_admin')){
-    return Number(user.department_id)>0
-      && Number(user.department_id)===Number(targetDepartment);
+  // Department-scoped App Admin and Department Head have hard department
+  // boundaries. Retained supervisor assignments must never widen that scope.
+  if(userHasPermission(user,'app_admin')) return sameDepartment;
+  if(role==='department_head') return sameDepartment;
+
+  // Employee is always self-only. Supervisor is assigned-employees-only.
+  if(role==='employee') return false;
+  if(role==='supervisor'){
+    return !isSelf && await isAssignedEmployee(user,employeeId);
   }
-
-  // Department Head scope is the entire department, including themselves.
-  if(await isDepartmentHead(user,targetDepartment)) return true;
-
-  // Supervisor scope is only explicitly assigned employees. Supervisors are
-  // never implicitly assigned to themselves.
-  if(!isSelf&&await isAssignedEmployee(user,employeeId)) return true;
 
   return false;
 }
+
 const APPLICATION_ROLES=new Set(['employee','supervisor','department_head','payroll','timeclock_manager','admin']);
 function resolveApplicationRole(explicitRole,permissions){
   const normalizedPermissions=normalizePermissions(permissions||[]);
