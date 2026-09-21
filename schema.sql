@@ -476,7 +476,8 @@ CREATE TABLE public.time_change_requests (
     supervisor_note text,
     status text DEFAULT 'pending'::text NOT NULL,
     created_at timestamp without time zone DEFAULT now() NOT NULL,
-    reviewed_at timestamp without time zone
+    reviewed_at timestamp without time zone,
+    employee_acknowledged_at timestamp with time zone
 );
 
 
