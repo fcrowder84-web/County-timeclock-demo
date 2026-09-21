@@ -71,17 +71,21 @@ function renderPicker(selectedId){
 async function loadLog(employeeId){
   const data=await json(`${apiBase}/employee/activity-log?employee_id=${encodeURIComponent(employeeId)}&limit=250`);
   document.getElementById('employeeName').textContent=`${data.employee.first_name} ${data.employee.last_name}`;
-  document.getElementById('employeeMeta').textContent=[data.employee.employee_number?`Employee #${data.employee.employee_number}`:'',data.employee.department||''].filter(Boolean).join(' · ');
+  document.getElementById('employeeMeta').textContent=data.employee.department||'';
   const rows=document.getElementById('logRows'),empty=document.getElementById('emptyState');
   if(!data.logs.length){rows.innerHTML='';empty.style.display='block';return}
   empty.style.display='none';
-  rows.innerHTML=data.logs.map(item=>`<tr>
-    <td>${esc(item.created_at_display||item.created_at)}</td>
-    <td class="action">${esc(actionLabel(item.action))}</td>
-    <td>${esc([item.actor_first_name,item.actor_last_name].filter(Boolean).join(' ')||'System')}</td>
-    <td>${esc([item.target_type,item.target_id].filter(Boolean).join(' #'))}</td>
-    <td class="details">${esc(detailText(item.details))}</td>
-  </tr>`).join('');
+  const employeeDisplay=`${data.employee.first_name} ${data.employee.last_name}`.trim();
+  rows.innerHTML=data.logs.map(item=>{
+    const recordType=actionLabel(item.target_type||'activity');
+    return `<tr>
+      <td>${esc(item.created_at_display||item.created_at)}</td>
+      <td class="action">${esc(actionLabel(item.action))}</td>
+      <td>${esc([item.actor_first_name,item.actor_last_name].filter(Boolean).join(' ')||'System')}</td>
+      <td>${esc(`${employeeDisplay} — ${recordType}`)}</td>
+      <td class="details">${esc(detailText(item.details))}</td>
+    </tr>`;
+  }).join('');
 }
 async function init(){
   try{
