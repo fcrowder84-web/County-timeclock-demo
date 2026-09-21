@@ -18,7 +18,12 @@ async function getApprovalAuthority(pool,user,employeeId){
   const isSelf=Number(user?.id)===Number(employeeId);
   const departmentId=target.rows[0].department_id;
   const role=String(user?.role||'employee').toLowerCase();
-  const isCountywideRole=userHasPermission(user,'app_admin')||role==='payroll'||role==='timeclock_manager';
+  const appAdmin=userHasPermission(user,'app_admin');
+  const appAdminInScope=appAdmin&&(
+    user.app_admin_scope==='all'
+    || (Number(user?.department_id)>0&&Number(user.department_id)===Number(departmentId))
+  );
+  const isCountywideRole=role==='payroll'||role==='timeclock_manager';
 
   const isDepartmentHead=role==='department_head'
     && Number(user?.department_id)===Number(departmentId);
@@ -34,7 +39,7 @@ async function getApprovalAuthority(pool,user,employeeId){
   }
 
   return {
-    allowed:isCountywideRole||isDepartmentHead||isAssignedSupervisor,
+    allowed:appAdminInScope||isCountywideRole||isDepartmentHead||isAssignedSupervisor,
     isSelf,
     isDepartmentHead,
     isAssignedSupervisor,
