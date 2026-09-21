@@ -944,10 +944,19 @@
 
         async function denyRequest(requestId) {
 
-            const note =
+            const entered =
                 prompt(
-                    "Reason for denial:"
-                ) || "";
+                    "Reason for denying this punch request (required):"
+                );
+
+            if (entered === null) return;
+
+            const note = entered.trim();
+
+            if (!note) {
+                showMessage("A reason is required when denying a punch request", true);
+                return;
+            }
 
             const response =
                 await apiFetch(
