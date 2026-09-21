@@ -20,8 +20,8 @@
   }
   function allRequests(){return currentData?.change_requests||currentData?.requests||[]}
   function isSinglePunchRequest(r){return r&&r.status==="pending"&&!r.time_entry_id&&Boolean(r.requested_clock_in)!==Boolean(r.requested_clock_out)}
-  function canApproveOwnPunch(){return selectedIsSelf()&&has("approve_own_punch_corrections")}
-  function canApproveOwnTimecard(){return selectedIsSelf()&&has("approve_own_timecard")}
+  function canApproveOwnPunch(){return selectedIsSelf()&&selfApprovalRoleAllowed()&&has("approve_own_punch_corrections")}
+  function canApproveOwnTimecard(){return selectedIsSelf()&&selfApprovalRoleAllowed()&&has("approve_own_timecard")}
   function actualPunchTimes(){
     const times=[];
     (currentData?.entries||[]).forEach(e=>{if(e.clock_in)times.push(e.clock_in);if(e.clock_out)times.push(e.clock_out)});
