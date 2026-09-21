@@ -6,6 +6,7 @@ function patch(rel,fn){const file=path.join(root,rel);const before=fs.readFileSy
 patch('server.js',s=>{const p=/async function canAccessEmployee\(user,\s*employeeId,\s*actionPermissions\s*=\s*\[\]\)\s*\{[\s\S]*?\}\s*\n\s*async function syncPortalUser/;if(!p.test(s))throw new Error('canAccessEmployee not found');const r=`async function canAccessEmployee(user, employeeId, actionPermissions = []) {
   const permissions=userPermissionSet(user);
   const isSelf=Number(user.id)===Number(employeeId);
+  if(permissions.has("app_admin")&&user.app_admin_scope==="all")return true;
   const requested=actionPermissions.length?actionPermissions:["view_assigned_employees","view_department_time","view_payroll_records","review_approved_timecards","edit_employee_time","edit_payroll_time","approve_punch_correction","approve_timecard","return_timecard","return_to_supervisor"];
   const approvalKind=requested.includes("approve_punch_correction")?"punch":(requested.includes("approve_timecard")?"timecard":null);
   const target=await pool.query(\`SELECT department_id FROM employees WHERE id=$1 LIMIT 1\`,[employeeId]);
