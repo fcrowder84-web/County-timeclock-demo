@@ -38,12 +38,16 @@ async function canEditPunch(db,user,employeeId,action='edit'){
 
   if(userHasPermission(user,'app_admin')) return sameDepartment;
 
-  // Department Head scope includes every employee in the department,
-  // including the Department Head's own record.
-  if(role==='department_head'&&sameDepartment) return true;
+  // Department Head has a hard department boundary. A retained
+  // supervisor assignment outside that department must not widen scope.
+  if(role==='department_head') return sameDepartment;
 
-  // Supervisor scope is assigned employees only and never self.
-  if(Number(user.id)!==Number(employeeId)&&target.is_assigned) return true;
+  // Employee is always self-only. Supervisor is assigned-employees-only and
+  // never implicitly gets self edit authority.
+  if(role==='employee') return false;
+  if(role==='supervisor'){
+    return Number(user.id)!==Number(employeeId)&&target.is_assigned;
+  }
 
   return false;
 }
