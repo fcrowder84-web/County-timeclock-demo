@@ -183,6 +183,15 @@ function createEmployeeRouter({ requireUser, requireAnyPermission, pool, audit, 
         [req.user.id],
       );
 
+      const lunchSettingsResult = await pool.query(
+        `SELECT to_char(effective_date,'YYYY-MM-DD') AS effective_date_iso, enabled, minutes
+           FROM forced_lunch_setting_history
+          WHERE employee_id=$1
+            AND effective_date <= $2::date
+          ORDER BY effective_date`,
+        [req.user.id, period.pay_period_end],
+      );
+
       const lunchWaiverResult = await pool.query(
         `SELECT id,to_char(work_date,'YYYY-MM-DD') AS work_date_iso,reason,source,
                 waived_by_employee_id,created_at,active
@@ -221,8 +230,7 @@ function createEmployeeRouter({ requireUser, requireAnyPermission, pool, audit, 
           entries: entriesResult.rows,
           leaveEntries: leaveResult.rows,
           payPeriodStart: period.pay_period_start,
-          forcedLunchEnabled: req.user.forced_lunch_enabled,
-          forcedLunchMinutes: req.user.forced_lunch_minutes,
+          forcedLunchSettings: lunchSettingsResult.rows,
           lunchWaivers: lunchWaiverResult.rows,
         }),
         requests: requestsResult.rows,
