@@ -45,7 +45,9 @@ function createTeamStructureRouter({
         const permissions=userPermissionSet(req.user);
         const countywide=(permissions.has('app_admin')&&req.user.app_admin_scope==='all')
           || role==='timeclock_manager'||role==='payroll';
-        const departmentScopedAdmin=permissions.has('app_admin')&&req.user.app_admin_scope!=='all';
+        const departmentBound=(permissions.has('app_admin')&&req.user.app_admin_scope!=='all')
+          || role==='department_head';
+        const assignmentBound=role==='supervisor'&&!permissions.has('app_admin');
         const result = await pool.query(
           `SELECT e.id,e.employee_number,e.first_name,e.last_name,e.department,e.department_id,
                   d.name AS department_name,e.role,e.active,e.must_change_pin,
@@ -54,15 +56,14 @@ function createTeamStructureRouter({
              LEFT JOIN departments d ON d.id=e.department_id
             WHERE (
               $1::boolean=TRUE
-              OR ($2::text='department_head' AND e.department_id=$3)
-              OR ($5::boolean=TRUE AND e.department_id=$3)
-              OR e.id IN (
+              OR ($2::boolean=TRUE AND e.department_id=$3)
+              OR ($5::boolean=TRUE AND e.id IN (
                 SELECT employee_id FROM supervisor_employee_assignments
                 WHERE supervisor_employee_id=$4 AND active=TRUE
-              )
+              ))
             )
             ORDER BY d.name,e.active DESC,e.last_name,e.first_name`,
-          [countywide,role,req.user.department_id,req.user.id,departmentScopedAdmin],
+          [countywide,departmentBound,req.user.department_id,req.user.id,assignmentBound],
         );
         return res.json(result.rows);
       } catch (err) {
@@ -105,21 +106,22 @@ function createTeamStructureRouter({
         const permissions=userPermissionSet(req.user);
         const countywide=(permissions.has('app_admin')&&req.user.app_admin_scope==='all')
           || role==='timeclock_manager'||role==='payroll';
-        const departmentScopedAdmin=permissions.has('app_admin')&&req.user.app_admin_scope!=='all';
+        const departmentBound=(permissions.has('app_admin')&&req.user.app_admin_scope!=='all')
+          || role==='department_head';
+        const assignmentBound=role==='supervisor'&&!permissions.has('app_admin');
         const result = await pool.query(
           `SELECT d.id,d.name
              FROM departments d
             WHERE (
               $1::boolean=TRUE
-              OR ($2::text='department_head' AND d.id=$3)
-              OR ($5::boolean=TRUE AND d.id=$3)
-              OR d.id IN (
+              OR ($2::boolean=TRUE AND d.id=$3)
+              OR ($5::boolean=TRUE AND d.id IN (
                 SELECT department_id FROM supervisor_employee_assignments
                 WHERE supervisor_employee_id=$4 AND active=TRUE
-              )
+              ))
             )
             ORDER BY d.name`,
-          [countywide,role,req.user.department_id,req.user.id,departmentScopedAdmin],
+          [countywide,departmentBound,req.user.department_id,req.user.id,assignmentBound],
         );
         return res.json(result.rows);
       } catch (err) {
@@ -143,6 +145,7 @@ function createTeamStructureRouter({
         const canManageAll = (structurePermissions.has('app_admin')&&req.user.app_admin_scope==='all')
           || structureRole === 'timeclock_manager'
           || structureRole === 'payroll';
+        const assignmentBound=structureRole==='supervisor'&&!structurePermissions.has('app_admin');
 
         const departments = await pool.query(
           `SELECT d.id,d.name,
@@ -161,12 +164,12 @@ function createTeamStructureRouter({
              ) he ON TRUE
             WHERE $1::boolean=TRUE
                OR d.id=$2
-               OR EXISTS (
+               OR ($4::boolean=TRUE AND EXISTS (
                  SELECT 1 FROM supervisor_employee_assignments x
                  WHERE x.department_id=d.id AND x.supervisor_employee_id=$3 AND x.active=TRUE
-               )
+               ))
             ORDER BY d.name`,
-          [canManageAll, req.user.department_id, req.user.id],
+          [canManageAll, req.user.department_id, req.user.id, assignmentBound],
         );
 
         const employees = await pool.query(
@@ -177,16 +180,16 @@ function createTeamStructureRouter({
              FROM employees e
              LEFT JOIN departments d ON d.id=e.department_id
             WHERE e.active=TRUE
-              AND ($1::boolean=TRUE OR e.department_id IN (
-                SELECT id FROM departments d2
-                WHERE d2.id=$2
-                   OR EXISTS (
-                     SELECT 1 FROM supervisor_employee_assignments x
-                     WHERE x.department_id=d2.id AND x.supervisor_employee_id=$3 AND x.active=TRUE
-                   )
-              ))
+              AND (
+                $1::boolean=TRUE
+                OR e.department_id=$2
+                OR ($4::boolean=TRUE AND e.department_id IN (
+                  SELECT department_id FROM supervisor_employee_assignments x
+                  WHERE x.supervisor_employee_id=$3 AND x.active=TRUE
+                ))
+              )
             ORDER BY d.name,e.last_name,e.first_name`,
-          [canManageAll, req.user.department_id, req.user.id],
+          [canManageAll, req.user.department_id, req.user.id, assignmentBound],
         );
 
         const visibleDepartmentIds = departments.rows.map((department) => department.id);
