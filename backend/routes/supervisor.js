@@ -423,6 +423,12 @@ function createSupervisorRouter({
       try {
         const requestId = parsePositiveInt(req.body?.request_id, 'change request');
         const supervisorNote = String(req.body?.supervisor_note || '').trim();
+        if (!supervisorNote) {
+          return res.status(400).json({ error: 'A reason is required when denying a punch request' });
+        }
+        if (supervisorNote.length > 1000) {
+          return res.status(400).json({ error: 'Denial reason must be 1000 characters or less' });
+        }
         const requestResult = await pool.query(
           `SELECT employee_id,status FROM time_change_requests WHERE id=$1`,
           [requestId],
