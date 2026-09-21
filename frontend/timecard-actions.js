@@ -63,7 +63,7 @@ function renderTimecard(){
   });
   html+=totalRow("Pay Period Total",summary.period,"period-total");document.getElementById("timeRows").innerHTML=html;
   document.getElementById("employeeNumber").textContent=employee.employee_number||"—";document.getElementById("departmentName").textContent=employee.department_name||employee.department||"—";document.getElementById("timecardStatus").textContent=statusLabel(data.approval);document.getElementById("workedRule").textContent=`${fmt(summary.period?.total_worked_hours)||"0.00"} worked${num(summary.period?.forced_lunch_hours)>0?` after ${fmt(summary.period.forced_lunch_hours)} forced lunch`:``} / OT after ${fmt(summary.overtime_threshold_hours)||"40.00"} worked hrs/week`;document.getElementById("periodLabel").textContent=`${localDateLabel(data.pay_period_start)} – ${localDateLabel(data.pay_period_end)}`;document.getElementById("modeLabel").textContent=selectedIsSelf()?"Viewing your own timecard":currentMode==="supervisor"?`Viewing as ${payrollView()?"Payroll / Admin":"Supervisor"}`:"Viewing your own timecard";
-  renderSignatures();renderPending();bindRowActions();syncNavButtons();
+  renderSignatures();renderDenied();renderPending();bindRowActions();syncNavButtons();
 }
 function statusLabel(a){if(!a)return"In Progress";return({open:"In Progress",employee_submitted:"Employee Submitted",returned_to_employee:"Returned to Employee",supervisor_approved:"Supervisor Approved",payroll_finalized:"Payroll Finalized"})[a.status]||String(a.status||"In Progress").replaceAll("_"," ")}
 function renderSignatures(){
@@ -90,6 +90,48 @@ function pendingItems(){
   const lunches=(currentData.lunch_requests||[]).filter(r=>r.status==="pending").filter(r=>{const d=dateOnly(r.work_date_iso||r.work_date);return d>=start&&d<=end}).map(r=>({type:"lunch",id:r.id,text:`${localDateLabel(r.work_date_iso||r.work_date)} — Forced lunch removal: ${r.reason||"No reason provided"}`}));
   return [...leave,...changes,...lunches];
 }
+function deniedPunchItems(){
+  if(!selectedIsSelf())return[];
+  return(currentData.change_requests||currentData.requests||[])
+    .filter(r=>r.status==="denied"&&!r.employee_acknowledged_at)
+    .map(r=>{
+      let requested="Punch correction";
+      if(!r.time_entry_id&&r.requested_clock_in&&r.requested_clock_out){
+        requested=`Missing time: ${localDateTime(r.requested_clock_in)} to ${localDateTime(r.requested_clock_out)}`;
+      }else if(!r.time_entry_id&&r.requested_clock_in){
+        requested=`Punch: ${localDateTime(r.requested_clock_in)}`;
+      }else if(r.requested_clock_in||r.requested_clock_out){
+        const parts=[];
+        if(r.requested_clock_in)parts.push(`Clock in ${localDateTime(r.requested_clock_in)}`);
+        if(r.requested_clock_out)parts.push(`Clock out ${localDateTime(r.requested_clock_out)}`);
+        requested=parts.join(" / ");
+      }
+      const reviewer=[r.supervisor_first_name,r.supervisor_last_name].filter(Boolean).join(" ");
+      const reviewed=r.reviewed_at_display? ` — Reviewed ${r.reviewed_at_display}`:"";
+      const by=reviewer? ` by ${reviewer}`:"";
+      return{
+        id:r.id,
+        text:`${requested}${reviewed}${by}`,
+        note:r.supervisor_note||"No denial reason was recorded."
+      };
+    });
+}
+function renderDenied(){
+  const panel=document.getElementById("deniedPanel"),list=document.getElementById("deniedList");
+  if(!panel||!list)return;
+  const items=deniedPunchItems();
+  panel.classList.toggle("show",items.length>0);
+  list.innerHTML=items.map(i=>`<div class="pending-item"><span><strong>Punch Request Denied</strong><br>${esc(i.text)}<span class="denied-note">Supervisor reason: ${esc(i.note)}</span></span><button class="btn btn-danger denied-ack" data-id="${Number(i.id)}">Mark Reviewed</button></div>`).join("");
+  list.querySelectorAll(".denied-ack").forEach(b=>b.addEventListener("click",()=>acknowledgeDeniedPunch(b.dataset.id)));
+}
+async function acknowledgeDeniedPunch(id){
+  try{
+    await jsonOrError(await apiFetch(`${apiBase}/employee/denied-change-requests/${Number(id)}/acknowledge`,{method:"POST",body:"{}"}));
+    showMessage("Denied punch request marked reviewed");
+    await loadTimecard();
+  }catch(err){showMessage(err.message,"error")}
+}
+
 function renderPending(){
   const items=pendingItems(),panel=document.getElementById("pendingPanel"),list=document.getElementById("pendingList");
   panel.classList.toggle("show",items.length>0);
