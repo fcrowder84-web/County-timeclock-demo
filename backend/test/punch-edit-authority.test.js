@@ -67,6 +67,27 @@ const {canEditPunch,hasPayrollOverride}=require('../lib/punch-edit-authority');
     true,
   );
 
+  // Retained assignments cannot widen restrictive role scope after a role
+  // change or department transfer.
+  assert.strictEqual(
+    await canEditPunch(
+      otherDepartmentDb,
+      {id:1,permissions:['edit_employee_time'],role:'department_head',department_id:10},
+      21,
+      'edit',
+    ),
+    false,
+  );
+  assert.strictEqual(
+    await canEditPunch(
+      assignedDb,
+      {id:1,permissions:['edit_employee_time'],role:'employee',department_id:10},
+      20,
+      'edit',
+    ),
+    false,
+  );
+
   // Payroll override is a capability check; scope is enforced separately.
   assert.strictEqual(hasPayrollOverride({permissions:['app_admin']}),true);
   assert.strictEqual(hasPayrollOverride({permissions:['edit_payroll_time']}),true);
