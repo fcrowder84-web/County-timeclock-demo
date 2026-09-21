@@ -27,6 +27,7 @@ function payrollView(){return hasAny(["edit_payroll_time","view_payroll_records"
 function canAddEntries(){return hasAny(["add_employee_entry","edit_employee_time","edit_payroll_time"])}
 function canReturn(){return hasAny(["return_timecard","return_to_supervisor"])}
 function selectedIsSelf(){return Number(selectedEmployeeId)===Number(currentUser?.id)}
+function selfApprovalRoleAllowed(){return ['department_head','payroll','timeclock_manager','admin'].includes(String(currentUser?.role||'employee').toLowerCase())}
 
 async function init(){
   if(!token()){location.replace("https://employee.edgefieldcountysc.org/apps/timeclock/launch?return_to=timecard");return}
