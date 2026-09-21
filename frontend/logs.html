@@ -89,11 +89,11 @@ async function init(){
     if(!token()){location.replace('https://employee.edgefieldcountysc.org/apps/timeclock/launch?return_to=logs');return}
     const session=await json(`${apiBase}/me`);me=session.user;permissions=new Set(session.permissions||[]);
     employees=[{id:me.id,first_name:me.first_name,last_name:me.last_name,department:me.department_name||me.department||''}];
-    const elevated=hasAny(['view_assigned_employees','view_department_time','view_all_timeclock_records','view_payroll_records','review_approved_timecards','edit_employee_time','edit_payroll_time']);
+    const elevated=hasAny(['view_assigned_employees','view_department_time','view_payroll_records','view_timeclock_audit','edit_employee_time','edit_payroll_time']);
     if(elevated){
       try{
-        const team=await json(`${apiBase}/supervisor/pay-period-status`);
-        for(const e of team.employees||[])if(!employees.some(x=>Number(x.id)===Number(e.id)))employees.push(e);
+        const team=await json(`${apiBase}/supervisor/staff`);
+        for(const e of team||[])if(!employees.some(x=>Number(x.id)===Number(e.id)))employees.push(e);
       }catch(_){}
     }
     employees.sort((a,b)=>String(a.last_name||'').localeCompare(String(b.last_name||''))||String(a.first_name||'').localeCompare(String(b.first_name||'')));

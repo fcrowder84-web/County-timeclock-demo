@@ -1,59 +1,65 @@
 'use strict';
 
+const { userPermissionSet, userHasPermission } = require('./permissions');
+
 function rawPermissions(user) {
-  return new Set(Array.isArray(user?.permissions) ? user.permissions : []);
+  return userPermissionSet(user);
 }
 
-async function getApprovalAuthority(pool, user, employeeId) {
-  const target = await pool.query(
+async function getApprovalAuthority(pool,user,employeeId){
+  const target=await pool.query(
     `SELECT id,department_id FROM employees WHERE id=$1 LIMIT 1`,
     [employeeId],
   );
-  if (!target.rows.length) return { allowed: false, isSelf: false, isDepartmentHead: false, isAssignedSupervisor: false };
+  if(!target.rows.length){
+    return {allowed:false,isSelf:false,isDepartmentHead:false,isAssignedSupervisor:false,isCountywideRole:false};
+  }
 
-  const isSelf = Number(user?.id) === Number(employeeId);
-  const departmentId = target.rows[0].department_id;
-  const head = await pool.query(
-    `SELECT 1 FROM department_heads
-      WHERE employee_id=$1 AND department_id=$2 AND active=TRUE LIMIT 1`,
-    [user.id, departmentId],
-  );
-  const isDepartmentHead = head.rows.length > 0;
+  const isSelf=Number(user?.id)===Number(employeeId);
+  const departmentId=target.rows[0].department_id;
+  const role=String(user?.role||'employee').toLowerCase();
+  const isCountywideRole=userHasPermission(user,'app_admin')||role==='payroll'||role==='timeclock_manager';
 
-  let isAssignedSupervisor = false;
-  if (!isSelf) {
-    const assigned = await pool.query(
+  const isDepartmentHead=role==='department_head'
+    && Number(user?.department_id)===Number(departmentId);
+
+  let isAssignedSupervisor=false;
+  if(!isSelf){
+    const assigned=await pool.query(
       `SELECT 1 FROM supervisor_employee_assignments
         WHERE supervisor_employee_id=$1 AND employee_id=$2 AND active=TRUE LIMIT 1`,
-      [user.id, employeeId],
+      [user.id,employeeId],
     );
-    isAssignedSupervisor = assigned.rows.length > 0;
+    isAssignedSupervisor=assigned.rows.length>0;
   }
 
   return {
-    allowed: isDepartmentHead || isAssignedSupervisor,
+    allowed:isCountywideRole||isDepartmentHead||isAssignedSupervisor,
     isSelf,
     isDepartmentHead,
     isAssignedSupervisor,
+    isCountywideRole,
     departmentId,
   };
 }
 
-async function canApprove(pool, user, employeeId, kind) {
-  const permissions = rawPermissions(user);
-  const authority = await getApprovalAuthority(pool, user, employeeId);
-  if (!authority.allowed) return false;
+async function canApprove(pool,user,employeeId,kind){
+  const authority=await getApprovalAuthority(pool,user,employeeId);
+  if(!authority.allowed)return false;
 
-  if (authority.isSelf) {
-    if (!authority.isDepartmentHead) return false;
-    if (kind === 'punch') return permissions.has('approve_own_punch_corrections');
-    if (kind === 'timecard' || kind === 'leave') return permissions.has('approve_own_timecard');
+  if(authority.isSelf){
+    if(kind==='punch')return userHasPermission(user,'approve_own_punch_corrections');
+    if(kind==='timecard')return userHasPermission(user,'approve_own_timecard');
+    if(kind==='leave')return userHasPermission(user,'approve_own_leave');
+    if(kind==='lunch')return userHasPermission(user,'approve_own_lunch_waiver');
     return false;
   }
 
-  if (kind === 'punch') return permissions.has('approve_punch_correction');
-  if (kind === 'timecard' || kind === 'leave') return permissions.has('approve_timecard');
+  if(kind==='punch')return userHasPermission(user,'approve_punch_correction');
+  if(kind==='timecard')return userHasPermission(user,'approve_timecard');
+  if(kind==='leave')return userHasPermission(user,'approve_leave');
+  if(kind==='lunch')return userHasPermission(user,'approve_lunch_waiver');
   return false;
 }
 
-module.exports = { rawPermissions, getApprovalAuthority, canApprove };
+module.exports={rawPermissions,getApprovalAuthority,canApprove};

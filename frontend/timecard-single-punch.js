@@ -20,8 +20,8 @@
   }
   function allRequests(){return currentData?.change_requests||currentData?.requests||[]}
   function isSinglePunchRequest(r){return r&&r.status==="pending"&&!r.time_entry_id&&Boolean(r.requested_clock_in)!==Boolean(r.requested_clock_out)}
-  function canApproveOwnPunch(){return selectedIsSelf()&&currentPermissions.has("approve_own_punch_corrections")}
-  function canApproveOwnTimecard(){return selectedIsSelf()&&currentPermissions.has("approve_own_timecard")}
+  function canApproveOwnPunch(){return selectedIsSelf()&&has("approve_own_punch_corrections")}
+  function canApproveOwnTimecard(){return selectedIsSelf()&&has("approve_own_timecard")}
   function actualPunchTimes(){
     const times=[];
     (currentData?.entries||[]).forEach(e=>{if(e.clock_in)times.push(e.clock_in);if(e.clock_out)times.push(e.clock_out)});
@@ -79,39 +79,6 @@
       ).join(" ")}</td>`);
     }
     return cells.join("");
-  };
-
-  pendingItems=function(){
-    const start=dateOnly(currentData.pay_period_start),end=dateOnly(currentData.pay_period_end);
-    const leave=(currentData.leave_entries||[]).filter(l=>l.status==="pending").map(l=>({type:"leave",id:l.id,text:`${localDateLabel(l.leave_date_iso||l.leave_date)} — ${String(l.leave_type).replaceAll("_"," ")} ${num(l.hours).toFixed(2)} hrs`}));
-    const changes=allRequests().filter(r=>r.status==="pending").filter(r=>{
-      const d=punchDate(r.requested_clock_in||r.requested_clock_out||r.created_at);return !d||(d>=start&&d<=end)
-    }).map(r=>{
-      const events=requestedEventsForRequest(r).map(e=>punchTimeLabel(e.ts));
-      const day=punchDate(r.requested_clock_in||r.requested_clock_out||r.created_at);
-      const text=isSinglePunchRequest(r)
-        ? `Punch request: ${localDateLabel(day)}${events.length?` — ${events[0]}`:""} — waiting for approval`
-        : `Punch change request: ${localDateLabel(day)}${events.length?` — ${events.join(" / ")}`:""} — waiting for approval`;
-      return{type:"change",id:r.id,text};
-    });
-    return [...leave,...changes];
-  };
-
-  renderPending=function(){
-    const items=pendingItems(),panel=document.getElementById("pendingPanel"),list=document.getElementById("pendingList");
-    panel.classList.toggle("show",items.length>0);document.getElementById("pendingLegend").textContent=items.length?`${items.length} pending item${items.length===1?"":"s"}`:"";
-    list.innerHTML=items.map(i=>{
-      let actions="";
-      if(i.type==="change"&&canApproveOwnPunch()){
-        actions=`<span><button class="btn pending-change-review" data-id="${Number(i.id)}" data-status="approved">Approve My Punch</button></span>`;
-      }else if(currentMode==="supervisor"){
-        if(i.type==="leave"&&hasAny(["approve_timecard","edit_employee_time","edit_payroll_time","app_admin"]))actions=`<span><button class="btn pending-leave-review" data-id="${Number(i.id)}" data-status="approved">Approve</button><button class="btn pending-leave-review" data-id="${Number(i.id)}" data-status="denied">Deny</button></span>`;
-        else if(i.type==="change"&&has("approve_punch_correction"))actions=`<span><button class="btn pending-change-review" data-id="${Number(i.id)}" data-status="approved">Approve</button><button class="btn pending-change-review" data-id="${Number(i.id)}" data-status="denied">Deny</button></span>`;
-      }
-      return `<div class="pending-item"><span>${esc(i.text)}</span>${actions}</div>`;
-    }).join("");
-    list.querySelectorAll(".pending-leave-review").forEach(b=>b.addEventListener("click",()=>reviewLeave(b.dataset.id,b.dataset.status)));
-    list.querySelectorAll(".pending-change-review").forEach(b=>b.addEventListener("click",()=>reviewChange(b.dataset.id,b.dataset.status)));
   };
 
   const originalReviewChange=reviewChange;
@@ -189,7 +156,7 @@
     modal("entryModal",true);
     const existing=(currentData?.entries||[]).filter(e=>dateOnly(e.entry_date_iso||e.clock_in)===day);
     if(employeeRequest&&existing.length){
-      showEntryModalMessage("Existing punches are already on this date. This requested punch will be inserted chronologically. Delete any incorrect punch first.",false);
+      showEntryModalMessage("Existing punches are already on this date. This requested punch will be inserted chronologically. Void any incorrect punch first.",false);
     }
   };
 

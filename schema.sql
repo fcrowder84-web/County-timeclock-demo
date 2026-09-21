@@ -232,11 +232,14 @@ CREATE TABLE public.leave_entries (
     reviewed_by_employee_id integer,
     review_note text,
     reviewed_at timestamp with time zone,
+    archived_at timestamp with time zone,
+    archived_by_employee_id integer,
+    archive_reason text,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     CONSTRAINT leave_entries_leave_type_check CHECK ((leave_type = ANY (ARRAY['vacation'::text, 'sick'::text, 'holiday'::text, 'floating_holiday'::text, 'bereavement'::text, 'jury_duty'::text, 'administrative'::text, 'other'::text]))),
     CONSTRAINT leave_entries_quarter_hours_check CHECK (((quarter_hours >= 1) AND (quarter_hours <= 96))),
-    CONSTRAINT leave_entries_status_check CHECK ((status = ANY (ARRAY['pending'::text, 'approved'::text, 'denied'::text])))
+    CONSTRAINT leave_entries_status_check CHECK ((status = ANY (ARRAY['pending'::text, 'approved'::text, 'denied'::text, 'withdrawn'::text, 'voided'::text])))
 );
 
 
@@ -477,7 +480,10 @@ CREATE TABLE public.time_change_requests (
     status text DEFAULT 'pending'::text NOT NULL,
     created_at timestamp without time zone DEFAULT now() NOT NULL,
     reviewed_at timestamp without time zone,
-    employee_acknowledged_at timestamp with time zone
+    employee_acknowledged_at timestamp with time zone,
+    archived_at timestamp with time zone,
+    archived_by_employee_id integer,
+    archive_reason text
 );
 
 
@@ -1173,6 +1179,13 @@ ALTER TABLE ONLY public.employees
 ALTER TABLE ONLY public.leave_entries
     ADD CONSTRAINT leave_entries_created_by_employee_id_fkey FOREIGN KEY (created_by_employee_id) REFERENCES public.employees(id);
 
+--
+-- Name: leave_entries leave_entries_archived_by_employee_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.leave_entries
+    ADD CONSTRAINT leave_entries_archived_by_employee_id_fkey FOREIGN KEY (archived_by_employee_id) REFERENCES public.employees(id);
+
 
 --
 -- Name: leave_entries leave_entries_employee_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
@@ -1292,6 +1305,13 @@ ALTER TABLE ONLY public.supervisor_employee_assignments
 
 ALTER TABLE ONLY public.time_change_requests
     ADD CONSTRAINT time_change_requests_employee_id_fkey FOREIGN KEY (employee_id) REFERENCES public.employees(id);
+
+--
+-- Name: time_change_requests time_change_requests_archived_by_employee_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.time_change_requests
+    ADD CONSTRAINT time_change_requests_archived_by_employee_id_fkey FOREIGN KEY (archived_by_employee_id) REFERENCES public.employees(id);
 
 
 --

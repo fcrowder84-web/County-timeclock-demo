@@ -1,17 +1,13 @@
 'use strict';
 
 const express = require('express');
-const { canEditPunch, hasPayrollOverride, hasPunchPermission } = require('../lib/punch-edit-authority');
+const { canEditPunch, hasPayrollOverride } = require('../lib/punch-edit-authority');
 const { recordPunchMetadata } = require('../lib/punch-metadata');
+const { userHasPermission } = require('../lib/permissions');
 
 function createQuickPunchRouter({ requireUser, requireAnyPermission, pool, audit }) {
   const router = express.Router();
   const canPunch = requireAnyPermission('clock_in_out');
-
-  function permissionSet(user) {
-    return new Set(Array.isArray(user?.permissions) ? user.permissions : []);
-  }
-
 
   async function currentTimecardLock(employeeId, db = pool) {
     const result = await db.query(
@@ -35,7 +31,7 @@ function createQuickPunchRouter({ requireUser, requireAnyPermission, pool, audit
 
   async function canDeleteEntry(user, entry, db = pool) {
     if (Number(user.id) === Number(entry.employee_id)) {
-      return hasPunchPermission(user, 'edit_own_pending_entry');
+      return userHasPermission(user,'void_own_unapproved_punch');
     }
     return canEditPunch(db, user, entry.employee_id, 'edit');
   }
@@ -118,7 +114,7 @@ function createQuickPunchRouter({ requireUser, requireAnyPermission, pool, audit
     }
   });
 
-  router.get('/my-punches', requireUser, async (req, res) => {
+  router.get('/my-punches', requireUser, requireAnyPermission('view_own_time'), async (req, res) => {
     try {
       const result = await pool.query(
         `SELECT
@@ -149,8 +145,8 @@ function createQuickPunchRouter({ requireUser, requireAnyPermission, pool, audit
     const reason = String(req.body?.reason || '').trim();
 
     if (!Number.isInteger(entryId) || entryId <= 0) return res.status(400).json({ error: 'Valid time entry is required' });
-    if (reason.length < 3) return res.status(400).json({ error: 'Deletion reason is required' });
-    if (reason.length > 500) return res.status(400).json({ error: 'Deletion reason must be 500 characters or less' });
+    if (reason.length < 3) return res.status(400).json({ error: 'Void reason is required' });
+    if (reason.length > 500) return res.status(400).json({ error: 'Void reason must be 500 characters or less' });
 
     let client = null;
     let auditDetails = null;
@@ -170,7 +166,7 @@ function createQuickPunchRouter({ requireUser, requireAnyPermission, pool, audit
       const entry = entryResult.rows[0];
       if (!(await canDeleteEntry(req.user, entry, client))) {
         await client.query('ROLLBACK');
-        return res.status(403).json({ error: "You cannot delete this employee's punch" });
+        return res.status(403).json({ error: "You cannot void this employee's punch" });
       }
 
       const approvalResult = await client.query(
@@ -196,9 +192,9 @@ function createQuickPunchRouter({ requireUser, requireAnyPermission, pool, audit
         const supervisorStage = approval?.status === 'employee_submitted'
           && approval.employee_signed_at && !approval.supervisor_approved_at && !approval.payroll_finalized_at;
         if ((!payroll && !supervisorStage)
-            || (payroll && approval?.payroll_finalized_at && !hasPunchPermission(req.user, 'reopen_timecard'))) {
+            || (payroll && approval?.payroll_finalized_at && !userHasPermission(req.user,'reopen_timecard'))) {
           await client.query('ROLLBACK');
-          return res.status(409).json({ error: 'Return the timecard to the authorized editing stage before deleting a punch.' });
+          return res.status(409).json({ error: 'Return the timecard to the authorized editing stage before voiding a punch.' });
         }
       }
 
@@ -210,16 +206,19 @@ function createQuickPunchRouter({ requireUser, requireAnyPermission, pool, audit
       );
       if (!deleted.rows.length) {
         await client.query('ROLLBACK');
-        return res.status(409).json({ error: 'Punch was already deleted or could not be deleted' });
+        return res.status(409).json({ error: 'Punch was already voided or could not be voided' });
       }
 
       const cancelledRequests = await client.query(
         `UPDATE time_change_requests
-            SET status='denied',
+            SET status='voided',
                 supervisor_note=CASE WHEN COALESCE(supervisor_note,'')='' THEN $2 ELSE supervisor_note || E'\n' || $2 END,
-                reviewed_at=NOW()
+                reviewed_at=NOW(),
+                archived_at=NOW(),
+                archived_by_employee_id=$3,
+                archive_reason=$2
           WHERE time_entry_id=$1 AND status='pending' RETURNING id`,
-        [entry.id, `Punch deleted: ${reason}`],
+        [entry.id, `Punch voided: ${reason}`, req.user.id],
       );
 
       if (approval) {
@@ -245,8 +244,8 @@ function createQuickPunchRouter({ requireUser, requireAnyPermission, pool, audit
       };
 
       await client.query('COMMIT');
-      await audit(req.user.id, 'delete_time_entry', 'time_entry', entry.id, auditDetails);
-      return res.json({ message: 'Punch deleted. The original record remains in the audit trail.' });
+      await audit(req.user.id, 'void_time_entry', 'time_entry', entry.id, auditDetails);
+      return res.json({ message: 'Punch voided. The original record remains in the audit trail.' });
     } catch (err) {
       if (client) await client.query('ROLLBACK').catch(() => {});
       console.error(err);

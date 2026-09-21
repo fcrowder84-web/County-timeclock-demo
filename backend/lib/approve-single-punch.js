@@ -2,64 +2,11 @@
 
 const { insertPunchIntoSequence } = require('./punch-sequence');
 
-function permissionSet(user) {
-  return new Set(Array.isArray(user?.permissions) ? user.permissions : []);
-}
-
-async function canReviewEmployee(pool, user, employeeId) {
-  const permissions = permissionSet(user);
-  const targetResult = await pool.query(
-    `SELECT department_id FROM employees WHERE id=$1 LIMIT 1`,
-    [employeeId],
-  );
-  if (!targetResult.rows.length) return false;
-  const targetDepartmentId = targetResult.rows[0].department_id;
-
-  const departmentHeadResult = await pool.query(
-    `SELECT 1 FROM department_heads
-      WHERE employee_id=$1 AND department_id=$2 AND active=TRUE
-      LIMIT 1`,
-    [user.id, targetDepartmentId],
-  );
-  const isTargetDepartmentHead = departmentHeadResult.rows.length > 0;
-  const isSelf = Number(user?.id) === Number(employeeId);
-
-  // Department heads may approve their own punch corrections. The structural
-  // department_heads assignment is the authority; Application Admin alone is
-  // deliberately not an approval role. Accept the normal punch-approval grant
-  // as well as the legacy explicit self-approval grant so Portal-managed
-  // department heads are not blocked when their operational permissions are
-  // represented by approve_punch_correction.
-  if (isSelf) {
-    return isTargetDepartmentHead && (
-      permissions.has('approve_own_punch_corrections') ||
-      permissions.has('approve_punch_correction')
-    );
-  }
-
-  // Department heads have backup approval authority for everyone in their
-  // department, including employees assigned to subordinate supervisors.
-  if (isTargetDepartmentHead) {
-    return permissions.has('approve_punch_correction');
-  }
-
-  // Ordinary supervisors may approve only employees explicitly assigned to
-  // them. Same-department membership alone is not sufficient.
-  if (!permissions.has('approve_punch_correction')) return false;
-  const assignment = await pool.query(
-    `SELECT 1 FROM supervisor_employee_assignments
-      WHERE employee_id=$1 AND supervisor_employee_id=$2 AND active=TRUE
-      LIMIT 1`,
-    [employeeId, user.id],
-  );
-  return assignment.rows.length > 0;
-}
-
 function punchTimestamp(request) {
   return request.requested_clock_in || request.requested_clock_out || null;
 }
 
-function createApproveSinglePunchHandler({ pool, audit }) {
+function createApproveSinglePunchHandler({ pool, audit, canAccessEmployee }) {
   return async (req, res) => {
     const requestId = Number(req.body?.request_id);
     if (!Number.isInteger(requestId) || requestId <= 0) {
@@ -78,7 +25,7 @@ function createApproveSinglePunchHandler({ pool, audit }) {
       && Boolean(target.requested_clock_in) !== Boolean(target.requested_clock_out);
     if (!isSinglePunch) return res.status(409).json({ error: 'This is not a single-punch request', code: 'NOT_SINGLE_PUNCH' });
     if (target.status !== 'pending') return res.status(409).json({ error: 'This punch request has already been reviewed' });
-    if (!(await canReviewEmployee(pool, req.user, target.employee_id))) return res.status(403).json({ error: 'Access denied' });
+    if (!(await canAccessEmployee(req.user, target.employee_id, ['approve_punch_correction']))) return res.status(403).json({ error: 'Access denied' });
 
     const client = await pool.connect();
     try {
@@ -237,4 +184,4 @@ function createApproveSinglePunchHandler({ pool, audit }) {
   };
 }
 
-module.exports = { createApproveSinglePunchHandler, canReviewEmployee };
+module.exports = { createApproveSinglePunchHandler };

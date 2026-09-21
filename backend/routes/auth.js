@@ -2,16 +2,13 @@
 const crypto=require('crypto');
 const express=require('express');
 const {createMobilePairingStore}=require('../lib/mobile-pairing');
+const {normalizePermissions}=require('../lib/permissions');
 
 function effectiveEmployeePermissions(permissions){
-  const list=[...(permissions||[])];
-  if((list.includes('access')||list.includes('app_admin'))&&!list.includes('view_own_time')){
-    list.push('view_own_time');
-  }
-  if(list.includes('view_own_time')&&!list.includes('request_punch_correction')){
-    list.push('request_punch_correction');
-  }
-  return [...new Set(list)];
+  // Permission checkboxes are independent capabilities. Role presets choose a
+  // starting set, but the TimeClock backend does not silently add operational
+  // permissions that were not granted.
+  return normalizePermissions(permissions||[]);
 }
 
 function requestAddress(req){

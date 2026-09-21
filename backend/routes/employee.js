@@ -1,23 +1,16 @@
 'use strict';
 
 const express = require('express');
-const { canEditPunch, hasPayrollOverride, hasPunchPermission } = require('../lib/punch-edit-authority');
+const { canEditPunch, hasPayrollOverride } = require('../lib/punch-edit-authority');
 const { summarizeTimecard } = require('../lib/timecard-summary');
 const { insertPunchIntoSequence } = require('../lib/punch-sequence');
 const { createApproveSinglePunchHandler } = require('../lib/approve-single-punch');
+const { userHasPermission } = require('../lib/permissions');
 
 function validDate(value) {
   if (!value) return null;
   const parsed = new Date(value);
   return Number.isNaN(parsed.getTime()) ? null : parsed;
-}
-
-function permissionSet(user) {
-  return new Set(Array.isArray(user?.permissions) ? user.permissions : []);
-}
-
-function hasPermission(user, key) {
-  return hasPunchPermission(user, key);
 }
 
 async function canDirectEditEmployee(pool, user, employeeId) {
@@ -37,7 +30,7 @@ async function approvalForTimestamp(db, employeeId, timestamp, lock = false) {
   );
 }
 
-function createEmployeeRouter({ requireUser, requireAnyPermission, pool, audit, getRequestedPayPeriod, canAccessEmployee }) {
+function createEmployeeRouter({ requireUser, requireAnyPermission, pool, audit, canAccessEmployee, getRequestedPayPeriod }) {
   const router = express.Router();
 
   router.post('/submit-timecard', requireUser, requireAnyPermission('submit_timecard'), async (req, res) => {
@@ -172,8 +165,8 @@ function createEmployeeRouter({ requireUser, requireAnyPermission, pool, audit, 
       const requestsResult = await pool.query(
         `SELECT
            tcr.*,
-           to_char(requested_clock_in, 'MM/DD/YYYY HH12:MI AM') AS requested_clock_in_display,
-           to_char(requested_clock_out, 'MM/DD/YYYY HH12:MI AM') AS requested_clock_out_display,
+           to_char(tcr.requested_clock_in, 'MM/DD/YYYY HH12:MI AM') AS requested_clock_in_display,
+           to_char(tcr.requested_clock_out, 'MM/DD/YYYY HH12:MI AM') AS requested_clock_out_display,
            to_char(tcr.created_at, 'MM/DD/YYYY HH12:MI AM') AS created_at_display,
            to_char(tcr.reviewed_at, 'MM/DD/YYYY HH12:MI AM') AS reviewed_at_display,
            reviewer.first_name AS supervisor_first_name,
@@ -247,14 +240,8 @@ function createEmployeeRouter({ requireUser, requireAnyPermission, pool, audit, 
     try {
       const result = await pool.query(
         `SELECT
-           tcr.id,
-           tcr.time_entry_id,
-           tcr.requested_clock_in,
-           tcr.requested_clock_out,
-           tcr.employee_reason,
-           tcr.supervisor_note,
-           tcr.reviewed_at,
-           tcr.employee_acknowledged_at,
+           tcr.id,tcr.time_entry_id,tcr.requested_clock_in,tcr.requested_clock_out,
+           tcr.employee_reason,tcr.supervisor_note,tcr.reviewed_at,tcr.employee_acknowledged_at,
            to_char(tcr.requested_clock_in, 'MM/DD/YYYY HH12:MI AM') AS requested_clock_in_display,
            to_char(tcr.requested_clock_out, 'MM/DD/YYYY HH12:MI AM') AS requested_clock_out_display,
            to_char(tcr.reviewed_at, 'MM/DD/YYYY HH12:MI AM') AS reviewed_at_display,
@@ -277,125 +264,84 @@ function createEmployeeRouter({ requireUser, requireAnyPermission, pool, audit, 
 
   router.post('/employee/denied-change-requests/:requestId/acknowledge', requireUser, async (req, res) => {
     try {
-      const requestId = Number(req.params.requestId);
-      if (!Number.isInteger(requestId) || requestId <= 0) {
-        return res.status(400).json({ error: 'Valid punch request is required' });
-      }
-      const result = await pool.query(
+      const requestId=Number(req.params.requestId);
+      if(!Number.isInteger(requestId)||requestId<=0) return res.status(400).json({error:'Valid punch request is required'});
+      const result=await pool.query(
         `UPDATE time_change_requests
             SET employee_acknowledged_at=COALESCE(employee_acknowledged_at,NOW())
-          WHERE id=$1
-            AND employee_id=$2
-            AND status='denied'
+          WHERE id=$1 AND employee_id=$2 AND status='denied'
           RETURNING id,employee_acknowledged_at`,
-        [requestId, req.user.id],
+        [requestId,req.user.id],
       );
-      if (!result.rows.length) return res.status(404).json({ error: 'Denied punch request not found' });
-      await audit(req.user.id, 'acknowledge_denied_punch_request', 'time_change_request', requestId, {
-        employee_id: req.user.id,
-      });
-      return res.json({ message: 'Denied punch request marked reviewed', request: result.rows[0] });
+      if(!result.rows.length) return res.status(404).json({error:'Denied punch request not found'});
+      await audit(req.user.id,'acknowledge_denied_punch_request','time_change_request',requestId,{employee_id:req.user.id});
+      return res.json({message:'Denied punch request marked reviewed',request:result.rows[0]});
     } catch (err) {
       console.error(err);
-      return res.status(500).json({ error: 'Unable to mark denied punch request reviewed' });
+      return res.status(500).json({error:'Unable to mark denied punch request reviewed'});
     }
   });
 
-  router.get('/employee/activity-log', requireUser, async (req, res) => {
-    try {
-      const requestedEmployeeId = req.query?.employee_id == null || req.query.employee_id === ''
+  router.get('/employee/activity-log', requireUser, async (req,res)=>{
+    try{
+      const requestedEmployeeId=req.query?.employee_id==null||req.query.employee_id===''
         ? Number(req.user.id)
         : Number(req.query.employee_id);
-      if (!Number.isInteger(requestedEmployeeId) || requestedEmployeeId <= 0) {
-        return res.status(400).json({ error: 'Valid employee is required' });
+      if(!Number.isInteger(requestedEmployeeId)||requestedEmployeeId<=0) return res.status(400).json({error:'Valid employee is required'});
+
+      if(requestedEmployeeId!==Number(req.user.id)){
+        if(typeof canAccessEmployee!=='function'||!(await canAccessEmployee(
+          req.user,
+          requestedEmployeeId,
+          ['view_assigned_employees','view_department_time','view_payroll_records','view_timeclock_audit'],
+        ))) return res.status(403).json({error:'Access denied'});
       }
 
-      if (requestedEmployeeId !== Number(req.user.id)) {
-        if (typeof canAccessEmployee !== 'function' || !(await canAccessEmployee(req.user, requestedEmployeeId))) {
-          return res.status(403).json({ error: 'Access denied' });
-        }
-      }
-
-      const targetResult = await pool.query(
+      const targetResult=await pool.query(
         `SELECT e.id,e.employee_number,e.first_name,e.last_name,d.name AS department
-           FROM employees e
-           LEFT JOIN departments d ON d.id=e.department_id
+           FROM employees e LEFT JOIN departments d ON d.id=e.department_id
           WHERE e.id=$1`,
         [requestedEmployeeId],
       );
-      if (!targetResult.rows.length) return res.status(404).json({ error: 'Employee not found' });
-
-      const requestedLimit = Number(req.query?.limit || 200);
-      const limit = Number.isInteger(requestedLimit) ? Math.min(Math.max(requestedLimit, 1), 500) : 200;
-      const result = await pool.query(
-        `SELECT
-           a.id,
-           a.action,
-           a.target_type,
-           a.target_id,
-           a.details,
-           a.created_at,
-           to_char(a.created_at AT TIME ZONE 'America/New_York','MM/DD/YYYY HH12:MI AM') AS created_at_display,
-           actor.first_name AS actor_first_name,
-           actor.last_name AS actor_last_name
-         FROM timeclock_audit_log a
-         LEFT JOIN employees actor ON actor.id=a.actor_employee_id
-        WHERE a.action NOT IN (
-          'portal_sso_login',
-          'trusted_mobile_session',
-          'generate_mobile_pairing_code',
-          'redeem_mobile_pairing_code'
-        )
-          AND (
-            a.actor_employee_id=$1
-            OR (a.target_type='employee' AND a.target_id=$1::text)
-            OR a.details->>'employee_id'=$1::text
-            OR (
-              a.target_type='time_entry'
-              AND EXISTS (
-                SELECT 1 FROM time_entries te
-                 WHERE te.id::text=a.target_id
-                   AND te.employee_id=$1
-              )
+      if(!targetResult.rows.length) return res.status(404).json({error:'Employee not found'});
+      const requestedLimit=Number(req.query?.limit||200);
+      const limit=Number.isInteger(requestedLimit)?Math.min(Math.max(requestedLimit,1),500):200;
+      const result=await pool.query(
+        `SELECT a.id,a.action,a.target_type,a.target_id,a.details,a.created_at,
+                to_char(a.created_at AT TIME ZONE 'America/New_York','MM/DD/YYYY HH12:MI AM') AS created_at_display,
+                actor.first_name AS actor_first_name,actor.last_name AS actor_last_name
+           FROM timeclock_audit_log a
+           LEFT JOIN employees actor ON actor.id=a.actor_employee_id
+          WHERE a.action NOT IN ('portal_sso_login','trusted_mobile_session','generate_mobile_pairing_code','redeem_mobile_pairing_code')
+            AND (
+              a.actor_employee_id=$1
+              OR (a.target_type='employee' AND a.target_id=$1::text)
+              OR a.details->>'employee_id'=$1::text
+              OR (a.target_type='time_entry' AND EXISTS (
+                SELECT 1 FROM time_entries te WHERE te.id::text=a.target_id AND te.employee_id=$1
+              ))
+              OR (a.target_type='time_change_request' AND EXISTS (
+                SELECT 1 FROM time_change_requests tcr WHERE tcr.id::text=a.target_id AND tcr.employee_id=$1
+              ))
+              OR (a.target_type='leave_entry' AND EXISTS (
+                SELECT 1 FROM leave_entries le WHERE le.id::text=a.target_id AND le.employee_id=$1
+              ))
+              OR (a.target_type='forced_lunch_waiver_request' AND EXISTS (
+                SELECT 1 FROM forced_lunch_waiver_requests flr WHERE flr.id::text=a.target_id AND flr.employee_id=$1
+              ))
             )
-            OR (
-              a.target_type='time_change_request'
-              AND EXISTS (
-                SELECT 1 FROM time_change_requests tcr
-                 WHERE tcr.id::text=a.target_id
-                   AND tcr.employee_id=$1
-              )
-            )
-            OR (
-              a.target_type='leave_entry'
-              AND EXISTS (
-                SELECT 1 FROM leave_entries le
-                 WHERE le.id::text=a.target_id
-                   AND le.employee_id=$1
-              )
-            )
-            OR (
-              a.target_type='forced_lunch_waiver_request'
-              AND EXISTS (
-                SELECT 1 FROM forced_lunch_waiver_requests flr
-                 WHERE flr.id::text=a.target_id
-                   AND flr.employee_id=$1
-              )
-            )
-          )
-        ORDER BY a.created_at DESC,a.id DESC
-        LIMIT $2`,
-        [requestedEmployeeId, limit],
+          ORDER BY a.created_at DESC,a.id DESC
+          LIMIT $2`,
+        [requestedEmployeeId,limit],
       );
-
       return res.json({
-        employee: targetResult.rows[0],
-        viewing_own_log: requestedEmployeeId === Number(req.user.id),
-        logs: result.rows,
+        employee:targetResult.rows[0],
+        viewing_own_log:requestedEmployeeId===Number(req.user.id),
+        logs:result.rows,
       });
-    } catch (err) {
+    }catch(err){
       console.error(err);
-      return res.status(500).json({ error: 'Activity log lookup failed' });
+      return res.status(500).json({error:'Activity log lookup failed'});
     }
   });
 
@@ -411,7 +357,7 @@ function createEmployeeRouter({ requireUser, requireAnyPermission, pool, audit, 
   router.post(
     '/employee/request-time-change',
     requireUser,
-    requireAnyPermission('request_punch_correction', 'view_own_time'),
+    requireAnyPermission('request_punch_correction'),
     async (req, res) => {
       const rawEntryId = req.body?.time_entry_id;
       const hasEntryId = rawEntryId !== null && rawEntryId !== undefined && String(rawEntryId).trim() !== '';
@@ -586,6 +532,86 @@ function createEmployeeRouter({ requireUser, requireAnyPermission, pool, audit, 
   );
 
   router.post(
+    '/employee/withdraw-time-change',
+    requireUser,
+    requireAnyPermission('withdraw_own_pending_request'),
+    async (req,res)=>{
+      const requestId=Number(req.body?.request_id);
+      const reason=String(req.body?.reason||'').trim()||null;
+      if(!Number.isInteger(requestId)||requestId<=0){
+        return res.status(400).json({error:'Valid change request is required'});
+      }
+
+      const client=await pool.connect();
+      try{
+        await client.query('BEGIN');
+        const found=await client.query(
+          `SELECT *
+             FROM time_change_requests
+            WHERE id=$1 AND employee_id=$2
+            FOR UPDATE`,
+          [requestId,req.user.id],
+        );
+        if(!found.rows.length){
+          await client.query('ROLLBACK');
+          return res.status(404).json({error:'Change request not found'});
+        }
+        const request=found.rows[0];
+        if(request.status!=='pending'){
+          await client.query('ROLLBACK');
+          return res.status(409).json({error:'Only a pending change request can be withdrawn'});
+        }
+
+        if(request.time_entry_id){
+          await client.query(
+            `UPDATE time_entries
+                SET pending_clock_in=CASE
+                      WHEN pending_clock_in IS NOT DISTINCT FROM $1::timestamp THEN NULL
+                      ELSE pending_clock_in
+                    END,
+                    pending_clock_out=CASE
+                      WHEN pending_clock_out IS NOT DISTINCT FROM $2::timestamp THEN NULL
+                      ELSE pending_clock_out
+                    END
+              WHERE id=$3 AND employee_id=$4 AND deleted_at IS NULL`,
+            [request.requested_clock_in,request.requested_clock_out,request.time_entry_id,req.user.id],
+          );
+        }
+
+        const archived=await client.query(
+          `UPDATE time_change_requests
+              SET status='withdrawn',
+                  archived_at=NOW(),
+                  archived_by_employee_id=$1,
+                  archive_reason=$2,
+                  reviewed_at=NOW()
+            WHERE id=$3 AND status='pending'
+            RETURNING *`,
+          [req.user.id,reason,requestId],
+        );
+        if(!archived.rows.length){
+          await client.query('ROLLBACK');
+          return res.status(409).json({error:'Change request is no longer pending'});
+        }
+
+        await client.query('COMMIT');
+        await audit(req.user.id,'withdraw_time_change_request','time_change_request',requestId,{
+          employee_id:req.user.id,
+          time_entry_id:request.time_entry_id,
+          reason,
+        });
+        return res.json({message:'Change request withdrawn',request:archived.rows[0]});
+      }catch(err){
+        await client.query('ROLLBACK').catch(()=>{});
+        console.error(err);
+        return res.status(500).json({error:'Unable to withdraw change request'});
+      }finally{
+        client.release();
+      }
+    },
+  );
+
+  router.post(
     '/supervisor/add-time-entry',
     requireUser,
     requireAnyPermission('add_employee_entry', 'edit_employee_time', 'edit_payroll_time'),
@@ -610,7 +636,7 @@ function createEmployeeRouter({ requireUser, requireAnyPermission, pool, audit, 
         await client.query('BEGIN');
         const approvalResult = await approvalForTimestamp(client, employeeId, primaryTimestamp, true);
         const approval = approvalResult.rows[0] || null;
-        if (payrollOverride && approval?.payroll_finalized_at && !hasPermission(req.user, 'reopen_timecard')) {
+        if (payrollOverride && approval?.payroll_finalized_at && !userHasPermission(req.user,'reopen_timecard')) {
           await client.query('ROLLBACK');
           return res.status(403).json({ error: 'Reopen permission is required for a finalized timecard.' });
         }
@@ -693,7 +719,7 @@ function createEmployeeRouter({ requireUser, requireAnyPermission, pool, audit, 
     '/supervisor/approve-single-punch',
     requireUser,
     requireAnyPermission('approve_punch_correction'),
-    createApproveSinglePunchHandler({ pool, audit }),
+    createApproveSinglePunchHandler({ pool, audit, canAccessEmployee }),
   );
 
   return router;

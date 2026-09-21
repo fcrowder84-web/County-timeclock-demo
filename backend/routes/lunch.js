@@ -88,7 +88,7 @@ function createLunchRouter({ requireUser, requireAnyPermission, pool, audit, can
   router.post(
     '/supervisor/lunch-settings',
     requireUser,
-    requireAnyPermission('manage_employee_timeclock_settings', 'manage_supervisor_assignments'),
+    requireAnyPermission('manage_employee_lunch_settings'),
     async (req, res) => {
       let client = null;
       try {
@@ -96,7 +96,7 @@ function createLunchRouter({ requireUser, requireAnyPermission, pool, audit, can
         const enabled = req.body?.enabled === true;
         const minutes = positiveInt(req.body?.minutes, 'lunch duration');
         if (minutes > 240) return res.status(400).json({ error: 'Lunch duration cannot exceed 240 minutes' });
-        if (!(await canAccessEmployee(req.user, employeeId))) return res.status(403).json({ error: 'Access denied' });
+        if (!(await canAccessEmployee(req.user, employeeId, ['manage_employee_lunch_settings']))) return res.status(403).json({ error: 'Access denied' });
 
         client = await pool.connect();
         await client.query('BEGIN');
@@ -179,7 +179,7 @@ function createLunchRouter({ requireUser, requireAnyPermission, pool, audit, can
   router.post(
     '/employee/request-lunch-waiver',
     requireUser,
-    requireAnyPermission('view_own_time', 'request_punch_correction'),
+    requireAnyPermission('request_lunch_waiver'),
     async (req, res) => {
       const workDate = validWorkDate(req.body?.work_date);
       const reason = String(req.body?.reason || '').trim();
@@ -212,10 +212,54 @@ function createLunchRouter({ requireUser, requireAnyPermission, pool, audit, can
     },
   );
 
+  router.post(
+    '/employee/withdraw-lunch-waiver-request',
+    requireUser,
+    requireAnyPermission('withdraw_own_pending_request'),
+    async (req,res)=>{
+      const requestId=positiveInt(req.body?.request_id,'request');
+      const reason=String(req.body?.reason||'').trim()||null;
+      try{
+        const result=await pool.query(
+          `UPDATE forced_lunch_waiver_requests
+              SET status='withdrawn',
+                  archived_at=NOW(),
+                  archived_by_employee_id=$1,
+                  archive_reason=$2,
+                  reviewed_at=NOW()
+            WHERE id=$3
+              AND employee_id=$1
+              AND status='pending'
+            RETURNING *`,
+          [req.user.id,reason,requestId],
+        );
+        if(!result.rows.length){
+          const exists=await pool.query(
+            'SELECT employee_id,status FROM forced_lunch_waiver_requests WHERE id=$1',
+            [requestId],
+          );
+          if(!exists.rows.length) return res.status(404).json({error:'Lunch waiver request not found'});
+          if(Number(exists.rows[0].employee_id)!==Number(req.user.id)) return res.status(403).json({error:'Access denied'});
+          return res.status(409).json({error:'Only a pending lunch waiver request can be withdrawn'});
+        }
+        await audit(req.user.id,'withdraw_forced_lunch_waiver_request','forced_lunch_waiver_request',requestId,{
+          employee_id:req.user.id,
+          work_date:result.rows[0].work_date,
+          reason,
+        });
+        return res.json({message:'Lunch waiver request withdrawn',request:result.rows[0]});
+      }catch(err){
+        if(err.statusCode) return res.status(err.statusCode).json({error:err.message});
+        console.error(err);
+        return res.status(500).json({error:'Lunch waiver request withdrawal failed'});
+      }
+    },
+  );
+
   router.get(
     '/supervisor/lunch-waiver-requests',
     requireUser,
-    requireAnyPermission('approve_timecard', 'edit_employee_time', 'edit_payroll_time'),
+    requireAnyPermission('approve_lunch_waiver'),
     async (req, res) => {
       try {
         const result = await pool.query(
@@ -224,13 +268,13 @@ function createLunchRouter({ requireUser, requireAnyPermission, pool, audit, can
              JOIN employees e ON e.id=r.employee_id
              LEFT JOIN departments d ON d.id=e.department_id
             WHERE r.status='pending'
-              AND ($1::text IN ('admin','payroll')
-                OR e.id IN (SELECT employee_id FROM supervisor_employee_assignments WHERE supervisor_employee_id=$2 AND active=TRUE)
-                OR e.department_id IN (SELECT department_id FROM department_heads WHERE employee_id=$2 AND active=TRUE))
             ORDER BY r.work_date,r.created_at`,
-          [req.user.role, req.user.id],
         );
-        return res.json(result.rows);
+        const visible=[];
+        for(const row of result.rows){
+          if(await canAccessEmployee(req.user,row.employee_id,['approve_lunch_waiver'])) visible.push(row);
+        }
+        return res.json(visible);
       } catch (err) {
         console.error(err);
         return res.status(500).json({ error: 'Lunch removal request lookup failed' });
@@ -241,7 +285,7 @@ function createLunchRouter({ requireUser, requireAnyPermission, pool, audit, can
   router.post(
     '/supervisor/review-lunch-waiver-request',
     requireUser,
-    requireAnyPermission('approve_timecard', 'edit_employee_time', 'edit_payroll_time'),
+    requireAnyPermission('approve_lunch_waiver', 'approve_own_lunch_waiver'),
     async (req, res) => {
       let client = null;
       try {
@@ -253,7 +297,7 @@ function createLunchRouter({ requireUser, requireAnyPermission, pool, audit, can
         const target = await pool.query('SELECT employee_id,status FROM forced_lunch_waiver_requests WHERE id=$1', [requestId]);
         if (!target.rows.length) return res.status(404).json({ error: 'Request not found' });
         if (target.rows[0].status !== 'pending') return res.status(409).json({ error: 'This request has already been reviewed' });
-        if (!(await canAccessEmployee(req.user, target.rows[0].employee_id))) return res.status(403).json({ error: 'Access denied' });
+        if (!(await canAccessEmployee(req.user, target.rows[0].employee_id, ['approve_lunch_waiver']))) return res.status(403).json({ error: 'Access denied' });
 
         client = await pool.connect();
         await client.query('BEGIN');
@@ -314,7 +358,7 @@ function createLunchRouter({ requireUser, requireAnyPermission, pool, audit, can
   router.post(
     '/supervisor/lunch-waiver',
     requireUser,
-    requireAnyPermission('approve_timecard', 'edit_employee_time', 'edit_payroll_time'),
+    requireAnyPermission('approve_lunch_waiver'),
     async (req, res) => {
       let client = null;
       try {
@@ -324,7 +368,7 @@ function createLunchRouter({ requireUser, requireAnyPermission, pool, audit, can
         if (!workDate) return res.status(400).json({ error: 'Valid work date is required' });
         if (!reason) return res.status(400).json({ error: 'Reason is required' });
         if (reason.length > 1000) return res.status(400).json({ error: 'Reason must be 1000 characters or less' });
-        if (!(await canAccessEmployee(req.user, employeeId))) return res.status(403).json({ error: 'Access denied' });
+        if (!(await canAccessEmployee(req.user, employeeId, ['approve_lunch_waiver']))) return res.status(403).json({ error: 'Access denied' });
 
         client = await pool.connect();
         await client.query('BEGIN');

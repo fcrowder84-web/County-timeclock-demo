@@ -43,7 +43,6 @@ function createSupervisorRouter({
       'view_department_time',
       'view_live_status',
       'view_payroll_records',
-      'view_all_timeclock_records',
     ),
     async (req, res) => {
       try {
@@ -132,29 +131,22 @@ function createSupervisorRouter({
                  AND period_te.clock_in < ($2::date + INTERVAL '1 day')
              )
            )
-           AND (
-             $3::text IN ('admin','payroll')
-             OR e.id IN (
-               SELECT employee_id
-               FROM supervisor_employee_assignments
-               WHERE supervisor_employee_id=$4 AND active=TRUE
-             )
-             OR e.department_id IN (
-               SELECT department_id
-               FROM department_heads
-               WHERE employee_id=$4 AND active=TRUE
-             )
-           )
            GROUP BY e.id,e.first_name,e.last_name,d.name,e.role,
                     ppa.status,ppa.employee_signed_at,ppa.supervisor_approved_at
            ORDER BY d.name,e.last_name`,
-          [period.pay_period_start, period.pay_period_end, req.user.role, req.user.id],
+          [period.pay_period_start, period.pay_period_end],
         );
+
+        const visible=[];
+        const viewPermissions=['view_assigned_employees','view_department_time','view_live_status','view_payroll_records'];
+        for(const row of result.rows){
+          if(await canAccessEmployee(req.user,row.id,viewPermissions)) visible.push(row);
+        }
 
         return res.json({
           pay_period_start: period.pay_period_start,
           pay_period_end: period.pay_period_end,
-          employees: result.rows,
+          employees: visible,
         });
       } catch (err) {
         console.error(err);
@@ -184,21 +176,13 @@ function createSupervisorRouter({
            LEFT JOIN departments d ON d.id=e.department_id
            WHERE tcr.status='pending'
              AND (tcr.time_entry_id IS NULL OR te.deleted_at IS NULL)
-             AND (
-               $1::text IN ('admin','payroll')
-               OR e.id IN (
-                 SELECT employee_id FROM supervisor_employee_assignments
-                 WHERE supervisor_employee_id=$2 AND active=TRUE
-               )
-               OR e.department_id IN (
-                 SELECT department_id FROM department_heads
-                 WHERE employee_id=$2 AND active=TRUE
-               )
-             )
            ORDER BY tcr.created_at`,
-          [req.user.role, req.user.id],
         );
-        return res.json(result.rows);
+        const visible=[];
+        for(const row of result.rows){
+          if(await canAccessEmployee(req.user,row.employee_id,['approve_punch_correction'])) visible.push(row);
+        }
+        return res.json(visible);
       } catch (err) {
         console.error(err);
         return res.status(500).json({ error: 'Change request lookup failed' });
@@ -215,6 +199,12 @@ function createSupervisorRouter({
       try {
         const requestId = parsePositiveInt(req.body?.request_id, 'change request');
         const supervisorNote = String(req.body?.supervisor_note || '').trim();
+        if (!supervisorNote) {
+          return res.status(400).json({ error: 'A reason is required when denying a punch request' });
+        }
+        if (supervisorNote.length > 1000) {
+          return res.status(400).json({ error: 'Denial reason must be 1000 characters or less' });
+        }
 
         const target = await pool.query(
           `SELECT employee_id,status FROM time_change_requests WHERE id=$1`,
@@ -423,12 +413,6 @@ function createSupervisorRouter({
       try {
         const requestId = parsePositiveInt(req.body?.request_id, 'change request');
         const supervisorNote = String(req.body?.supervisor_note || '').trim();
-        if (!supervisorNote) {
-          return res.status(400).json({ error: 'A reason is required when denying a punch request' });
-        }
-        if (supervisorNote.length > 1000) {
-          return res.status(400).json({ error: 'Denial reason must be 1000 characters or less' });
-        }
         const requestResult = await pool.query(
           `SELECT employee_id,status FROM time_change_requests WHERE id=$1`,
           [requestId],
@@ -471,13 +455,11 @@ function createSupervisorRouter({
       'view_assigned_employees',
       'view_department_time',
       'view_payroll_records',
-      'review_approved_timecards',
-      'view_all_timeclock_records',
     ),
     async (req, res) => {
       try {
         const employeeId = parsePositiveInt(req.params.employeeId, 'employee');
-        if (!(await canAccessEmployee(req.user, employeeId))) {
+        if (!(await canAccessEmployee(req.user, employeeId, ['view_assigned_employees','view_department_time','view_payroll_records']))) {
           return res.status(403).json({ error: 'Access denied' });
         }
         const period = await getRequestedPayPeriod(req);
@@ -727,13 +709,12 @@ function createSupervisorRouter({
         if (!['employee','supervisor'].includes(targetStage)) {
           return res.status(400).json({ error: 'Return target must be employee or supervisor' });
         }
-        if (!(await canAccessEmployee(req.user, employeeId))) {
+        if (!(await canAccessEmployee(req.user, employeeId, ['return_timecard','return_to_supervisor','edit_payroll_time']))) {
           return res.status(403).json({ error: 'Access denied' });
         }
 
         const canReturnFromPayroll =
-          userHasPermission(req.user, 'return_to_supervisor') ||
-          userHasPermission(req.user, 'edit_payroll_time');
+          userHasPermission(req.user, 'return_to_supervisor');
         if (targetStage === 'supervisor' && !canReturnFromPayroll) {
           return res.status(403).json({ error: 'Only payroll can return a timecard to supervisor review' });
         }
@@ -953,13 +934,13 @@ function createSupervisorRouter({
   router.get(
     '/supervisor/time-entry-audit/:timeEntryId',
     requireUser,
-    requireAnyPermission('view_timeclock_audit', 'edit_employee_time', 'edit_payroll_time'),
+    requireAnyPermission('view_timeclock_audit'),
     async (req, res) => {
       try {
         const timeEntryId = parsePositiveInt(req.params.timeEntryId, 'time entry');
         const entryResult = await pool.query(`SELECT employee_id FROM time_entries WHERE id=$1`, [timeEntryId]);
         if (!entryResult.rows.length) return res.status(404).json({ error: 'Time entry not found' });
-        if (!(await canAccessEmployee(req.user, entryResult.rows[0].employee_id))) {
+        if (!(await canAccessEmployee(req.user, entryResult.rows[0].employee_id, ['view_timeclock_audit']))) {
           return res.status(403).json({ error: 'Access denied' });
         }
 

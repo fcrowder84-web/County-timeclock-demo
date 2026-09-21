@@ -38,9 +38,12 @@ function createTeamStructureRouter({
   router.get(
     '/supervisor/staff',
     requireUser,
-    requireAnyPermission('view_assigned_employees', 'view_department_time', 'manage_employee_timeclock_settings', 'manage_supervisor_assignments'),
+    requireAnyPermission('view_assigned_employees', 'view_department_time', 'view_employee_leave', 'add_employee_leave', 'approve_leave', 'void_employee_leave', 'submit_employee_timecard', 'view_timeclock_audit', 'manage_employee_timeclock_settings', 'manage_supervisor_assignments', 'manage_employee_lunch_settings'),
     async (req, res) => {
       try {
+        const role=String(req.user.role||'employee').toLowerCase();
+        const permissions=userPermissionSet(req.user);
+        const countywide=permissions.has('app_admin')||role==='timeclock_manager'||role==='payroll';
         const result = await pool.query(
           `SELECT e.id,e.employee_number,e.first_name,e.last_name,e.department,e.department_id,
                   d.name AS department_name,e.role,e.active,e.must_change_pin,
@@ -48,18 +51,15 @@ function createTeamStructureRouter({
              FROM employees e
              LEFT JOIN departments d ON d.id=e.department_id
             WHERE (
-              $1::text IN ('admin','payroll')
+              $1::boolean=TRUE
+              OR ($2::text='department_head' AND e.department_id=$3)
               OR e.id IN (
                 SELECT employee_id FROM supervisor_employee_assignments
-                WHERE supervisor_employee_id=$2 AND active=TRUE
-              )
-              OR e.department_id IN (
-                SELECT department_id FROM department_heads
-                WHERE employee_id=$2 AND active=TRUE
+                WHERE supervisor_employee_id=$4 AND active=TRUE
               )
             )
             ORDER BY d.name,e.active DESC,e.last_name,e.first_name`,
-          [req.user.role, req.user.id],
+          [countywide,role,req.user.department_id,req.user.id],
         );
         return res.json(result.rows);
       } catch (err) {
@@ -98,22 +98,22 @@ function createTeamStructureRouter({
     requireAnyPermission('view_department_time', 'manage_employee_timeclock_settings', 'manage_supervisor_assignments'),
     async (req, res) => {
       try {
+        const role=String(req.user.role||'employee').toLowerCase();
+        const permissions=userPermissionSet(req.user);
+        const countywide=permissions.has('app_admin')||role==='timeclock_manager'||role==='payroll';
         const result = await pool.query(
           `SELECT d.id,d.name
              FROM departments d
             WHERE (
-              $1::text IN ('admin','payroll')
-              OR d.id IN (
-                SELECT department_id FROM department_heads
-                WHERE employee_id=$2 AND active=TRUE
-              )
+              $1::boolean=TRUE
+              OR ($2::text='department_head' AND d.id=$3)
               OR d.id IN (
                 SELECT department_id FROM supervisor_employee_assignments
-                WHERE supervisor_employee_id=$2 AND active=TRUE
+                WHERE supervisor_employee_id=$4 AND active=TRUE
               )
             )
             ORDER BY d.name`,
-          [req.user.role, req.user.id],
+          [countywide,role,req.user.department_id,req.user.id],
         );
         return res.json(result.rows);
       } catch (err) {
@@ -126,32 +126,35 @@ function createTeamStructureRouter({
   router.get(
     '/supervisor/team-structure',
     requireUser,
-    requireAnyPermission('view_assigned_employees', 'view_department_time', 'manage_supervisor_assignments'),
+    requireAnyPermission('manage_supervisor_assignments', 'manage_employee_lunch_settings'),
     async (req, res) => {
       try {
         if (!(await canManageTeamStructure(req.user))) {
-          return res.status(403).json({ error: 'Department Structure is limited to department heads, Payroll, and administrators' });
+          return res.status(403).json({ error: 'Department Structure requires a structure or lunch-management permission within your authorized scope' });
         }
         const structurePermissions = userPermissionSet(req.user);
         const structureRole = String(req.user.role || '').toLowerCase();
-        const canManageAll = ['admin', 'payroll'].includes(structureRole) ||
-          (req.user.app_admin_scope === 'all' &&
-            (structurePermissions.has('app_admin') || structurePermissions.has('manage_supervisor_assignments')));
+        const canManageAll = structurePermissions.has('app_admin')
+          || structureRole === 'timeclock_manager'
+          || structureRole === 'payroll';
 
         const departments = await pool.query(
           `SELECT d.id,d.name,
-                  dh.employee_id AS department_head_id,
+                  he.id AS department_head_id,
                   he.first_name AS department_head_first_name,
                   he.last_name AS department_head_last_name
              FROM departments d
-             LEFT JOIN department_heads dh ON dh.department_id=d.id AND dh.active=TRUE
-             LEFT JOIN employees he ON he.id=dh.employee_id
+             LEFT JOIN LATERAL (
+               SELECT e.id,e.first_name,e.last_name
+                 FROM employees e
+                WHERE e.department_id=d.id
+                  AND e.role='department_head'
+                  AND e.active=TRUE
+                ORDER BY e.id
+                LIMIT 1
+             ) he ON TRUE
             WHERE $1::boolean=TRUE
                OR d.id=$2
-               OR EXISTS (
-                 SELECT 1 FROM department_heads x
-                 WHERE x.department_id=d.id AND x.employee_id=$3 AND x.active=TRUE
-               )
                OR EXISTS (
                  SELECT 1 FROM supervisor_employee_assignments x
                  WHERE x.department_id=d.id AND x.supervisor_employee_id=$3 AND x.active=TRUE
@@ -163,7 +166,7 @@ function createTeamStructureRouter({
         const employees = await pool.query(
           `SELECT e.id,e.employee_number,e.first_name,e.last_name,e.department_id,
                   d.name AS department_name,e.active,e.forced_lunch_enabled,e.forced_lunch_minutes,
-                  EXISTS(SELECT 1 FROM department_heads dh WHERE dh.employee_id=e.id AND dh.active=TRUE) AS is_department_head,
+                  (e.role='department_head') AS is_department_head,
                   EXISTS(SELECT 1 FROM supervisor_employee_assignments sea WHERE sea.supervisor_employee_id=e.id AND sea.active=TRUE) AS is_supervisor
              FROM employees e
              LEFT JOIN departments d ON d.id=e.department_id
@@ -171,10 +174,6 @@ function createTeamStructureRouter({
               AND ($1::boolean=TRUE OR e.department_id IN (
                 SELECT id FROM departments d2
                 WHERE d2.id=$2
-                   OR EXISTS (
-                     SELECT 1 FROM department_heads x
-                     WHERE x.department_id=d2.id AND x.employee_id=$3 AND x.active=TRUE
-                   )
                    OR EXISTS (
                      SELECT 1 FROM supervisor_employee_assignments x
                      WHERE x.department_id=d2.id AND x.supervisor_employee_id=$3 AND x.active=TRUE
@@ -215,58 +214,16 @@ function createTeamStructureRouter({
   router.post(
     '/supervisor/team-structure/department-head',
     requireUser,
-    requireAnyPermission('manage_supervisor_assignments'),
-    async (req, res) => {
-      let client = null;
-      try {
-        const departmentId = parsePositiveInt(req.body?.department_id, 'department');
-        const employeeId = req.body?.employee_id ? parsePositiveInt(req.body.employee_id, 'employee') : null;
-        if (!(await canManageTeamStructure(req.user, departmentId))) {
-          return res.status(403).json({ error: 'You cannot manage this department' });
-        }
-
-        client = await pool.connect();
-        await client.query('BEGIN');
-        await client.query(
-          `UPDATE department_heads SET active=FALSE WHERE department_id=$1 AND active=TRUE`,
-          [departmentId],
-        );
-
-        if (employeeId) {
-          const employee = await client.query(
-            `SELECT id FROM employees WHERE id=$1 AND department_id=$2 AND active=TRUE`,
-            [employeeId, departmentId],
-          );
-          if (!employee.rows.length) {
-            await client.query('ROLLBACK');
-            return res.status(400).json({ error: 'Department head must be an active employee in the department' });
-          }
-          await client.query(
-            `INSERT INTO department_heads(department_id,employee_id,active,assigned_by)
-             VALUES($1,$2,TRUE,$3)
-             ON CONFLICT(department_id,employee_id)
-             DO UPDATE SET active=TRUE,assigned_by=EXCLUDED.assigned_by,assigned_at=NOW()`,
-            [departmentId, employeeId, req.user.id],
-          );
-        }
-        await client.query('COMMIT');
-        await audit(req.user.id, 'assign_department_head', 'department', departmentId, { employee_id: employeeId });
-        return res.json({ message: 'Department head updated' });
-      } catch (err) {
-        if (client) await client.query('ROLLBACK').catch(() => {});
-        if (err.statusCode) return res.status(err.statusCode).json({ error: err.message });
-        console.error(err);
-        return res.status(400).json({ error: err.message || 'Department head update failed' });
-      } finally {
-        if (client) client.release();
-      }
-    },
+    requireAnyPermission('app_admin'),
+    (_req,res)=>res.status(410).json({
+      error:'Department Head is now a TimeClock role managed in Employee Portal > Access Matrix.'
+    }),
   );
 
   router.post(
     '/supervisor/team-structure/assign',
     requireUser,
-    requireAnyPermission('manage_supervisor_assignments', 'view_department_time'),
+    requireAnyPermission('manage_supervisor_assignments'),
     async (req, res) => {
       let client = null;
       try {
@@ -328,7 +285,7 @@ function createTeamStructureRouter({
   router.post(
     '/supervisor/team-structure/unassign',
     requireUser,
-    requireAnyPermission('manage_supervisor_assignments', 'view_department_time'),
+    requireAnyPermission('manage_supervisor_assignments'),
     async (req, res) => {
       try {
         const employeeId = parsePositiveInt(req.body?.employee_id, 'employee');

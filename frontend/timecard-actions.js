@@ -9,8 +9,14 @@ function lunchStatusHtml(day){
   const pending=lunchRequestForDay(day);
   let action="";
   if(selectedIsSelf()&&currentMode==="employee"){
-    action=pending?'<span style="margin-left:6px">Removal pending</span>':` <button type="button" class="btn lunch-request" data-date="${day}" style="padding:3px 7px;font-size:.82em">Request removal</button>`;
-  }else if(currentMode==="supervisor"&&!selectedIsSelf()&&hasAny(["approve_timecard","edit_employee_time","edit_payroll_time"])){
+    if(pending&&has("withdraw_own_pending_request")){
+      action=` <button type="button" class="btn lunch-withdraw" data-id="${Number(pending.id)}" style="padding:3px 7px;font-size:.82em">Withdraw request</button>`;
+    }else if(pending){
+      action='<span style="margin-left:6px">Removal pending</span>';
+    }else if(has("request_lunch_waiver")){
+      action=` <button type="button" class="btn lunch-request" data-date="${day}" style="padding:3px 7px;font-size:.82em">Request removal</button>`;
+    }
+  }else if(currentMode==="supervisor"&&!selectedIsSelf()&&has("approve_lunch_waiver")){
     action=` <button type="button" class="btn lunch-waive" data-date="${day}" style="padding:3px 7px;font-size:.82em">Remove lunch</button>`;
   }
   return`<div style="margin-top:5px;font-size:.82em"><strong>Forced Lunch −${deduction.toFixed(2)} hr</strong>${action}</div>`;
@@ -41,6 +47,21 @@ async function reviewLunchRequest(id,status){
     await loadTimecard();
   }catch(err){showMessage(err.message,"error")}
 }
+async function withdrawPendingItem(type,id){
+  const reason=prompt("Reason for withdrawing this pending request (optional):");
+  if(reason===null)return;
+  try{
+    if(type==="leave"){
+      await jsonOrError(await apiFetch(`${apiBase}/leave/${Number(id)}`,{method:"DELETE",body:JSON.stringify({reason})}));
+    }else if(type==="change"){
+      await jsonOrError(await apiFetch(`${apiBase}/employee/withdraw-time-change`,{method:"POST",body:JSON.stringify({request_id:Number(id),reason})}));
+    }else if(type==="lunch"){
+      await jsonOrError(await apiFetch(`${apiBase}/employee/withdraw-lunch-waiver-request`,{method:"POST",body:JSON.stringify({request_id:Number(id),reason})}));
+    }
+    showMessage("Pending request withdrawn. History has been preserved.");
+    await loadTimecard();
+  }catch(err){showMessage(err.message,"error")}
+}
 function renderTimecard(){
   const data=currentData,employee=data.employee||currentUser,entries=data.entries||[],start=dateOnly(data.pay_period_start||selectedPeriodStart),summary=data.timecard_summary||{weeks:[],period:{},days:[]};
   const summaryDays=new Map((summary.days||[]).map(item=>[dateOnly(item.work_date),item]));
@@ -48,15 +69,15 @@ function renderTimecard(){
   const today=new Date().toLocaleDateString("en-CA",{timeZone:"America/New_York"});
   let html="";
   days.forEach((d,i)=>{
-    const leavePresent=(data.leave_entries||[]).some(l=>dateOnly(l.leave_date_iso||l.leave_date)===d.date&&l.status!=="denied"),work=allocated[d.date]||{regular:0,ot:0},approvedLeave=["holiday","vacation","sick","floating_holiday","other"].reduce((a,t)=>a+approvedLeaveHours(d.date,t),0),dailyTotal=d.worked+approvedLeave;
+    const leavePresent=(data.leave_entries||[]).some(l=>dateOnly(l.leave_date_iso||l.leave_date)===d.date&&["pending","approved"].includes(l.status)),work=allocated[d.date]||{regular:0,ot:0},approvedLeave=["holiday","vacation","sick","floating_holiday","other"].reduce((a,t)=>a+approvedLeaveHours(d.date,t),0),dailyTotal=d.worked+approvedLeave;
     const employeeCanModify=currentMode==="employee"&&data.can_edit_entries!==false;
     const elevatedCanModify=currentMode==="supervisor"&&data.can_edit_entries===true;
     const ownTimecard=selectedIsSelf();
-    const employeePunchRequestEnabled=ownTimecard&&d.date<=today;
+    const employeePunchRequestEnabled=ownTimecard&&has("request_punch_correction")&&d.date<=today;
     const supervisorPunchEnabled=!ownTimecard&&elevatedCanModify&&canAddEntries();
     const punchEnabled=employeePunchRequestEnabled||supervisorPunchEnabled;
     const punchTitle=employeePunchRequestEnabled?"Request missing time for this date":supervisorPunchEnabled?"Add punch entry":"Punch request not available for this date";
-    const leaveEnabled=(employeeCanModify&&ownTimecard)||elevatedCanModify;
+    const leaveEnabled=(employeeCanModify&&ownTimecard&&has("request_leave"))||(!ownTimecard&&currentMode==="supervisor"&&has("add_employee_leave"));
     html+=`<tr class="${leavePresent?"leave-day":""}"><td class="left"><div class="datecell"><button class="icon-button day-punch" data-date="${d.date}" ${punchEnabled?"":"disabled"} title="${punchTitle}">${punchSvg}</button><button class="icon-button leave day-leave" data-date="${d.date}" ${leaveEnabled?"":"disabled"} title="Add leave">${leaveSvg}</button><span class="date-label"><strong>${esc(dayName(d.date))}</strong> ${esc(localDateLabel(d.date))}${lunchStatusHtml(d.date)}</span></div></td>${punchCells(d.date,d.entries)}<td>${fmt(work.regular)}</td><td>${fmt(work.ot)}</td>${leaveCell(d.date,"holiday")}${leaveCell(d.date,"vacation")}${leaveCell(d.date,"sick")}${leaveCell(d.date,"floating_holiday")}${leaveCell(d.date,"other")}<td><strong>${fmt(dailyTotal)}</strong></td></tr>`;
     if(i===6)html+=totalRow("Week 1 Total",summary.weeks?.[0],"week-total");
     if(i===13)html+=totalRow("Week 2 Total",summary.weeks?.[1],"week-total");
@@ -98,8 +119,8 @@ function deniedPunchItems(){
       let requested="Punch correction";
       if(!r.time_entry_id&&r.requested_clock_in&&r.requested_clock_out){
         requested=`Missing time: ${localDateTime(r.requested_clock_in)} to ${localDateTime(r.requested_clock_out)}`;
-      }else if(!r.time_entry_id&&r.requested_clock_in){
-        requested=`Punch: ${localDateTime(r.requested_clock_in)}`;
+      }else if(!r.time_entry_id&&(r.requested_clock_in||r.requested_clock_out)){
+        requested=`Punch: ${localDateTime(r.requested_clock_in||r.requested_clock_out)}`;
       }else if(r.requested_clock_in||r.requested_clock_out){
         const parts=[];
         if(r.requested_clock_in)parts.push(`Clock in ${localDateTime(r.requested_clock_in)}`);
@@ -107,13 +128,9 @@ function deniedPunchItems(){
         requested=parts.join(" / ");
       }
       const reviewer=[r.supervisor_first_name,r.supervisor_last_name].filter(Boolean).join(" ");
-      const reviewed=r.reviewed_at_display? ` — Reviewed ${r.reviewed_at_display}`:"";
-      const by=reviewer? ` by ${reviewer}`:"";
-      return{
-        id:r.id,
-        text:`${requested}${reviewed}${by}`,
-        note:r.supervisor_note||"No denial reason was recorded."
-      };
+      const reviewed=r.reviewed_at_display?` — Reviewed ${r.reviewed_at_display}`:"";
+      const by=reviewer?` by ${reviewer}`:"";
+      return{id:r.id,text:`${requested}${reviewed}${by}`,note:r.supervisor_note||"No denial reason was recorded."};
     });
 }
 function renderDenied(){
@@ -138,16 +155,28 @@ function renderPending(){
   document.getElementById("pendingLegend").textContent=items.length?`${items.length} pending item${items.length===1?"":"s"}`:"";
   list.innerHTML=items.map(i=>{
     let actions="";
-    if(currentMode==="supervisor"){
-      if(i.type==="leave"&&hasAny(["approve_timecard","edit_employee_time","edit_payroll_time","app_admin"]))actions=`<span><button class="btn pending-leave-review" data-id="${Number(i.id)}" data-status="approved">Approve</button><button class="btn pending-leave-review" data-id="${Number(i.id)}" data-status="denied">Deny</button></span>`;
-      if(i.type==="change"&&has("approve_punch_correction"))actions=`<span><button class="btn pending-change-review" data-id="${Number(i.id)}" data-status="approved">Approve</button><button class="btn pending-change-review" data-id="${Number(i.id)}" data-status="denied">Deny</button></span>`;
-      if(i.type==="lunch"&&hasAny(["approve_timecard","edit_employee_time","edit_payroll_time"]))actions=`<span><button class="btn pending-lunch-review" data-id="${Number(i.id)}" data-status="approved">Approve</button><button class="btn pending-lunch-review" data-id="${Number(i.id)}" data-status="denied">Deny</button></span>`;
+    if(selectedIsSelf()&&currentMode==="employee"&&has("withdraw_own_pending_request")){
+      actions=`<span><button class="btn pending-withdraw" data-type="${i.type}" data-id="${Number(i.id)}">Withdraw</button></span>`;
+    }else if(currentMode==="supervisor"){
+      if(i.type==="leave"){
+        const allowed=selectedIsSelf()?has("approve_own_leave"):has("approve_leave");
+        if(allowed)actions=`<span><button class="btn pending-leave-review" data-id="${Number(i.id)}" data-status="approved">Approve</button><button class="btn pending-leave-review" data-id="${Number(i.id)}" data-status="denied">Deny</button></span>`;
+      }
+      if(i.type==="change"){
+        const allowed=selectedIsSelf()?has("approve_own_punch_corrections"):has("approve_punch_correction");
+        if(allowed)actions=`<span><button class="btn pending-change-review" data-id="${Number(i.id)}" data-status="approved">Approve</button><button class="btn pending-change-review" data-id="${Number(i.id)}" data-status="denied">Deny</button></span>`;
+      }
+      if(i.type==="lunch"){
+        const allowed=selectedIsSelf()?has("approve_own_lunch_waiver"):has("approve_lunch_waiver");
+        if(allowed)actions=`<span><button class="btn pending-lunch-review" data-id="${Number(i.id)}" data-status="approved">Approve</button><button class="btn pending-lunch-review" data-id="${Number(i.id)}" data-status="denied">Deny</button></span>`;
+      }
     }
     return`<div class="pending-item"><span>${esc(i.text)}</span>${actions}</div>`;
   }).join("");
   list.querySelectorAll(".pending-leave-review").forEach(b=>b.addEventListener("click",()=>reviewLeave(b.dataset.id,b.dataset.status)));
   list.querySelectorAll(".pending-change-review").forEach(b=>b.addEventListener("click",()=>reviewChange(b.dataset.id,b.dataset.status)));
   list.querySelectorAll(".pending-lunch-review").forEach(b=>b.addEventListener("click",()=>reviewLunchRequest(b.dataset.id,b.dataset.status)));
+  list.querySelectorAll(".pending-withdraw").forEach(b=>b.addEventListener("click",()=>withdrawPendingItem(b.dataset.type,b.dataset.id)));
 }
 function bindRowActions(){
   document.querySelectorAll(".punch").forEach(el=>el.addEventListener("click",ev=>openPunchMenu(ev,Number(el.dataset.entryId),el.dataset.kind)));
@@ -155,12 +184,13 @@ function bindRowActions(){
   document.querySelectorAll(".day-leave:not(:disabled)").forEach(b=>b.addEventListener("click",()=>openLeave(b.dataset.date)));
   document.querySelectorAll(".lunch-request").forEach(b=>b.addEventListener("click",()=>requestLunchWaiver(b.dataset.date)));
   document.querySelectorAll(".lunch-waive").forEach(b=>b.addEventListener("click",()=>waiveForcedLunch(b.dataset.date)));
+  document.querySelectorAll(".lunch-withdraw").forEach(b=>b.addEventListener("click",()=>withdrawPendingItem("lunch",b.dataset.id)));
 }
 function findEntry(id){return(currentData.entries||[]).find(e=>Number(e.id)===Number(id))}
 function openPunchMenu(ev,id,kind){
   const entry=findEntry(id);if(!entry)return;activeEntry={...entry,clickedKind:kind};const menu=document.getElementById("contextMenu");let buttons=[];
-  if(selectedIsSelf()&&currentData.can_edit_entries!==false){buttons.push(["Request Change","request"]);buttons.push(["Delete Punch","delete"])}
-  if(!selectedIsSelf()&&currentMode==="supervisor"&&currentData.can_edit_entries===true){if(hasAny(["edit_employee_time","edit_payroll_time"]))buttons.push(["Edit","edit"]);buttons.push(["Delete","delete"])}
+  if(selectedIsSelf()&&currentData.can_edit_entries!==false){if(has("request_punch_correction"))buttons.push(["Request Change","request"]);if(has("void_own_unapproved_punch"))buttons.push(["Void Punch","delete"])}
+  if(!selectedIsSelf()&&currentMode==="supervisor"&&currentData.can_edit_entries===true&&hasAny(["edit_employee_time","edit_payroll_time"])){buttons.push(["Edit","edit"]);buttons.push(["Void Punch","delete"])}
   if(!buttons.length)buttons=[["View only","none"]];
   menu.innerHTML=buttons.map(([label,action])=>`<button data-action="${action}">${esc(label)}</button>`).join("");menu.querySelectorAll("button").forEach(b=>b.addEventListener("click",()=>handlePunchAction(b.dataset.action)));const x=Math.min(ev.clientX,innerWidth-180),y=Math.min(ev.clientY+8,innerHeight-160);menu.style.left=x+"px";menu.style.top=y+"px";menu.style.display="block";ev.stopPropagation()
 }
@@ -226,7 +256,7 @@ document.getElementById("entrySubmitBtn").addEventListener("click",async()=>{
   }catch(err){showEntryModalMessage(err.message||"Unable to save punch request",true)}
 });
 async function deleteEntry(entry){
-  const reason=prompt("Reason for deleting this punch entry:");if(!reason)return;try{await jsonOrError(await apiFetch(`${apiBase}/delete-punch`,{method:"POST",body:JSON.stringify({time_entry_id:entry.id,reason})}));showMessage("Punch deleted. Original record remains in the audit trail.");await loadTimecard()}catch(err){showMessage(err.message,"error")}
+  const reason=prompt("Reason for voiding this punch entry:");if(!reason)return;try{await jsonOrError(await apiFetch(`${apiBase}/delete-punch`,{method:"POST",body:JSON.stringify({time_entry_id:entry.id,reason})}));showMessage("Punch voided. Original record remains in the audit trail.");await loadTimecard()}catch(err){showMessage(err.message,"error")}
 }
 function openLeave(day){document.getElementById("leaveDate").value=day;document.getElementById("leaveType").value="vacation";document.getElementById("leaveHours").value="8";document.getElementById("leaveNote").value="";modal("leaveModal",true)}
 document.getElementById("leaveSubmitBtn").addEventListener("click",()=>submitLeave(false));
@@ -248,7 +278,11 @@ async function reviewChange(id,status){
     note=entered.trim();
   }
   const path=status==="approved"?"approve-change-request":"deny-change-request";
-  try{await jsonOrError(await apiFetch(`${apiBase}/supervisor/${path}`,{method:"POST",body:JSON.stringify({request_id:Number(id),supervisor_note:note})}));showMessage(`Change request ${status}`);await loadTimecard()}catch(err){showMessage(err.message,"error")}
+  try{
+    await jsonOrError(await apiFetch(`${apiBase}/supervisor/${path}`,{method:"POST",body:JSON.stringify({request_id:Number(id),supervisor_note:note})}));
+    showMessage(`Change request ${status}`);
+    await loadTimecard();
+  }catch(err){showMessage(err.message,"error")}
 }
 
 document.getElementById("employeeSignBtn").addEventListener("click",async()=>{if(!confirm("Sign and submit this timecard to your supervisor?"))return;try{await jsonOrError(await apiFetch(`${apiBase}/submit-timecard`,{method:"POST",body:"{}"}));showMessage("Timecard submitted");await loadTimecard()}catch(err){showMessage(err.message,"error")}});

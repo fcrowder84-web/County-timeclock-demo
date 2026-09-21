@@ -22,10 +22,10 @@ function updateUrl(){const u=new URL(location.href);if(selectedPeriodStart)u.sea
 function showMessage(message,type="success"){const box=document.getElementById("messageBox");box.textContent=message;box.className="notice "+type;clearTimeout(showMessage.t);showMessage.t=setTimeout(()=>{box.className="notice"},6000)}
 async function apiFetch(url,options={}){const headers={...(options.headers||{})};if(token())headers.Authorization=`Bearer ${token()}`;if(options.body&&!headers["Content-Type"])headers["Content-Type"]="application/json";if(selectedPeriodStart&&url.startsWith(apiBase)){const sep=url.includes("?")?"&":"?";url+=`${sep}period_start=${encodeURIComponent(selectedPeriodStart)}`}const response=await fetch(url,{...options,headers});if(response.status===401){localStorage.removeItem("timeclock_token");location.replace("https://employee.edgefieldcountysc.org/apps/timeclock/launch?return_to=timecard");throw new Error("Login required")}return response}
 async function jsonOrError(response){let data={};try{data=await response.json()}catch(_){data={}}if(!response.ok){const err=new Error(data.error||`Request failed (${response.status})`);err.status=response.status;err.data=data;throw err}return data}
-function elevatedView(){return hasAny(["view_assigned_employees","view_department_time","view_payroll_records","review_approved_timecards","view_all_timeclock_records"])}
-function payrollView(){return hasAny(["edit_payroll_time","view_payroll_records","review_approved_timecards","view_all_timeclock_records","return_to_supervisor","finalize_timecard"])}
+function elevatedView(){return hasAny(["view_assigned_employees","view_department_time","view_payroll_records"])}
+function payrollView(){return hasAny(["edit_payroll_time","view_payroll_records","return_to_supervisor","finalize_timecard","finalize_pay_period"])}
 function canAddEntries(){return hasAny(["add_employee_entry","edit_employee_time","edit_payroll_time"])}
-function canReturn(){return hasAny(["return_timecard","return_to_supervisor","edit_payroll_time"])}
+function canReturn(){return hasAny(["return_timecard","return_to_supervisor"])}
 function selectedIsSelf(){return Number(selectedEmployeeId)===Number(currentUser?.id)}
 
 async function init(){

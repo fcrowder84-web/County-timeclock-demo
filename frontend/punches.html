@@ -22,7 +22,7 @@
   <div id="message" class="message"></div>
   <section class="card">
     <h1>My Recent Punches</h1>
-    <p class="muted">You may remove an incorrect punch. A reason is required. Deleted punches are removed from time calculations but the original record, deletion details, and punch audit information are retained.</p>
+    <p class="muted">You may void an incorrect punch when your permissions and timecard workflow allow it. A reason is required. Voided punches are removed from time calculations while the original record and audit history are retained.</p>
     <div class="actions"><a class="btn back" href="/mobile.html">Mobile Quick Punch</a><a class="btn back" href="/employee.html">Full TimeClock</a></div>
   </section>
   <section class="card">
@@ -38,10 +38,18 @@
   const apiBase='/api';
   const token=()=>localStorage.getItem('timeclock_token');
   const headers=()=>({Authorization:`Bearer ${token()}`,'Content-Type':'application/json'});
+  let permissions=new Set();
+  function has(permission){return permissions.has('app_admin')||permissions.has(permission)}
   function showMessage(text,error=false){const box=document.getElementById('message');box.className=`message ${error?'error':'ok'}`;box.textContent=text;}
   async function load(){
     if(!token()){window.location.replace('/mobile.html');return;}
     try{
+      const meResponse=await fetch(`${apiBase}/me`,{headers:headers()});
+      if(meResponse.status===401){localStorage.removeItem('timeclock_token');window.location.replace('/mobile.html');return;}
+      const me=await meResponse.json().catch(()=>({}));
+      if(!meResponse.ok)throw new Error(me.error||'Unable to load account permissions');
+      permissions=new Set(me.permissions||[]);
+      if(!has('view_own_time'))throw new Error('View Own Time permission is required');
       const response=await fetch(`${apiBase}/my-punches`,{headers:headers()});
       if(response.status===401){localStorage.removeItem('timeclock_token');window.location.replace('/mobile.html');return;}
       const data=await response.json();
@@ -51,26 +59,26 @@
       const rows=document.getElementById('rows');rows.innerHTML='';
       data.entries.forEach(entry=>{
         const tr=document.createElement('tr');
-        tr.innerHTML=`<td data-label="Clock In">${entry.clock_in_display||'-'}</td><td data-label="Clock Out">${entry.clock_out_display||'OPEN'}</td><td data-label="Hours">${Number(entry.hours_worked||0).toFixed(2)}</td><td data-label="Status">${entry.status||'-'}</td><td data-label="Action"><button class="delete" data-id="${entry.id}">Delete Punch</button></td>`;
+        tr.innerHTML=`<td data-label="Clock In">${entry.clock_in_display||'-'}</td><td data-label="Clock Out">${entry.clock_out_display||'OPEN'}</td><td data-label="Hours">${Number(entry.hours_worked||0).toFixed(2)}</td><td data-label="Status">${entry.status||'-'}</td><td data-label="Action">${has('void_own_unapproved_punch')?`<button class="delete" data-id="${entry.id}">Void Punch</button>`:'View only'}</td>`;
         rows.appendChild(tr);
       });
-      rows.querySelectorAll('button.delete').forEach(button=>button.addEventListener('click',()=>deletePunch(Number(button.dataset.id))));
+      rows.querySelectorAll('button.delete').forEach(button=>button.addEventListener('click',()=>voidPunch(Number(button.dataset.id))));
       document.getElementById('punchTable').style.display='table';
     }catch(err){document.getElementById('loading').style.display='none';showMessage(err.message||'Unable to load punches',true);}
   }
-  async function deletePunch(id){
-    const reason=window.prompt('Why are you deleting this punch? This reason will be saved in the audit trail.');
+  async function voidPunch(id){
+    const reason=window.prompt('Why are you voiding this punch? This reason will be saved in the audit trail.');
     if(reason===null)return;
-    if(reason.trim().length<3){showMessage('A deletion reason is required.',true);return;}
-    if(!window.confirm('Delete this punch from your timecard? The original record will remain in the audit trail.'))return;
+    if(reason.trim().length<3){showMessage('A void reason is required.',true);return;}
+    if(!window.confirm('Void this punch from your timecard? The original record will remain in the audit trail.'))return;
     try{
       const response=await fetch(`${apiBase}/delete-punch`,{method:'POST',headers:headers(),body:JSON.stringify({time_entry_id:id,reason:reason.trim()})});
       const data=await response.json();
       if(response.status===401){localStorage.removeItem('timeclock_token');window.location.replace('/mobile.html');return;}
-      if(!response.ok)throw new Error(data.error||'Unable to delete punch');
-      showMessage(data.message||'Punch deleted.');
+      if(!response.ok)throw new Error(data.error||'Unable to void punch');
+      showMessage(data.message||'Punch voided.');
       await load();
-    }catch(err){showMessage(err.message||'Unable to delete punch',true);}
+    }catch(err){showMessage(err.message||'Unable to void punch',true);}
   }
   load();
 </script>

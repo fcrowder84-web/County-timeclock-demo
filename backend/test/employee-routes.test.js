@@ -30,6 +30,7 @@ function compact(sql) { return String(sql).replace(/\s+/g, ' ').trim(); }
   const router = createEmployeeRouter({
     requireUser: noop,
     requireAnyPermission: allow,
+    canAccessEmployee: async () => true,
     getRequestedPayPeriod: async () => period,
     audit: async () => {},
     pool: {
@@ -45,6 +46,7 @@ function compact(sql) { return String(sql).replace(/\s+/g, ' ').trim(); }
       'get /employee/my-timecard',
       'post /employee/edit-time-entry',
       'post /employee/request-time-change',
+      'post /employee/withdraw-time-change',
       'post /supervisor/add-time-entry',
       'post /supervisor/approve-single-punch',
     ],
@@ -69,6 +71,7 @@ function compact(sql) { return String(sql).replace(/\s+/g, ' ').trim(); }
   const otherEmployeeRouter = createEmployeeRouter({
     requireUser: noop,
     requireAnyPermission: allow,
+    canAccessEmployee: async () => true,
     getRequestedPayPeriod: async () => period,
     audit: async () => {},
     pool: {
@@ -94,6 +97,7 @@ function compact(sql) { return String(sql).replace(/\s+/g, ' ').trim(); }
   const invalidPairRouter = createEmployeeRouter({
     requireUser: noop,
     requireAnyPermission: allow,
+    canAccessEmployee: async () => true,
     getRequestedPayPeriod: async () => period,
     audit: async () => {},
     pool: {
@@ -130,6 +134,7 @@ function compact(sql) { return String(sql).replace(/\s+/g, ' ').trim(); }
   const singlePunchRouter = createEmployeeRouter({
     requireUser: noop,
     requireAnyPermission: allow,
+    canAccessEmployee: async () => true,
     getRequestedPayPeriod: async () => period,
     audit: async (...args) => singleAudit.push(args),
     pool: {
@@ -180,6 +185,7 @@ function compact(sql) { return String(sql).replace(/\s+/g, ' ').trim(); }
     const submitRouter = createEmployeeRouter({
       requireUser: noop,
       requireAnyPermission: allow,
+    canAccessEmployee: async () => true,
       getRequestedPayPeriod: async () => period,
       audit: async () => {},
       pool: {
@@ -217,6 +223,7 @@ function compact(sql) { return String(sql).replace(/\s+/g, ' ').trim(); }
   const timecardRouter = createEmployeeRouter({
     requireUser: noop,
     requireAnyPermission: allow,
+    canAccessEmployee: async () => true,
     getRequestedPayPeriod: async () => period,
     audit: async () => {},
     pool: {

@@ -303,7 +303,12 @@
             </button>
 
             <button id="printTimecardsButton" class="btn-print" onclick="openPrintableTimecards()">
-                Print Payroll Timecards   </button>
+                Print Payroll Timecards
+            </button>
+
+            <button id="finalizePeriodButton" class="btn-primary" onclick="finalizePayPeriod()" style="display:none">
+                Finalize Entire Pay Period
+            </button>
 
             <button class="btn-home" onclick="goHome()">
                 Home
@@ -410,10 +415,9 @@
         }
 
         const payrollPermissionKeys = [
-            "view_payroll_records", "review_approved_timecards", "edit_payroll_time",
+            "view_payroll_records", "edit_payroll_time",
             "return_to_supervisor", "reopen_timecard", "finalize_timecard",
-            "finalize_pay_period", "export_payroll", "view_payroll_reports",
-            "view_all_timeclock_records"
+            "finalize_pay_period", "export_payroll", "view_timeclock_audit"
         ];
 
         function portalLogin() {
@@ -434,9 +438,10 @@
 
         function applyPermissionUi() {
             document.getElementById("exportButton").style.display = hasPermission("export_payroll") ? "inline-block" : "none";
-            const canPrint = hasPermission("view_payroll_records") || hasPermission("view_payroll_reports") || hasPermission("export_payroll");
+            const canPrint = hasPermission("view_payroll_records");
             document.getElementById("printSummaryButton").style.display = canPrint ? "inline-block" : "none";
             document.getElementById("printTimecardsButton").style.display = canPrint ? "inline-block" : "none";
+            document.getElementById("finalizePeriodButton").style.display = hasPermission("finalize_pay_period") ? "inline-block" : "none";
         }
 
         function getToken() {
@@ -570,6 +575,13 @@
         }
 
         function getStatusInfo(row) {
+            if (row.payroll_finalized_at || row.status === "payroll_finalized") {
+                return {
+                    text: "Payroll Finalized",
+                    className: "status-good"
+                };
+            }
+
             if (row.supervisor_approved_at || row.status === "supervisor_approved") {
                 return {
                     text: "Approved",
@@ -610,12 +622,17 @@
             let submitted = 0;
             let notSubmitted = 0;
             let approved = 0;
+            let finalized = 0;
             let waitingSupervisor = 0;
 
             rows.forEach(row => {
                 const info = getStatusInfo(row);
 
-                if (info.text === "Approved") {
+                if (info.text === "Payroll Finalized") {
+                    finalized++;
+                    approved++;
+                    submitted++;
+                } else if (info.text === "Approved") {
                     approved++;
                     submitted++;
                 } else if (info.text === "Submitted") {
@@ -637,8 +654,13 @@
                         </div>
 
                         <div class="summary-box status-good">
-                            <strong>Approved</strong>
+                            <strong>Approved / Finalized</strong>
                             <div class="summary-number">${approved}</div>
+                        </div>
+
+                        <div class="summary-box status-good">
+                            <strong>Payroll Finalized</strong>
+                            <div class="summary-number">${finalized}</div>
                         </div>
 
                         <div class="summary-box status-waiting">
@@ -724,7 +746,13 @@
                             </td>
 
                             <td>
-                                <button class="btn-primary" onclick="openEmployeeTimecard(${row.id})">View / Edit Timecard</button>
+                                <button class="btn-primary" onclick="openEmployeeTimecard(${row.id})">View Timecard</button>
+                                ${hasPermission("finalize_timecard") && !row.payroll_finalized_at && row.status === "supervisor_approved"
+                                    ? `<button class="btn-export" onclick="finalizeTimecard(${row.id})">Finalize</button>`
+                                    : ""}
+                                ${row.payroll_finalized_at || row.status === "payroll_finalized"
+                                    ? '<span class="status-pill status-good">Finalized</span>'
+                                    : ""}
                             </td>
                         </tr>
                     `;
@@ -915,6 +943,51 @@
             if (response.ok) {
                 await loadPayrollSummary();
                 if (selectedEmployeeId) await viewPayrollTimecard(selectedEmployeeId);
+            }
+        }
+
+        async function finalizeTimecard(employeeId) {
+            if (!confirm("Finalize this employee timecard for payroll?\n\nThe card must already be employee-submitted and supervisor-approved, with no open or pending items.")) return;
+            try {
+                const response = await apiFetch(`${apiBase}/payroll/finalize-timecard`, {
+                    method: "POST",
+                    body: JSON.stringify({ employee_id: Number(employeeId) })
+                });
+                const data = await response.json().catch(() => ({}));
+                if (!response.ok) {
+                    const blockers = Array.isArray(data.blockers) && data.blockers.length
+                        ? "\n\n" + data.blockers.join("\n")
+                        : "";
+                    throw new Error((data.error || "Unable to finalize timecard") + blockers);
+                }
+                showMessage(data.message || "Timecard payroll finalized");
+                await loadPayrollSummary();
+            } catch (err) {
+                showMessage(err.message || "Unable to finalize timecard", true);
+            }
+        }
+
+        async function finalizePayPeriod() {
+            if (!confirm("Finalize every timecard in your scope for this pay period?\n\nThis will stop if even one employee still has an unapproved card, open punch, or pending punch/leave/lunch request.")) return;
+            try {
+                const response = await apiFetch(`${apiBase}/payroll/finalize-pay-period`, {
+                    method: "POST",
+                    body: JSON.stringify({})
+                });
+                const data = await response.json().catch(() => ({}));
+                if (!response.ok) {
+                    let details = "";
+                    if (Array.isArray(data.blockers) && data.blockers.length) {
+                        details = "\n\n" + data.blockers.map(item =>
+                            `${item.employee}: ${(item.blockers || []).join("; ")}`
+                        ).join("\n");
+                    }
+                    throw new Error((data.error || "Unable to finalize pay period") + details);
+                }
+                showMessage(data.message || "Pay period finalized");
+                await loadPayrollSummary();
+            } catch (err) {
+                showMessage(err.message || "Unable to finalize pay period", true);
             }
         }
 
