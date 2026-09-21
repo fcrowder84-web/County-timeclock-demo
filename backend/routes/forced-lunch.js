@@ -259,19 +259,10 @@ function createForcedLunchRouter({
         }
 
         const approval = await approvalForDate(client, employeeId, workDate, true);
-        const payrollOverride = userHasPermission(req.user, "edit_payroll_time");
-        if (approval?.payroll_finalized_at && !payrollOverride) {
-          await client.query("ROLLBACK");
-          return res.status(409).json({ error: "This timecard is payroll-finalized" });
-        }
-        if (!payrollOverride && approval && (
-          !approval.employee_signed_at ||
-          approval.supervisor_approved_at ||
-          approval.status !== "employee_submitted"
-        )) {
+        if (approval?.payroll_finalized_at && !userHasPermission(req.user, "reopen_timecard")) {
           await client.query("ROLLBACK");
           return res.status(409).json({
-            error: "Supervisor lunch removal is available while the submitted timecard is awaiting supervisor review",
+            error: "This timecard is payroll-finalized. Reopen permission is required before removing lunch.",
           });
         }
 
