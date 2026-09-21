@@ -9,6 +9,8 @@ const {
   normalizePermissions,
   legacyPermissionsForRole,
   deriveLegacyRole,
+  currentAuthorizationForUser,
+  roleCanSelfApprove,
   userHasPermission,
   userHasAnyPermission,
 }=require('../lib/permissions');
@@ -54,6 +56,42 @@ assert.strictEqual(
   userHasAnyPermission({permissions:['clock_in_out']},['edit_payroll_time','clock_in_out']),
   true,
 );
+
+// Authorization for Portal users comes from the current database snapshot,
+ // not stale bearer-session permissions or scope.
+assert.deepStrictEqual(
+  currentAuthorizationForUser(
+    {auth_source:'portal',portal_permissions:['access'],app_admin_scope:'own'},
+    ['app_admin'],
+    'all',
+  ),
+  {permissions:['access'],appAdminScope:'own'},
+);
+assert.deepStrictEqual(
+  currentAuthorizationForUser(
+    {auth_source:'portal',portal_permissions:['app_admin'],app_admin_scope:'own'},
+    ['app_admin'],
+    'all',
+  ),
+  {permissions:['app_admin'],appAdminScope:'own'},
+);
+assert.deepStrictEqual(
+  currentAuthorizationForUser(
+    {auth_source:'portal',portal_permissions:['app_admin'],app_admin_scope:'all'},
+    ['access'],
+    'own',
+  ),
+  {permissions:['app_admin'],appAdminScope:'all'},
+);
+
+// Supervisor and Employee are never eligible for self approval even if a
+// dedicated self-approval checkbox is accidentally granted.
+assert.strictEqual(roleCanSelfApprove({role:'employee'}),false);
+assert.strictEqual(roleCanSelfApprove({role:'supervisor'}),false);
+assert.strictEqual(roleCanSelfApprove({role:'department_head'}),true);
+assert.strictEqual(roleCanSelfApprove({role:'payroll'}),true);
+assert.strictEqual(roleCanSelfApprove({role:'timeclock_manager'}),true);
+assert.strictEqual(roleCanSelfApprove({role:'admin'}),true);
 
 // Self-approval permissions remain separate from ordinary supervisor approval.
 assert.strictEqual(userHasPermission({permissions:['approve_own_punch_corrections']},'approve_punch_correction'),false);
