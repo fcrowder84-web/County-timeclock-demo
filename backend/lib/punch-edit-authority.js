@@ -11,7 +11,7 @@ async function canEditPunch(db,user,employeeId,action='edit'){
     || (action==='add'&&userHasPermission(user,'add_employee_entry'));
   if(!canEdit) return false;
 
-  if(userHasPermission(user,'app_admin')) return true;
+  if(userHasPermission(user,'app_admin')&&user.app_admin_scope==='all') return true;
 
   const role=String(user?.role||'employee').toLowerCase();
   if(role==='timeclock_manager'||role==='payroll') return true;
@@ -35,6 +35,8 @@ async function canEditPunch(db,user,employeeId,action='edit'){
   const sameDepartment=
     Number(user?.department_id)>0
     && Number(user.department_id)===Number(target.department_id);
+
+  if(userHasPermission(user,'app_admin')) return sameDepartment;
 
   // Department Head scope includes every employee in the department,
   // including the Department Head's own record.
