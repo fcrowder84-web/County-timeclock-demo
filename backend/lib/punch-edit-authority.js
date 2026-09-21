@@ -1,9 +1,25 @@
 'use strict';
 
-// Technical administration and read permissions never authorize punch changes.
+// App Admin is the master TimeClock permission. Scope still limits which
+// employees an administrator may operate on; ordinary supervisors continue to
+// require explicit edit permission plus assignment/department-head authority.
 async function canEditPunch(db, user, employeeId, action = 'edit') {
   const permissions = new Set(user?.permissions || []);
   if (Number(user.id) === Number(employeeId)) return false;
+
+  if (permissions.has('app_admin')) {
+    if (user?.app_admin_scope === 'all') return true;
+    const sameDepartment = await db.query(
+      `SELECT 1
+         FROM employees target
+        WHERE target.id=$1
+          AND target.department_id=$2
+        LIMIT 1`,
+      [employeeId, user?.department_id || null],
+    );
+    return sameDepartment.rows.length > 0;
+  }
+
   if (permissions.has('edit_payroll_time')) return true;
   const allowed = permissions.has('edit_employee_time')
     || (action === 'add' && permissions.has('add_employee_entry'));
@@ -19,7 +35,13 @@ async function canEditPunch(db, user, employeeId, action = 'edit') {
 }
 
 function hasPayrollOverride(user) {
-  return new Set(user?.permissions || []).has('edit_payroll_time');
+  const permissions = new Set(user?.permissions || []);
+  return permissions.has('app_admin') || permissions.has('edit_payroll_time');
 }
 
-module.exports = { canEditPunch, hasPayrollOverride };
+function hasPunchPermission(user, permissionKey) {
+  const permissions = new Set(user?.permissions || []);
+  return permissions.has('app_admin') || permissions.has(permissionKey);
+}
+
+module.exports = { canEditPunch, hasPayrollOverride, hasPunchPermission };
