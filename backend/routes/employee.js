@@ -182,7 +182,7 @@ function createEmployeeRouter({ requireUser, requireAnyPermission, pool, audit, 
          FROM time_change_requests tcr
          LEFT JOIN employees reviewer ON reviewer.id=tcr.supervisor_id
         WHERE tcr.employee_id=$1
-        ORDER BY created_at DESC`,
+        ORDER BY tcr.created_at DESC`,
         [req.user.id],
       );
 
