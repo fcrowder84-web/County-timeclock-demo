@@ -93,7 +93,7 @@
       if(!Array.isArray(requests)||!requests.length)return;
       const button=document.createElement('button');
       button.type='button';button.id='deniedPunchAlertBtn';button.className=actions.classList.contains('top-actions')?'btn btn-danger':'button';
-      button.textContent=requests.length===1?'Denied Punch Request':`Denied Punch Requests (${requests.length})`;
+      button.textContent=requests.length===1?'Denied Punch Request (1)':`Denied Punch Requests (${requests.length})`;
       button.title='A supervisor denied one or more of your punch requests. Open the timecard to review the reason.';
       button.style.background='#a61b1b';button.style.color='#fff';button.style.borderColor='#a61b1b';
       button.addEventListener('click',()=>{window.location.href=`/timecard.html?deniedRequest=${encodeURIComponent(requests[0].id)}`});
