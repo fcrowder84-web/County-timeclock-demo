@@ -79,13 +79,35 @@ function summarizeTimecard({
   overtimeThresholdHours = 40,
   forcedLunchEnabled = false,
   forcedLunchMinutes = 0,
+  forcedLunchSettings = null,
   lunchWaivers = [],
 }) {
   const start = dateOnly(payPeriodStart);
   if (!start) throw new Error('payPeriodStart is required');
 
   const thresholdMinutes = Math.max(0, Math.round(number(overtimeThresholdHours) * 60)) || OVERTIME_THRESHOLD_MINUTES;
-  const configuredLunchMinutes = forcedLunchEnabled ? Math.max(0, Math.round(number(forcedLunchMinutes))) : 0;
+  const legacyConfiguredLunchMinutes = forcedLunchEnabled ? Math.max(0, Math.round(number(forcedLunchMinutes))) : 0;
+  const lunchSettingHistory = Array.isArray(forcedLunchSettings)
+    ? forcedLunchSettings
+        .map(setting => ({
+          effectiveDate: dateOnly(setting.effective_date_iso || setting.effective_date),
+          enabled: setting.enabled === true || String(setting.enabled) === 'true',
+          minutes: Math.max(0, Math.round(number(setting.minutes))),
+        }))
+        .filter(setting => setting.effectiveDate)
+        .sort((a, b) => a.effectiveDate.localeCompare(b.effectiveDate))
+    : null;
+
+  function configuredLunchMinutesForDay(day) {
+    if (lunchSettingHistory === null) return legacyConfiguredLunchMinutes;
+    let activeSetting = null;
+    for (const setting of lunchSettingHistory) {
+      if (setting.effectiveDate > day) break;
+      activeSetting = setting;
+    }
+    return activeSetting?.enabled ? activeSetting.minutes : 0;
+  }
+
   const weeks = [emptyWeek(1, start), emptyWeek(2, addDays(start, 7))];
   const daily = new Map();
   const waiverMap = new Map();
@@ -126,6 +148,7 @@ function summarizeTimecard({
   for (const [day, state] of daily.entries()) {
     const weekIndex = diffDays(start, day) < 7 ? 0 : 1;
     const grossRoundedMinutes = roundDailyMinutes(state.grossMinutes);
+    const configuredLunchMinutes = configuredLunchMinutesForDay(day);
     const intervals = [...state.intervals].sort((a, b) => a.inMs - b.inMs);
     let existingBreakMinutes = 0;
     let previousOutMs = null;
@@ -222,8 +245,12 @@ function summarizeTimecard({
   return {
     overtime_rule: 'weekly_worked_hours_over_40_only',
     overtime_threshold_hours: round2(thresholdMinutes / 60),
-    forced_lunch_enabled: configuredLunchMinutes > 0,
-    forced_lunch_minutes: configuredLunchMinutes,
+    forced_lunch_enabled: lunchSettingHistory === null
+      ? legacyConfiguredLunchMinutes > 0
+      : Boolean([...lunchSettingHistory].reverse().find(setting => setting.effectiveDate <= addDays(start, 13))?.enabled),
+    forced_lunch_minutes: lunchSettingHistory === null
+      ? legacyConfiguredLunchMinutes
+      : ([...lunchSettingHistory].reverse().find(setting => setting.effectiveDate <= addDays(start, 13))?.minutes || 0),
     days,
     weeks,
     period,

@@ -71,8 +71,8 @@ function createPayrollRouter({ requireUser, requireAnyPermission, pool, getReque
              to_char(te.clock_in,'HH12:MI AM') AS clock_in,
              CASE WHEN te.clock_out IS NULL THEN '' ELSE to_char(te.clock_out,'HH12:MI AM') END AS clock_out,
              ROUND((EXTRACT(EPOCH FROM (COALESCE(te.clock_out,NOW())-te.clock_in))/3600)::numeric,2) AS hours_worked,
-             e.forced_lunch_enabled,
-             e.forced_lunch_minutes,
+             COALESCE(lunch_setting.enabled,FALSE) AS forced_lunch_enabled,
+             COALESCE(lunch_setting.minutes,0) AS forced_lunch_minutes,
              EXISTS(
                SELECT 1 FROM forced_lunch_waivers flw
                 WHERE flw.employee_id=e.id
@@ -83,6 +83,14 @@ function createPayrollRouter({ requireUser, requireAnyPermission, pool, getReque
            FROM time_entries te
            JOIN employees e ON e.id=te.employee_id
            LEFT JOIN departments d ON d.id=e.department_id
+           LEFT JOIN LATERAL (
+             SELECT flsh.enabled,flsh.minutes
+               FROM forced_lunch_setting_history flsh
+              WHERE flsh.employee_id=e.id
+                AND flsh.effective_date <= te.clock_in::date
+              ORDER BY flsh.effective_date DESC
+              LIMIT 1
+           ) lunch_setting ON TRUE
            LEFT JOIN pay_period_approvals ppa
              ON ppa.employee_id=e.id
             AND ppa.pay_period_start=$1::date
@@ -126,8 +134,8 @@ function createPayrollRouter({ requireUser, requireAnyPermission, pool, getReque
              to_char(te.clock_in,'HH12:MI AM') AS clock_in,
              CASE WHEN te.clock_out IS NULL THEN '' ELSE to_char(te.clock_out,'HH12:MI AM') END AS clock_out,
              ROUND((EXTRACT(EPOCH FROM (COALESCE(te.clock_out,NOW())-te.clock_in))/3600)::numeric,2) AS hours_worked,
-             e.forced_lunch_enabled,
-             e.forced_lunch_minutes,
+             COALESCE(lunch_setting.enabled,FALSE) AS forced_lunch_enabled,
+             COALESCE(lunch_setting.minutes,0) AS forced_lunch_minutes,
              EXISTS(
                SELECT 1 FROM forced_lunch_waivers flw
                 WHERE flw.employee_id=e.id
@@ -145,6 +153,14 @@ function createPayrollRouter({ requireUser, requireAnyPermission, pool, getReque
             AND te.deleted_at IS NULL
             AND te.clock_in >= $1::date
             AND te.clock_in < ($2::date + INTERVAL '1 day')
+           LEFT JOIN LATERAL (
+             SELECT flsh.enabled,flsh.minutes
+               FROM forced_lunch_setting_history flsh
+              WHERE flsh.employee_id=e.id
+                AND flsh.effective_date <= te.clock_in::date
+              ORDER BY flsh.effective_date DESC
+              LIMIT 1
+           ) lunch_setting ON TRUE
            WHERE (
              e.active=TRUE
              OR ppa.id IS NOT NULL
