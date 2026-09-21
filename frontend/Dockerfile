@@ -11,6 +11,7 @@ COPY department-structure.html /usr/share/nginx/html/department-structure.html
 COPY payroll.html /usr/share/nginx/html/payroll.html
 COPY payroll-timecards.html /usr/share/nginx/html/payroll-timecards.html
 COPY leave.html /usr/share/nginx/html/leave.html
+COPY logs.html /usr/share/nginx/html/logs.html
 COPY timecard-summary-ui.js /usr/share/nginx/html/timecard-summary-ui.js
 COPY timecard.html /usr/share/nginx/html/timecard.html
 COPY timecard.css /usr/share/nginx/html/timecard.css
