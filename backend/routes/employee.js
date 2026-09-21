@@ -38,7 +38,7 @@ async function approvalForTimestamp(db, employeeId, timestamp, lock = false) {
   );
 }
 
-function createEmployeeRouter({ requireUser, requireAnyPermission, pool, audit, getRequestedPayPeriod }) {
+function createEmployeeRouter({ requireUser, requireAnyPermission, pool, audit, getRequestedPayPeriod, canAccessEmployee }) {
   const router = express.Router();
 
   router.post('/submit-timecard', requireUser, requireAnyPermission('submit_timecard'), async (req, res) => {
@@ -238,6 +238,162 @@ function createEmployeeRouter({ requireUser, requireAnyPermission, pool, audit, 
     } catch (err) {
       console.error(err);
       return res.status(500).json({ error: 'Employee timecard error' });
+    }
+  });
+
+  router.get('/employee/denied-change-requests', requireUser, async (req, res) => {
+    try {
+      const result = await pool.query(
+        `SELECT
+           tcr.id,
+           tcr.time_entry_id,
+           tcr.requested_clock_in,
+           tcr.requested_clock_out,
+           tcr.employee_reason,
+           tcr.supervisor_note,
+           tcr.reviewed_at,
+           tcr.employee_acknowledged_at,
+           to_char(tcr.requested_clock_in, 'MM/DD/YYYY HH12:MI AM') AS requested_clock_in_display,
+           to_char(tcr.requested_clock_out, 'MM/DD/YYYY HH12:MI AM') AS requested_clock_out_display,
+           to_char(tcr.reviewed_at, 'MM/DD/YYYY HH12:MI AM') AS reviewed_at_display,
+           reviewer.first_name AS supervisor_first_name,
+           reviewer.last_name AS supervisor_last_name
+         FROM time_change_requests tcr
+         LEFT JOIN employees reviewer ON reviewer.id=tcr.supervisor_id
+        WHERE tcr.employee_id=$1
+          AND tcr.status='denied'
+          AND tcr.employee_acknowledged_at IS NULL
+        ORDER BY tcr.reviewed_at DESC NULLS LAST,tcr.id DESC`,
+        [req.user.id],
+      );
+      return res.json(result.rows);
+    } catch (err) {
+      console.error(err);
+      return res.status(500).json({ error: 'Denied punch request lookup failed' });
+    }
+  });
+
+  router.post('/employee/denied-change-requests/:requestId/acknowledge', requireUser, async (req, res) => {
+    try {
+      const requestId = Number(req.params.requestId);
+      if (!Number.isInteger(requestId) || requestId <= 0) {
+        return res.status(400).json({ error: 'Valid punch request is required' });
+      }
+      const result = await pool.query(
+        `UPDATE time_change_requests
+            SET employee_acknowledged_at=COALESCE(employee_acknowledged_at,NOW())
+          WHERE id=$1
+            AND employee_id=$2
+            AND status='denied'
+          RETURNING id,employee_acknowledged_at`,
+        [requestId, req.user.id],
+      );
+      if (!result.rows.length) return res.status(404).json({ error: 'Denied punch request not found' });
+      await audit(req.user.id, 'acknowledge_denied_punch_request', 'time_change_request', requestId, {
+        employee_id: req.user.id,
+      });
+      return res.json({ message: 'Denied punch request marked reviewed', request: result.rows[0] });
+    } catch (err) {
+      console.error(err);
+      return res.status(500).json({ error: 'Unable to mark denied punch request reviewed' });
+    }
+  });
+
+  router.get('/employee/activity-log', requireUser, async (req, res) => {
+    try {
+      const requestedEmployeeId = req.query?.employee_id == null || req.query.employee_id === ''
+        ? Number(req.user.id)
+        : Number(req.query.employee_id);
+      if (!Number.isInteger(requestedEmployeeId) || requestedEmployeeId <= 0) {
+        return res.status(400).json({ error: 'Valid employee is required' });
+      }
+
+      if (requestedEmployeeId !== Number(req.user.id)) {
+        if (typeof canAccessEmployee !== 'function' || !(await canAccessEmployee(req.user, requestedEmployeeId))) {
+          return res.status(403).json({ error: 'Access denied' });
+        }
+      }
+
+      const targetResult = await pool.query(
+        `SELECT e.id,e.employee_number,e.first_name,e.last_name,d.name AS department
+           FROM employees e
+           LEFT JOIN departments d ON d.id=e.department_id
+          WHERE e.id=$1`,
+        [requestedEmployeeId],
+      );
+      if (!targetResult.rows.length) return res.status(404).json({ error: 'Employee not found' });
+
+      const requestedLimit = Number(req.query?.limit || 200);
+      const limit = Number.isInteger(requestedLimit) ? Math.min(Math.max(requestedLimit, 1), 500) : 200;
+      const result = await pool.query(
+        `SELECT
+           a.id,
+           a.action,
+           a.target_type,
+           a.target_id,
+           a.details,
+           a.created_at,
+           to_char(a.created_at AT TIME ZONE 'America/New_York','MM/DD/YYYY HH12:MI AM') AS created_at_display,
+           actor.first_name AS actor_first_name,
+           actor.last_name AS actor_last_name
+         FROM timeclock_audit_log a
+         LEFT JOIN employees actor ON actor.id=a.actor_employee_id
+        WHERE a.action NOT IN (
+          'portal_sso_login',
+          'trusted_mobile_session',
+          'generate_mobile_pairing_code',
+          'redeem_mobile_pairing_code'
+        )
+          AND (
+            a.actor_employee_id=$1
+            OR (a.target_type='employee' AND a.target_id=$1::text)
+            OR a.details->>'employee_id'=$1::text
+            OR (
+              a.target_type='time_entry'
+              AND EXISTS (
+                SELECT 1 FROM time_entries te
+                 WHERE te.id::text=a.target_id
+                   AND te.employee_id=$1
+              )
+            )
+            OR (
+              a.target_type='time_change_request'
+              AND EXISTS (
+                SELECT 1 FROM time_change_requests tcr
+                 WHERE tcr.id::text=a.target_id
+                   AND tcr.employee_id=$1
+              )
+            )
+            OR (
+              a.target_type='leave_entry'
+              AND EXISTS (
+                SELECT 1 FROM leave_entries le
+                 WHERE le.id::text=a.target_id
+                   AND le.employee_id=$1
+              )
+            )
+            OR (
+              a.target_type='forced_lunch_waiver_request'
+              AND EXISTS (
+                SELECT 1 FROM forced_lunch_waiver_requests flr
+                 WHERE flr.id::text=a.target_id
+                   AND flr.employee_id=$1
+              )
+            )
+          )
+        ORDER BY a.created_at DESC,a.id DESC
+        LIMIT $2`,
+        [requestedEmployeeId, limit],
+      );
+
+      return res.json({
+        employee: targetResult.rows[0],
+        viewing_own_log: requestedEmployeeId === Number(req.user.id),
+        logs: result.rows,
+      });
+    } catch (err) {
+      console.error(err);
+      return res.status(500).json({ error: 'Activity log lookup failed' });
     }
   });
 
