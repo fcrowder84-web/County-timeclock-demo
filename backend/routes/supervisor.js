@@ -477,7 +477,8 @@ function createSupervisorRouter({
         const period = await getRequestedPayPeriod(req);
 
         const employeeResult = await pool.query(
-          `SELECT e.id,e.employee_number,e.first_name,e.last_name,d.name AS department,e.role
+          `SELECT e.id,e.employee_number,e.first_name,e.last_name,d.name AS department,e.role,
+                  e.forced_lunch_enabled,e.forced_lunch_minutes
              FROM employees e
              LEFT JOIN departments d ON d.id=e.department_id
             WHERE e.id=$1`,
@@ -542,6 +543,27 @@ function createSupervisorRouter({
           ),
         ]);
 
+        const lunchWaiverResult = await pool.query(
+          `SELECT id,to_char(work_date,'YYYY-MM-DD') AS work_date_iso,reason,source,
+                  waived_by_employee_id,created_at,active
+             FROM forced_lunch_waivers
+            WHERE employee_id=$1
+              AND work_date BETWEEN $2::date AND $3::date
+              AND active=TRUE
+            ORDER BY work_date`,
+          [employeeId, period.pay_period_start, period.pay_period_end],
+        );
+
+        const lunchRequestResult = await pool.query(
+          `SELECT id,to_char(work_date,'YYYY-MM-DD') AS work_date_iso,reason,status,
+                  review_note,created_at,reviewed_at
+             FROM forced_lunch_waiver_requests
+            WHERE employee_id=$1
+              AND work_date BETWEEN $2::date AND $3::date
+            ORDER BY work_date,created_at`,
+          [employeeId, period.pay_period_start, period.pay_period_end],
+        );
+
         const approval = approvalResult.rows[0] || null;
         const payrollCanEdit =
           userHasPermission(req.user, 'edit_payroll_time');
@@ -560,6 +582,8 @@ function createSupervisorRouter({
           correction_requests: correctionResult.rows,
           change_requests: requestsResult.rows,
           leave_entries: leaveResult.rows,
+          lunch_waivers: lunchWaiverResult.rows,
+          lunch_requests: lunchRequestResult.rows,
           pay_period_start: period.pay_period_start,
           pay_period_end: period.pay_period_end,
           entries: entriesResult.rows,
@@ -567,6 +591,9 @@ function createSupervisorRouter({
             entries: entriesResult.rows,
             leaveEntries: leaveResult.rows,
             payPeriodStart: period.pay_period_start,
+            forcedLunchEnabled: employeeResult.rows[0].forced_lunch_enabled,
+            forcedLunchMinutes: employeeResult.rows[0].forced_lunch_minutes,
+            lunchWaivers: lunchWaiverResult.rows,
           }),
         });
       } catch (err) {
