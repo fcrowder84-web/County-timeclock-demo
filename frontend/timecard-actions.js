@@ -193,7 +193,21 @@ async function submitLeave(override){
   try{await jsonOrError(await apiFetch(`${apiBase}/leave`,{method:"POST",body:JSON.stringify(body)}));modal("leaveModal",false);showMessage(selectedIsSelf()&&currentMode==="employee"?"Leave submitted for approval":"Leave added");await loadTimecard()}catch(err){if(err.status===409&&err.data?.requires_confirmation&&!override){if(confirm(`${err.message}\n\nSubmit anyway for supervisor review?`))return submitLeave(true)}showMessage(err.message,"error")}
 }
 async function reviewLeave(id,status){const note=status==="denied"?(prompt("Reason for denying leave:")||""):"";try{await jsonOrError(await apiFetch(`${apiBase}/leave/${id}/review`,{method:"POST",body:JSON.stringify({status,review_note:note})}));showMessage(`Leave ${status}`);await loadTimecard()}catch(err){showMessage(err.message,"error")}}
-async function reviewChange(id,status){const note=prompt(`Supervisor note for ${status==="approved"?"approval":"denial"} (optional):`)||"";const path=status==="approved"?"approve-change-request":"deny-change-request";try{await jsonOrError(await apiFetch(`${apiBase}/supervisor/${path}`,{method:"POST",body:JSON.stringify({request_id:Number(id),supervisor_note:note})}));showMessage(`Change request ${status}`);await loadTimecard()}catch(err){showMessage(err.message,"error")}}
+async function reviewChange(id,status){
+  let note="";
+  if(status==="denied"){
+    const entered=prompt("Reason for denying this punch request (required):");
+    if(entered===null)return;
+    note=entered.trim();
+    if(!note){showMessage("A reason is required when denying a punch request","error");return}
+  }else{
+    const entered=prompt("Supervisor note for approval (optional):");
+    if(entered===null)return;
+    note=entered.trim();
+  }
+  const path=status==="approved"?"approve-change-request":"deny-change-request";
+  try{await jsonOrError(await apiFetch(`${apiBase}/supervisor/${path}`,{method:"POST",body:JSON.stringify({request_id:Number(id),supervisor_note:note})}));showMessage(`Change request ${status}`);await loadTimecard()}catch(err){showMessage(err.message,"error")}
+}
 
 document.getElementById("employeeSignBtn").addEventListener("click",async()=>{if(!confirm("Sign and submit this timecard to your supervisor?"))return;try{await jsonOrError(await apiFetch(`${apiBase}/submit-timecard`,{method:"POST",body:"{}"}));showMessage("Timecard submitted");await loadTimecard()}catch(err){showMessage(err.message,"error")}});
 document.getElementById("supervisorSignBtn").addEventListener("click",async()=>{if(!confirm("Approve and sign this employee timecard?"))return;try{await jsonOrError(await apiFetch(`${apiBase}/supervisor/approve-timecard`,{method:"POST",body:JSON.stringify({employee_id:selectedEmployeeId})}));showMessage("Timecard approved");await loadTimecard()}catch(err){showMessage(err.message,"error")}});
