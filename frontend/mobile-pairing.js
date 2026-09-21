@@ -83,6 +83,26 @@
     }catch(_){}
   }
 
+  async function installDeniedPunchAlert(){
+    const actions=document.querySelector('.top-actions')||document.querySelector('#signedIn .actions');
+    if(!actions||!getToken()||document.getElementById('deniedPunchAlertBtn'))return;
+    try{
+      const response=await fetch(`${apiBase}/employee/denied-change-requests`,{headers:authHeaders()});
+      if(!response.ok)return;
+      const requests=await response.json().catch(()=>[]);
+      if(!Array.isArray(requests)||!requests.length)return;
+      const button=document.createElement('button');
+      button.type='button';button.id='deniedPunchAlertBtn';button.className=actions.classList.contains('top-actions')?'btn btn-danger':'button';
+      button.textContent=requests.length===1?'Denied Punch Request':`Denied Punch Requests (${requests.length})`;
+      button.title='A supervisor denied one or more of your punch requests. Open the timecard to review the reason.';
+      button.style.background='#a61b1b';button.style.color='#fff';button.style.borderColor='#a61b1b';
+      button.addEventListener('click',()=>{window.location.href=`/timecard.html?deniedRequest=${encodeURIComponent(requests[0].id)}`});
+      const pendingButton=document.getElementById('pendingRequestAlertBtn');
+      const phoneButton=document.getElementById('mobilePairingGenerateBtn');
+      actions.insertBefore(button,pendingButton||phoneButton||actions.firstChild);
+    }catch(_){}
+  }
+
   function installMobileRedeemer(){
     const signedOut=document.getElementById('signedOut');if(!signedOut||document.getElementById('mobilePairingCodeInput'))return;
     const box=document.createElement('div');box.style.cssText='margin-top:22px;padding-top:20px;border-top:1px solid #d8e0e8';box.innerHTML=`<h3 style="margin:0 0 8px">Enter Desktop Code</h3><p class="muted" style="margin-top:0">Already signed in on a computer? Generate a Phone Login Code there and enter the 6 digits below. This phone will remain signed in until you log it out.</p><input id="mobilePairingCodeInput" inputmode="numeric" autocomplete="one-time-code" maxlength="7" placeholder="000 000" aria-label="6-digit desktop code" style="width:100%;font-size:28px;letter-spacing:.18em;text-align:center;padding:14px;border:1px solid #b8c5d1;border-radius:10px;margin:8px 0 12px"><button type="button" id="mobilePairingRedeemBtn" class="signin" style="border:0;width:100%;cursor:pointer">Use Desktop Code</button><div id="mobilePairingMessage" class="muted" style="margin-top:10px;min-height:20px"></div>`;signedOut.appendChild(box);
@@ -95,6 +115,6 @@
     if(!location.pathname.endsWith('/mobile.html')||document.getElementById('trustedPhoneLogout'))return;const links=document.querySelector('.links');if(!links||(!getToken()&&!getDeviceCredential()))return;const button=document.createElement('button');button.type='button';button.id='trustedPhoneLogout';button.textContent='Log Out This Phone';button.style.cssText='border:0;border-radius:10px;padding:11px 14px;font-weight:700;background:#f3e8e8;color:#7b1f1f;cursor:pointer';button.addEventListener('click',async()=>{const token=getToken();if(token){try{await nativeFetch(`${apiBase}/logout`,{method:'POST',headers:{Authorization:`Bearer ${token}`}})}catch(_){}}localStorage.removeItem(tokenKey);localStorage.removeItem(deviceKey);window.location.reload()});links.appendChild(button);
   }
 
-  function install(){installDesktopGenerator();installPendingRequestAlert();installMobileRedeemer();installMobileLogout()}
+  function install(){installDesktopGenerator();installDeniedPunchAlert();installPendingRequestAlert();installMobileRedeemer();installMobileLogout()}
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',install);else install();
 })();
