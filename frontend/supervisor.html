@@ -429,6 +429,11 @@
             return keys.some(hasPermission);
         }
 
+        function selfApprovalRoleAllowed() {
+            return ["department_head","payroll","timeclock_manager","admin"]
+                .includes(String(currentUser?.role || "employee").toLowerCase());
+        }
+
         function hasSupervisorAccess() {
             return hasAnyPermission(supervisorPermissionKeys);
         }
@@ -776,7 +781,7 @@
                                 Add Time
                             </button>` : ""}
 
-                            ${((Number(row.id) === Number(currentUser?.id) && hasPermission("approve_own_timecard"))
+                            ${((Number(row.id) === Number(currentUser?.id) && selfApprovalRoleAllowed() && hasPermission("approve_own_timecard"))
                                 || (Number(row.id) !== Number(currentUser?.id) && hasPermission("approve_timecard"))) ? `
                             <button class="btn-approve" onclick="approveTimecard(${row.id})">
                                 ${Number(row.id) === Number(currentUser?.id) ? "Approve My Timecard" : "Approve"}
