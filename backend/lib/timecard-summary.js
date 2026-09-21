@@ -42,6 +42,13 @@ function roundDailyMinutes(minutes) {
   return completedQuarters + (safe % 15 > 5 ? 15 : 0);
 }
 
+function timestampMs(value) {
+  if (!value) return null;
+  const parsed = value instanceof Date ? value : new Date(value);
+  const ms = parsed.getTime();
+  return Number.isFinite(ms) ? ms : null;
+}
+
 function emptyWeek(weekNumber, start) {
   return {
     week_number: weekNumber,
@@ -49,6 +56,8 @@ function emptyWeek(weekNumber, start) {
     end_date: addDays(start, 6),
     regular_worked_hours: 0,
     overtime_hours: 0,
+    gross_worked_hours: 0,
+    forced_lunch_hours: 0,
     total_worked_hours: 0,
     leave_hours_by_type: {},
     pending_leave_hours_by_type: {},
@@ -63,28 +72,87 @@ function addByType(target, type, hours) {
   target[key] = round2(number(target[key]) + number(hours));
 }
 
-function summarizeTimecard({ entries = [], leaveEntries = [], payPeriodStart, overtimeThresholdHours = 40 }) {
+function summarizeTimecard({
+  entries = [],
+  leaveEntries = [],
+  payPeriodStart,
+  overtimeThresholdHours = 40,
+  forcedLunchEnabled = false,
+  forcedLunchMinutes = 0,
+  lunchWaivers = [],
+}) {
   const start = dateOnly(payPeriodStart);
   if (!start) throw new Error('payPeriodStart is required');
 
   const thresholdMinutes = Math.max(0, Math.round(number(overtimeThresholdHours) * 60)) || OVERTIME_THRESHOLD_MINUTES;
+  const configuredLunchMinutes = forcedLunchEnabled ? Math.max(0, Math.round(number(forcedLunchMinutes))) : 0;
   const weeks = [emptyWeek(1, start), emptyWeek(2, addDays(start, 7))];
-  const dailyMinutes = new Map();
+  const daily = new Map();
+  const waiverMap = new Map();
+
+  for (const waiver of lunchWaivers) {
+    if (waiver.active === false) continue;
+    const day = dateOnly(waiver.work_date_iso || waiver.work_date);
+    if (day) waiverMap.set(day, waiver);
+  }
 
   for (const entry of entries) {
     const day = dateOnly(entry.entry_date_iso || entry.work_date || entry.clock_in);
     if (!day) continue;
     const offset = diffDays(start, day);
     if (offset < 0 || offset > 13) continue;
-    dailyMinutes.set(day, (dailyMinutes.get(day) || 0) + durationMinutes(entry.hours_worked));
+
+    const state = daily.get(day) || {
+      grossMinutes: 0,
+      firstInMs: null,
+      lastOutMs: null,
+      hasWork: false,
+    };
+    state.grossMinutes += durationMinutes(entry.hours_worked);
+    state.hasWork = true;
+
+    const inMs = timestampMs(entry.clock_in);
+    const outMs = timestampMs(entry.clock_out || entry.pending_clock_out);
+    if (inMs != null) state.firstInMs = state.firstInMs == null ? inMs : Math.min(state.firstInMs, inMs);
+    if (outMs != null) state.lastOutMs = state.lastOutMs == null ? outMs : Math.max(state.lastOutMs, outMs);
+    daily.set(day, state);
   }
 
-  for (const [day, minutes] of dailyMinutes.entries()) {
+  const days = [];
+  for (const [day, state] of daily.entries()) {
     const weekIndex = diffDays(start, day) < 7 ? 0 : 1;
-    weeks[weekIndex].total_worked_hours = round2(
-      weeks[weekIndex].total_worked_hours + roundDailyMinutes(minutes) / 60,
-    );
+    const grossRoundedMinutes = roundDailyMinutes(state.grossMinutes);
+    let spanMinutes = grossRoundedMinutes;
+    if (state.firstInMs != null && state.lastOutMs != null && state.lastOutMs >= state.firstInMs) {
+      spanMinutes = Math.max(grossRoundedMinutes, Math.round((state.lastOutMs - state.firstInMs) / 60000));
+    }
+    const existingBreakMinutes = Math.max(0, spanMinutes - grossRoundedMinutes);
+    const waiver = waiverMap.get(day) || null;
+    const waived = Boolean(waiver);
+    const deductionMinutes = configuredLunchMinutes > 0 && state.hasWork && !waived
+      ? Math.min(grossRoundedMinutes, Math.max(0, configuredLunchMinutes - existingBreakMinutes))
+      : 0;
+    const creditedMinutes = Math.max(0, grossRoundedMinutes - deductionMinutes);
+
+    weeks[weekIndex].gross_worked_hours = round2(weeks[weekIndex].gross_worked_hours + grossRoundedMinutes / 60);
+    weeks[weekIndex].forced_lunch_hours = round2(weeks[weekIndex].forced_lunch_hours + deductionMinutes / 60);
+    weeks[weekIndex].total_worked_hours = round2(weeks[weekIndex].total_worked_hours + creditedMinutes / 60);
+
+    days.push({
+      work_date: day,
+      gross_worked_hours: round2(grossRoundedMinutes / 60),
+      existing_break_hours: round2(existingBreakMinutes / 60),
+      configured_lunch_hours: round2(configuredLunchMinutes / 60),
+      forced_lunch_deduction_hours: round2(deductionMinutes / 60),
+      total_worked_hours: round2(creditedMinutes / 60),
+      lunch_waived: waived,
+      lunch_waiver_reason: waiver?.reason || null,
+      lunch_waiver_source: waiver?.source || null,
+      lunch_waived_by_employee_id: waiver?.waived_by_employee_id || null,
+    });
   }
+
+  days.sort((a, b) => a.work_date.localeCompare(b.work_date));
 
   for (const leave of leaveEntries) {
     const day = dateOnly(leave.leave_date_iso || leave.leave_date || leave.work_date);
@@ -113,6 +181,8 @@ function summarizeTimecard({ entries = [], leaveEntries = [], payPeriodStart, ov
   const period = {
     regular_worked_hours: 0,
     overtime_hours: 0,
+    gross_worked_hours: 0,
+    forced_lunch_hours: 0,
     total_worked_hours: 0,
     leave_hours_by_type: {},
     pending_leave_hours_by_type: {},
@@ -122,7 +192,16 @@ function summarizeTimecard({ entries = [], leaveEntries = [], payPeriodStart, ov
   };
 
   for (const week of weeks) {
-    for (const key of ['regular_worked_hours','overtime_hours','total_worked_hours','total_leave_hours','pending_leave_hours','total_paid_hours']) {
+    for (const key of [
+      'regular_worked_hours',
+      'overtime_hours',
+      'gross_worked_hours',
+      'forced_lunch_hours',
+      'total_worked_hours',
+      'total_leave_hours',
+      'pending_leave_hours',
+      'total_paid_hours',
+    ]) {
       period[key] = round2(period[key] + week[key]);
     }
     for (const [type, hours] of Object.entries(week.leave_hours_by_type)) addByType(period.leave_hours_by_type, type, hours);
@@ -132,6 +211,9 @@ function summarizeTimecard({ entries = [], leaveEntries = [], payPeriodStart, ov
   return {
     overtime_rule: 'weekly_worked_hours_over_40_only',
     overtime_threshold_hours: round2(thresholdMinutes / 60),
+    forced_lunch_enabled: configuredLunchMinutes > 0,
+    forced_lunch_minutes: configuredLunchMinutes,
+    days,
     weeks,
     period,
   };
