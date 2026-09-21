@@ -20,6 +20,8 @@ const timecardHtml = read('../frontend/timecard.html');
 const frontendDockerfile = read('../frontend/Dockerfile');
 const schema = read('../schema.sql');
 const deniedPunchMigration = read('../migrations/015_denied_punch_acknowledgement.sql');
+const server = read('server.js');
+const leave = read('routes/leave.js');
 
 for (const [label, source] of [
   ['supervisor', supervisor],
@@ -81,6 +83,25 @@ assert.match(employee, /portal_sso_login/);
 assert.match(employee, /trusted_mobile_session/);
 assert.match(employee, /generate_mobile_pairing_code/);
 assert.match(employee, /redeem_mobile_pairing_code/);
+assert.match(employee, /finalized_employee_ids/);
+assert.match(employee, /jsonb_array_elements_text/);
+
+// Existing bearer sessions identify the employee only; current Portal
+// authorization is refreshed from the employee record on every request.
+assert.match(server, /currentAuthorizationForUser\(/);
+assert.match(server, /TimeClock access has been removed/);
+assert.doesNotMatch(server, /user\.permissions=session\.permissions/);
+
+// Dedicated self punch approval also covers denial, while role eligibility is
+// enforced separately.
+assert.match(server, /deny-change-request/);
+assert.match(server, /roleCanSelfApprove/);
+
+// Leave changes lock approval rows and require explicit reopen authority before
+// mutating finalized payroll.
+assert.match(leave, /FOR UPDATE/);
+assert.match(leave, /reopen_timecard/);
+assert.match(leave, /invalidateApprovalsForDates/);
 
 // Logs navigation and nginx image inclusion are deployment requirements.
 assert.match(timecardHtml, /href="\/logs\.html"/);
