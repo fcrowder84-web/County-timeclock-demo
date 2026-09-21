@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Edgefield County TimeClock Logs</title>
+<style>
+:root{--blue:#17324d;--blue2:#1f5f8b;--bg:#f4f7fb;--card:#fff;--text:#1f2937;--muted:#667085;--line:#dbe3ee;--danger:#a61b1b}
+*{box-sizing:border-box}body{margin:0;font-family:Segoe UI,Arial,sans-serif;background:var(--bg);color:var(--text)}
+.topbar{background:linear-gradient(90deg,var(--blue),#234c73);color:#fff;padding:15px 28px;display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}
+.topbar h1{font-size:22px;margin:0}.actions{display:flex;gap:8px;flex-wrap:wrap}
+.btn{border:0;border-radius:8px;padding:9px 13px;font-weight:700;cursor:pointer;text-decoration:none;background:#fff;color:var(--blue)}
+.page{max-width:1250px;margin:0 auto;padding:28px 20px}.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:18px;margin-bottom:18px;box-shadow:0 5px 18px rgba(22,38,60,.07)}
+.controls{display:flex;gap:14px;align-items:end;flex-wrap:wrap}.controls label{font-size:12px;font-weight:700;color:var(--muted);display:block;margin-bottom:5px}
+select{min-width:280px;max-width:100%;padding:9px;border:1px solid #aeb9c2;border-radius:7px;background:#fff}.muted{color:var(--muted)}
+.notice{display:none;padding:10px 12px;border-radius:8px;margin-bottom:16px}.notice.error{display:block;background:#fff1f1;color:#7b1f1f;border:1px solid #e0aaaa}
+.tablewrap{overflow:auto}table{width:100%;border-collapse:collapse;min-width:900px}th,td{padding:9px;border-bottom:1px solid var(--line);vertical-align:top;text-align:left}th{font-size:12px;background:#f2f5f8;color:#415466}
+.action{font-weight:700;color:var(--blue)}.details{white-space:pre-wrap;font-family:Consolas,monospace;font-size:12px;max-width:500px}.empty{padding:24px;text-align:center;color:var(--muted)}
+@media(max-width:700px){.topbar{padding:14px 16px}.page{padding:18px 10px}select{min-width:220px}}
+</style>
+</head>
+<body>
+<header class="topbar">
+  <h1>TimeClock Activity Logs</h1>
+  <div class="actions"><a class="btn" href="/timecard.html">Timecard</a><a class="btn" href="/index.html">Home</a></div>
+</header>
+<main class="page">
+  <div id="notice" class="notice"></div>
+  <section class="card">
+    <div class="controls">
+      <div id="employeePickerWrap">
+        <label for="employeePicker">Employee</label>
+        <select id="employeePicker"></select>
+      </div>
+      <div><strong id="employeeName">Loading…</strong><div id="employeeMeta" class="muted"></div></div>
+    </div>
+  </section>
+  <section class="card">
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th>Date / Time</th><th>Action</th><th>Performed By</th><th>Record</th><th>Details</th></tr></thead>
+        <tbody id="logRows"></tbody>
+      </table>
+    </div>
+    <div id="emptyState" class="empty" style="display:none">No activity logs found.</div>
+  </section>
+</main>
+<script src="/mobile-pairing.js?v=20260921-2"></script>
+<script>
+const apiBase='/api';
+let me=null,permissions=new Set(),employees=[];
+const token=()=>localStorage.getItem('timeclock_token');
+const headers=()=>token()?{Authorization:`Bearer ${token()}`}:{};
+const has=k=>permissions.has('app_admin')||permissions.has(k);
+const hasAny=keys=>keys.some(has);
+const esc=v=>String(v??'').replace(/[&<>"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
+const actionLabel=value=>String(value||'activity').replaceAll('_',' ').replace(/\b\w/g,c=>c.toUpperCase());
+function showError(message){const n=document.getElementById('notice');n.textContent=message;n.className='notice error'}
+async function json(url){const r=await fetch(url,{headers:headers()});let d={};try{d=await r.json()}catch(_){d={}}if(!r.ok)throw new Error(d.error||`Request failed (${r.status})`);return d}
+function detailText(details){
+  if(!details)return '-';
+  const entries=Object.entries(details).filter(([,v])=>v!==null&&v!==undefined&&v!=='');
+  if(!entries.length)return '-';
+  return entries.map(([k,v])=>`${k.replaceAll('_',' ')}: ${typeof v==='object'?JSON.stringify(v):v}`).join('\n');
+}
+function renderPicker(selectedId){
+  const picker=document.getElementById('employeePicker');
+  picker.innerHTML=employees.map(e=>`<option value="${Number(e.id)}"${Number(e.id)===Number(selectedId)?' selected':''}>${esc(e.last_name)}, ${esc(e.first_name)}${e.department?` — ${esc(e.department)}`:''}</option>`).join('');
+  document.getElementById('employeePickerWrap').style.display=employees.length>1?'block':'none';
+}
+async function loadLog(employeeId){
+  const data=await json(`${apiBase}/employee/activity-log?employee_id=${encodeURIComponent(employeeId)}&limit=250`);
+  document.getElementById('employeeName').textContent=`${data.employee.first_name} ${data.employee.last_name}`;
+  document.getElementById('employeeMeta').textContent=[data.employee.employee_number?`Employee #${data.employee.employee_number}`:'',data.employee.department||''].filter(Boolean).join(' · ');
+  const rows=document.getElementById('logRows'),empty=document.getElementById('emptyState');
+  if(!data.logs.length){rows.innerHTML='';empty.style.display='block';return}
+  empty.style.display='none';
+  rows.innerHTML=data.logs.map(item=>`<tr>
+    <td>${esc(item.created_at_display||item.created_at)}</td>
+    <td class="action">${esc(actionLabel(item.action))}</td>
+    <td>${esc([item.actor_first_name,item.actor_last_name].filter(Boolean).join(' ')||'System')}</td>
+    <td>${esc([item.target_type,item.target_id].filter(Boolean).join(' #'))}</td>
+    <td class="details">${esc(detailText(item.details))}</td>
+  </tr>`).join('');
+}
+async function init(){
+  try{
+    if(window.TimeClockTrustedReady)await window.TimeClockTrustedReady;
+    if(!token()){location.replace('https://employee.edgefieldcountysc.org/apps/timeclock/launch?return_to=logs');return}
+    const session=await json(`${apiBase}/me`);me=session.user;permissions=new Set(session.permissions||[]);
+    employees=[{id:me.id,first_name:me.first_name,last_name:me.last_name,department:me.department_name||me.department||''}];
+    const elevated=hasAny(['view_assigned_employees','view_department_time','view_all_timeclock_records','view_payroll_records','review_approved_timecards','edit_employee_time','edit_payroll_time']);
+    if(elevated){
+      try{
+        const team=await json(`${apiBase}/supervisor/pay-period-status`);
+        for(const e of team.employees||[])if(!employees.some(x=>Number(x.id)===Number(e.id)))employees.push(e);
+      }catch(_){}
+    }
+    employees.sort((a,b)=>String(a.last_name||'').localeCompare(String(b.last_name||''))||String(a.first_name||'').localeCompare(String(b.first_name||'')));
+    const requested=Number(new URLSearchParams(location.search).get('employeeId'));
+    const selected=employees.some(e=>Number(e.id)===requested)?requested:Number(me.id);
+    renderPicker(selected);await loadLog(selected);
+    document.getElementById('employeePicker').addEventListener('change',async e=>{const id=Number(e.target.value);const u=new URL(location.href);u.searchParams.set('employeeId',id);history.replaceState({},'',u);try{await loadLog(id)}catch(err){showError(err.message)}});
+  }catch(err){showError(err.message)}
+}
+init();
+</script>
+</body>
+</html>
