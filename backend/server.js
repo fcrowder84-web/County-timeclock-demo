@@ -19,7 +19,8 @@ const { createEmployeeRouter } = require("./routes/employee");
 const { createSupervisorRouter } = require("./routes/supervisor");
 const { createPayrollRouter } = require("./routes/payroll");
 const { createTeamStructureRouter } = require("./routes/team-structure");
-const { createLeaveRouter } = require("./routes/leave");\nconst { createForcedLunchRouter } = require("./routes/forced-lunch");
+const { createLeaveRouter } = require("./routes/leave");
+const { createForcedLunchRouter } = require("./routes/forced-lunch");
 
 const app = express();
 app.use(express.json({ limit: "1mb" }));
