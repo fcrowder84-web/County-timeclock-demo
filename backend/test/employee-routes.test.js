@@ -44,6 +44,9 @@ function compact(sql) { return String(sql).replace(/\s+/g, ' ').trim(); }
     [
       'post /submit-timecard',
       'get /employee/my-timecard',
+      'get /employee/denied-change-requests',
+      'post /employee/denied-change-requests/:requestId/acknowledge',
+      'get /employee/activity-log',
       'post /employee/edit-time-entry',
       'post /employee/request-time-change',
       'post /employee/withdraw-time-change',
