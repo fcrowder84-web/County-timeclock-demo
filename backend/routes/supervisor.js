@@ -199,11 +199,8 @@ function createSupervisorRouter({
       try {
         const requestId = parsePositiveInt(req.body?.request_id, 'change request');
         const supervisorNote = String(req.body?.supervisor_note || '').trim();
-        if (!supervisorNote) {
-          return res.status(400).json({ error: 'A reason is required when denying a punch request' });
-        }
         if (supervisorNote.length > 1000) {
-          return res.status(400).json({ error: 'Denial reason must be 1000 characters or less' });
+          return res.status(400).json({ error: 'Supervisor note must be 1000 characters or less' });
         }
 
         const target = await pool.query(
@@ -739,9 +736,14 @@ function createSupervisorRouter({
           await client.query('ROLLBACK');
           return res.status(404).json({ error: 'No timecard found for this pay period' });
         }
-        if (approval.payroll_finalized_at && !canReturnFromPayroll) {
-          await client.query('ROLLBACK');
-          return res.status(409).json({ error: 'This timecard is payroll-finalized. Payroll must return it before changes can be made.' });
+        if (approval.payroll_finalized_at) {
+          const canReopen =
+            userHasPermission(req.user,'reopen_timecard')
+            && await canAccessEmployee(req.user,employeeId,['reopen_timecard']);
+          if(!canReopen){
+            await client.query('ROLLBACK');
+            return res.status(403).json({ error: 'Reopen permission is required for a payroll-finalized timecard.' });
+          }
         }
 
         const returningToEmployee = targetStage === 'employee';
