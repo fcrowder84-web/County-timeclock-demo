@@ -664,6 +664,24 @@
             };
         }
 
+        function pendingItemsHtml(row) {
+            const parts = [];
+            if (Number(row.pending_leave_count || 0) > 0) {
+                parts.push(...(row.pending_leave_entries || []).map(entry => {
+                    const leaveType = String(entry.leave_type || "").replaceAll("_", " ").replace(/\\b\\w/g, letter => letter.toUpperCase());
+                    const reviewingOwnLeave = Number(row.id) === Number(currentUser?.id);
+                    const canReviewLeave = hasAnyPermission(["view_assigned_employees","view_department_time","edit_employee_time","approve_timecard","edit_payroll_time","view_all_timeclock_records","app_admin"]) || (reviewingOwnLeave && hasAnyPermission(["approve_own_timecard"]));
+                    let actions = "";
+                    if (canReviewLeave) actions = "<button class=\"btn-approve\" style=\"margin-left:6px\" onclick=\"reviewLeave(" + Number(entry.id) + ", &quot;approved&quot;)\">Approve</button> <button class=\"btn-return\" onclick=\"reviewLeave(" + Number(entry.id) + ", &quot;denied&quot;)\">Deny</button>";
+                    return "<div class=\"leave-row\" style=\"margin-bottom:6px\"><span class=\"leave-badge\">" + esc(leaveType) + " · " + Number(entry.hours || 0).toFixed(2) + "h</span>" + actions + "</div>";
+                }));
+            }
+            if (Number(row.pending_lunch_count || 0) > 0) {
+                parts.push(...(row.pending_lunch_entries || []).map(entry => "<div class=\"leave-row\" style=\"margin-bottom:6px\"><span class=\"leave-badge\">Lunch · " + esc(entry.work_date || "") + " · " + Number(entry.configured_lunch_minutes || 0) + " min</span><button class=\"btn-approve\" style=\"margin-left:6px\" onclick=\"reviewLunchWaiver(" + Number(entry.id) + ", &quot;approved&quot;)\">Approve</button> <button class=\"btn-return\" onclick=\"reviewLunchWaiver(" + Number(entry.id) + ", &quot;denied&quot;)\">Deny</button></div>"));
+            }
+            return parts.length ? parts.join("") : "-";
+        }
+
         async function loadSummary() {
 
             const response =
@@ -704,7 +722,7 @@
                                 <th>Employee</th>
                                 <th>Department</th>
                                 <th>Status</th>
-                                <th>Pending Leave</th>
+                                <th>Pending Items</th>
                                 <th>Worked Hours</th>
                                 <th>Actions</th>
                             </tr>
@@ -737,26 +755,7 @@
                         </td>
 
                         <td>
-                            ${Number(row.pending_leave_count || 0) > 0
-                                ? (row.pending_leave_entries || []).map(entry => {
-                                    const leaveType = String(entry.leave_type || "")
-                                        .replaceAll("_", " ")
-                                        .replace(/\b\w/g, letter => letter.toUpperCase());
-                                    const reviewingOwnLeave = Number(row.id) === Number(currentUser?.id);
-                                    const canReviewLeave = hasAnyPermission([
-                                        "view_assigned_employees", "view_department_time",
-                                        "edit_employee_time", "approve_timecard",
-                                        "edit_payroll_time", "view_all_timeclock_records", "app_admin"
-                                    ]) || (reviewingOwnLeave && hasAnyPermission(["approve_own_timecard"]));
-                                    return `<div class="leave-row" style="margin-bottom:6px">
-                                        <span class="leave-badge">${esc(leaveType)} · ${Number(entry.hours || 0).toFixed(2)}h</span>
-                                        ${canReviewLeave
-                                            ? `<button class="btn-approve" style="margin-left:6px" onclick="reviewLeave(${entry.id}, 'approved')">Approve</button>
-                                               <button class="btn-return" onclick="reviewLeave(${entry.id}, 'denied')">Deny</button>`
-                                            : ""}
-                                    </div>`;
-                                }).join("")
-                                : "-"}
+                            ${pendingItemsHtml(row)}
                         </td>
 
                         <td>
@@ -991,6 +990,19 @@
             } catch (err) {
                 if (err.message !== "Login required") showMessage(err.message, true);
             }
+        }
+
+        async function reviewLunchWaiver(requestId, status) {
+            const note = status === "denied" ? (prompt("Reason for denying lunch removal:") || "") : (prompt("Supervisor note (optional):") || "");
+            if (status === "denied" && !note.trim()) { showMessage("Reason is required when denying lunch removal", true); return; }
+            try {
+                const response = await apiFetch(`${apiBase}/supervisor/review-lunch-waiver`, { method: "POST", body: JSON.stringify({ request_id: Number(requestId), status, review_note: note.trim() }) });
+                const data = await response.json().catch(() => ({}));
+                if (!response.ok || data.error) throw new Error(data.error || "Unable to review lunch removal");
+                showMessage(data.message || `Lunch removal request ${status}`);
+                await loadSummary();
+                if (selectedEmployeeId) await viewTimecard(selectedEmployeeId);
+            } catch (err) { if (err.message !== "Login required") showMessage(err.message, true); }
         }
 
         async function approveTimecard(employeeId) {
