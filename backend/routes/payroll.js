@@ -144,14 +144,6 @@ function createPayrollRouter({ requireUser, requireAnyPermission, pool, getReque
              ) AS lunch_waived
            FROM employees e
            LEFT JOIN departments d ON d.id=e.department_id
-           LEFT JOIN LATERAL (
-             SELECT flsh.enabled,flsh.minutes
-               FROM forced_lunch_setting_history flsh
-              WHERE flsh.employee_id=e.id
-                AND flsh.effective_date <= te.clock_in::date
-              ORDER BY flsh.effective_date DESC
-              LIMIT 1
-           ) lunch_setting ON TRUE
            LEFT JOIN pay_period_approvals ppa
              ON ppa.employee_id=e.id
             AND ppa.pay_period_start=$1::date
@@ -161,6 +153,14 @@ function createPayrollRouter({ requireUser, requireAnyPermission, pool, getReque
             AND te.deleted_at IS NULL
             AND te.clock_in >= $1::date
             AND te.clock_in < ($2::date + INTERVAL '1 day')
+           LEFT JOIN LATERAL (
+             SELECT flsh.enabled,flsh.minutes
+               FROM forced_lunch_setting_history flsh
+              WHERE flsh.employee_id=e.id
+                AND flsh.effective_date <= te.clock_in::date
+              ORDER BY flsh.effective_date DESC
+              LIMIT 1
+           ) lunch_setting ON TRUE
            WHERE (
              e.active=TRUE
              OR ppa.id IS NOT NULL
