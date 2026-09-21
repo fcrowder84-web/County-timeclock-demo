@@ -1,6 +1,6 @@
 'use strict';
 
-const { userPermissionSet, userHasPermission } = require('./permissions');
+const { userPermissionSet, userHasPermission, roleCanSelfApprove } = require('./permissions');
 
 function rawPermissions(user) {
   return userPermissionSet(user);
@@ -29,7 +29,7 @@ async function getApprovalAuthority(pool,user,employeeId){
     && Number(user?.department_id)===Number(departmentId);
 
   let isAssignedSupervisor=false;
-  if(!isSelf){
+  if(role==='supervisor'&&!isSelf){
     const assigned=await pool.query(
       `SELECT 1 FROM supervisor_employee_assignments
         WHERE supervisor_employee_id=$1 AND employee_id=$2 AND active=TRUE LIMIT 1`,
@@ -53,6 +53,7 @@ async function canApprove(pool,user,employeeId,kind){
   if(!authority.allowed)return false;
 
   if(authority.isSelf){
+    if(!roleCanSelfApprove(user)) return false;
     if(kind==='punch')return userHasPermission(user,'approve_own_punch_corrections');
     if(kind==='timecard')return userHasPermission(user,'approve_own_timecard');
     if(kind==='leave')return userHasPermission(user,'approve_own_leave');
