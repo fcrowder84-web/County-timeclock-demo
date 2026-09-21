@@ -5,6 +5,14 @@ const root=path.resolve(__dirname,'..');
 function patch(rel,fn){const file=path.join(root,rel);const before=fs.readFileSync(file,'utf8');const after=fn(before);if(after===before)throw new Error('No change: '+rel);fs.writeFileSync(file,after);}
 patch('server.js',s=>{const p=/async function canAccessEmployee\(user,\s*employeeId,\s*actionPermissions\s*=\s*\[\]\)\s*\{[\s\S]*?\}\s*\n\s*async function syncPortalUser/;if(!p.test(s))throw new Error('canAccessEmployee not found');const r=`async function canAccessEmployee(user, employeeId, actionPermissions = []) {
   const permissions=userPermissionSet(user);
+
+  // App Admin is the master TimeClock permission.
+  // Scope still determines whether access is countywide or department-only.
+  if(permissions.has("app_admin")){
+    if(user.app_admin_scope==="all")return true;
+    return isSameDepartment(user,employeeId);
+  }
+
   const isSelf=Number(user.id)===Number(employeeId);
   const requested=actionPermissions.length?actionPermissions:["view_assigned_employees","view_department_time","view_payroll_records","review_approved_timecards","edit_employee_time","edit_payroll_time","approve_punch_correction","approve_timecard","return_timecard","return_to_supervisor"];
   const approvalKind=requested.includes("approve_punch_correction")?"punch":(requested.includes("approve_timecard")?"timecard":null);

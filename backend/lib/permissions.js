@@ -80,6 +80,10 @@ function userPermissionSet(user) {
 
 function userHasPermission(user, permissionKey) {
   const permissions = userPermissionSet(user);
+
+  // App Admin is the master TimeClock permission.
+  // App admins automatically receive all current and future permissions.
+  if (permissions.has('app_admin')) return true;
   if (permissions.has(permissionKey)) return true;
   if (permissionKey === 'view_own_time' && permissions.has('access')) return true;
   return false;

@@ -986,7 +986,9 @@
                     throw new Error(data.error || `Unable to ${action} leave`);
                 }
                 showMessage(data.message || `Leave ${status}`);
-                await viewTimecard(selectedEmployeeId);
+                if (selectedEmployeeId) {
+                    await viewTimecard(selectedEmployeeId);
+                }
                 await loadSummary();
             } catch (err) {
                 if (err.message !== "Login required") showMessage(err.message, true);
