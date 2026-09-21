@@ -163,6 +163,35 @@ function deriveLegacyRole(permissions) {
   return 'employee';
 }
 
+function currentAuthorizationForUser(user, fallbackPermissions = [], fallbackScope = 'own') {
+  const source=String(user?.auth_source||'').toLowerCase();
+  let permissions;
+  if(source==='portal'){
+    if(Array.isArray(user?.portal_permissions)){
+      permissions=normalizePermissions(user.portal_permissions);
+    }else if(user?.portal_permissions&&typeof user.portal_permissions==='object'){
+      permissions=normalizePermissions(
+        Object.keys(user.portal_permissions).filter(key=>user.portal_permissions[key]),
+      );
+    }else{
+      permissions=[];
+    }
+  }else{
+    permissions=normalizePermissions(fallbackPermissions||[]);
+  }
+
+  const scopeSource=source==='portal' ? user?.app_admin_scope : fallbackScope;
+  const appAdminScope=
+    permissions.includes('app_admin')&&scopeSource==='all' ? 'all' : 'own';
+
+  return {permissions,appAdminScope};
+}
+
+function roleCanSelfApprove(user) {
+  const role=String(user?.role||'employee').toLowerCase();
+  return ['department_head','payroll','timeclock_manager','admin'].includes(role);
+}
+
 function userPermissionSet(user) {
   return new Set(normalizePermissions(Array.isArray(user?.permissions) ? user.permissions : []));
 }
@@ -197,6 +226,8 @@ module.exports={
   normalizePermissions,
   legacyPermissionsForRole,
   deriveLegacyRole,
+  currentAuthorizationForUser,
+  roleCanSelfApprove,
   userPermissionSet,
   userHasPermission,
   userHasAnyPermission,
