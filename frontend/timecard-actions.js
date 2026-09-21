@@ -136,10 +136,15 @@ function deniedPunchItems(){
 function renderDenied(){
   const panel=document.getElementById("deniedPanel"),list=document.getElementById("deniedList");
   if(!panel||!list)return;
-  const items=deniedPunchItems();
+  const requestedDeniedId=Number(new URLSearchParams(location.search).get("deniedRequest")||0)||null;
+  const items=deniedPunchItems().sort((a,b)=>Number(b.id===requestedDeniedId)-Number(a.id===requestedDeniedId));
   panel.classList.toggle("show",items.length>0);
-  list.innerHTML=items.map(i=>`<div class="pending-item"><span><strong>Punch Request Denied</strong><br>${esc(i.text)}<span class="denied-note">Supervisor reason: ${esc(i.note)}</span></span><button class="btn btn-danger denied-ack" data-id="${Number(i.id)}">Mark Reviewed</button></div>`).join("");
+  list.innerHTML=items.map(i=>`<div class="pending-item${Number(i.id)===requestedDeniedId?" denied-target":""}" data-denied-id="${Number(i.id)}"><span><strong>Punch Request Denied</strong><br>${esc(i.text)}<span class="denied-note">Supervisor reason: ${esc(i.note)}</span></span><button class="btn btn-danger denied-ack" data-id="${Number(i.id)}">Mark Reviewed</button></div>`).join("");
   list.querySelectorAll(".denied-ack").forEach(b=>b.addEventListener("click",()=>acknowledgeDeniedPunch(b.dataset.id)));
+  if(requestedDeniedId&&items.some(i=>Number(i.id)===requestedDeniedId)&&!renderDenied.focused){
+    renderDenied.focused=true;
+    requestAnimationFrame(()=>panel.scrollIntoView({behavior:"smooth",block:"center"}));
+  }
 }
 async function acknowledgeDeniedPunch(id){
   try{
@@ -272,6 +277,7 @@ async function reviewChange(id,status){
     if(entered===null)return;
     note=entered.trim();
     if(!note){showMessage("A reason is required when denying a punch request","error");return}
+    if(note.length>1000){showMessage("Denial reason must be 1000 characters or less","error");return}
   }else{
     const entered=prompt("Supervisor note for approval (optional):");
     if(entered===null)return;
