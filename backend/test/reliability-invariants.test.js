@@ -40,7 +40,7 @@ assert.match(team, /await client\.query\('BEGIN'\)/);
 assert.doesNotMatch(team, /await pool\.query\(["']BEGIN["']\)/);
 assert.match(team, /cannot be assigned as their own supervisor/);
 
-assert.match(quick, /UPDATE time_change_requests[\s\S]*status='denied'/);
+assert.match(quick, /UPDATE time_change_requests[\s\S]*status='voided'/);
 assert.match(quick, /deleted_at=NOW\(\)/);
 assert.match(quick, /clock_out IS NULL\s+RETURNING \*/);
 
