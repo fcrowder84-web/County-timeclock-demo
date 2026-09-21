@@ -80,6 +80,7 @@ function userPermissionSet(user) {
 
 function userHasPermission(user, permissionKey) {
   const permissions = userPermissionSet(user);
+  if (permissions.has('app_admin')) return true;
   if (permissions.has(permissionKey)) return true;
   if (permissionKey === 'view_own_time' && permissions.has('access')) return true;
   return false;
