@@ -314,8 +314,7 @@ function createEmployeeRouter({ requireUser, requireAnyPermission, pool, audit, 
            LEFT JOIN employees actor ON actor.id=a.actor_employee_id
           WHERE a.action NOT IN ('portal_sso_login','trusted_mobile_session','generate_mobile_pairing_code','redeem_mobile_pairing_code')
             AND (
-              a.actor_employee_id=$1
-              OR (a.target_type='employee' AND a.target_id=$1::text)
+              (a.target_type='employee' AND a.target_id=$1::text)
               OR a.details->>'employee_id'=$1::text
               OR (a.target_type='time_entry' AND EXISTS (
                 SELECT 1 FROM time_entries te WHERE te.id::text=a.target_id AND te.employee_id=$1
