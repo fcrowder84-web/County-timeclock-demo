@@ -164,15 +164,15 @@ function renderPending(){
       actions=`<span><button class="btn pending-withdraw" data-type="${i.type}" data-id="${Number(i.id)}">Withdraw</button></span>`;
     }else if(currentMode==="supervisor"){
       if(i.type==="leave"){
-        const allowed=selectedIsSelf()?has("approve_own_leave"):has("approve_leave");
+        const allowed=selectedIsSelf()?(selfApprovalRoleAllowed()&&has("approve_own_leave")):has("approve_leave");
         if(allowed)actions=`<span><button class="btn pending-leave-review" data-id="${Number(i.id)}" data-status="approved">Approve</button><button class="btn pending-leave-review" data-id="${Number(i.id)}" data-status="denied">Deny</button></span>`;
       }
       if(i.type==="change"){
-        const allowed=selectedIsSelf()?has("approve_own_punch_corrections"):has("approve_punch_correction");
+        const allowed=selectedIsSelf()?(selfApprovalRoleAllowed()&&has("approve_own_punch_corrections")):has("approve_punch_correction");
         if(allowed)actions=`<span><button class="btn pending-change-review" data-id="${Number(i.id)}" data-status="approved">Approve</button><button class="btn pending-change-review" data-id="${Number(i.id)}" data-status="denied">Deny</button></span>`;
       }
       if(i.type==="lunch"){
-        const allowed=selectedIsSelf()?has("approve_own_lunch_waiver"):has("approve_lunch_waiver");
+        const allowed=selectedIsSelf()?(selfApprovalRoleAllowed()&&has("approve_own_lunch_waiver")):has("approve_lunch_waiver");
         if(allowed)actions=`<span><button class="btn pending-lunch-review" data-id="${Number(i.id)}" data-status="approved">Approve</button><button class="btn pending-lunch-review" data-id="${Number(i.id)}" data-status="denied">Deny</button></span>`;
       }
     }
