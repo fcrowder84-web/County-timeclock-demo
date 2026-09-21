@@ -24,6 +24,7 @@
                 <td>${hours(week.regular_worked_hours)}</td>
                 <td><strong>${hours(week.overtime_hours)}</strong></td>
                 <td>${hours(week.total_worked_hours)}</td>
+                <td>${hours(week.forced_lunch_deducted_hours)}</td>
                 <td>${leaveText(week.leave_hours_by_type)}</td>
                 <td>${hours(week.total_leave_hours)}</td>
                 <td><strong>${hours(week.total_paid_hours)}</strong></td>
@@ -34,16 +35,18 @@
                 <div class="summary-box"><strong>Regular Worked</strong><br>${hours(p.regular_worked_hours)}</div>
                 <div class="summary-box"><strong>Overtime Worked</strong><br>${hours(p.overtime_hours)}</div>
                 <div class="summary-box"><strong>Total Worked</strong><br>${hours(p.total_worked_hours)}</div>
+                <div class="summary-box"><strong>Forced Lunch Deducted</strong><br>${hours(p.forced_lunch_deducted_hours)}</div>
                 <div class="summary-box"><strong>Total Leave</strong><br>${hours(p.total_leave_hours)}</div>
                 <div class="summary-box"><strong>Total Paid</strong><br>${hours(p.total_paid_hours)}</div>
             </div>
             <div style="margin:12px 0 18px;overflow-x:auto;">
                 <table>
-                    <thead><tr><th>Week</th><th>Regular Worked</th><th>OT Worked</th><th>Total Worked</th><th>Approved Leave</th><th>Total Leave</th><th>Total Paid</th></tr></thead>
+                    <thead><tr><th>Week</th><th>Regular Worked</th><th>OT Worked</th><th>Total Worked</th><th>Forced Lunch</th><th>Approved Leave</th><th>Total Leave</th><th>Total Paid</th></tr></thead>
                     <tbody>${weekRows}</tbody>
                 </table>
                 ${Number(p.pending_leave_hours || 0) > 0 ? `<p><strong>Pending leave:</strong> ${leaveText(p.pending_leave_hours_by_type)}. Pending leave is not included in paid totals.</p>` : ''}
-                <p style="font-size:0.9em;margin-top:8px;"><strong>Overtime rule:</strong> OT is calculated separately for each week from actual worked hours over ${hours(summary.overtime_threshold_hours)} hours. Leave never creates overtime.</p>
+                ${Number(p.forced_lunch_deducted_hours || 0) > 0 ? `<p><strong>Forced lunch deducted:</strong> ${hours(p.forced_lunch_deducted_hours)} hours. Actual clocked-out gaps count toward the required lunch before any automatic deduction is added.</p>` : ''}
+                <p style="font-size:0.9em;margin-top:8px;"><strong>Overtime rule:</strong> OT is calculated separately for each week from credited worked hours over ${hours(summary.overtime_threshold_hours)} hours after any forced-lunch deduction. Leave never creates overtime.</p>
             </div>`;
     }
 
