@@ -183,6 +183,27 @@ function createEmployeeRouter({ requireUser, requireAnyPermission, pool, audit, 
         [req.user.id],
       );
 
+      const lunchWaiverResult = await pool.query(
+        `SELECT id,to_char(work_date,'YYYY-MM-DD') AS work_date_iso,reason,source,
+                waived_by_employee_id,created_at,active
+           FROM forced_lunch_waivers
+          WHERE employee_id=$1
+            AND work_date BETWEEN $2::date AND $3::date
+            AND active=TRUE
+          ORDER BY work_date`,
+        [req.user.id, period.pay_period_start, period.pay_period_end],
+      );
+
+      const lunchRequestResult = await pool.query(
+        `SELECT id,to_char(work_date,'YYYY-MM-DD') AS work_date_iso,reason,status,
+                review_note,created_at,reviewed_at
+           FROM forced_lunch_waiver_requests
+          WHERE employee_id=$1
+            AND work_date BETWEEN $2::date AND $3::date
+          ORDER BY work_date,created_at`,
+        [req.user.id, period.pay_period_start, period.pay_period_end],
+      );
+
       const approval = approvalResult.rows[0] || null;
       const canEditEntries = !approval?.employee_signed_at || approval?.status === 'returned_to_employee';
 
@@ -194,10 +215,15 @@ function createEmployeeRouter({ requireUser, requireAnyPermission, pool, audit, 
         can_edit_entries: canEditEntries,
         entries: entriesResult.rows,
         leave_entries: leaveResult.rows,
+        lunch_waivers: lunchWaiverResult.rows,
+        lunch_requests: lunchRequestResult.rows,
         timecard_summary: summarizeTimecard({
           entries: entriesResult.rows,
           leaveEntries: leaveResult.rows,
           payPeriodStart: period.pay_period_start,
+          forcedLunchEnabled: req.user.forced_lunch_enabled,
+          forcedLunchMinutes: req.user.forced_lunch_minutes,
+          lunchWaivers: lunchWaiverResult.rows,
         }),
         requests: requestsResult.rows,
       });
