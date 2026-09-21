@@ -1,7 +1,7 @@
 'use strict';
 
 const express = require('express');
-const { canEditPunch, hasPayrollOverride } = require('../lib/punch-edit-authority');
+const { canEditPunch, hasPayrollOverride, hasPunchPermission } = require('../lib/punch-edit-authority');
 const { recordPunchMetadata } = require('../lib/punch-metadata');
 
 function createQuickPunchRouter({ requireUser, requireAnyPermission, pool, audit }) {
@@ -35,7 +35,7 @@ function createQuickPunchRouter({ requireUser, requireAnyPermission, pool, audit
 
   async function canDeleteEntry(user, entry, db = pool) {
     if (Number(user.id) === Number(entry.employee_id)) {
-      return permissionSet(user).has('edit_own_pending_entry');
+      return hasPunchPermission(user, 'edit_own_pending_entry');
     }
     return canEditPunch(db, user, entry.employee_id, 'edit');
   }
@@ -196,7 +196,7 @@ function createQuickPunchRouter({ requireUser, requireAnyPermission, pool, audit
         const supervisorStage = approval?.status === 'employee_submitted'
           && approval.employee_signed_at && !approval.supervisor_approved_at && !approval.payroll_finalized_at;
         if ((!payroll && !supervisorStage)
-            || (payroll && approval?.payroll_finalized_at && !permissionSet(req.user).has('reopen_timecard'))) {
+            || (payroll && approval?.payroll_finalized_at && !hasPunchPermission(req.user, 'reopen_timecard'))) {
           await client.query('ROLLBACK');
           return res.status(409).json({ error: 'Return the timecard to the authorized editing stage before deleting a punch.' });
         }
