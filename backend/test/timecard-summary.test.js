@@ -119,4 +119,24 @@ assert.strictEqual(lunchPreventsArtificialOt.weeks[0].forced_lunch_hours, 5);
 assert.strictEqual(lunchPreventsArtificialOt.weeks[0].total_worked_hours, 40);
 assert.strictEqual(lunchPreventsArtificialOt.weeks[0].overtime_hours, 0);
 
-console.log('timecard summary tests passed');
+
+// Regression: rounding differences must never be mistaken for a lunch break.
+const continuousOddMinutePunch = summarizeTimecard({
+  payPeriodStart: "2026-09-14",
+  forcedLunchEnabled: true,
+  forcedLunchMinutes: 30,
+  entries: [
+    {
+      entry_date_iso: "2026-09-16",
+      clock_in: "2026-09-16T07:30:00-04:00",
+      clock_out: "2026-09-16T16:19:42-04:00",
+      hours_worked: 8.8283333333
+    }
+  ],
+});
+
+assert.strictEqual(continuousOddMinutePunch.days.length, 1);
+assert.strictEqual(continuousOddMinutePunch.days[0].existing_break_hours, 0);
+assert.strictEqual(continuousOddMinutePunch.days[0].forced_lunch_deduction_hours, 0.5);
+
+console.log("timecard summary tests passed");

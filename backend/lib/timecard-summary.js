@@ -107,6 +107,7 @@ function summarizeTimecard({
       firstInMs: null,
       lastOutMs: null,
       hasWork: false,
+      intervals: [],
     };
     state.grossMinutes += durationMinutes(entry.hours_worked);
     state.hasWork = true;
@@ -115,6 +116,9 @@ function summarizeTimecard({
     const outMs = timestampMs(entry.clock_out || entry.pending_clock_out);
     if (inMs != null) state.firstInMs = state.firstInMs == null ? inMs : Math.min(state.firstInMs, inMs);
     if (outMs != null) state.lastOutMs = state.lastOutMs == null ? outMs : Math.max(state.lastOutMs, outMs);
+    if (inMs != null && outMs != null && outMs >= inMs) {
+      state.intervals.push({ inMs, outMs });
+    }
     daily.set(day, state);
   }
 
@@ -122,11 +126,18 @@ function summarizeTimecard({
   for (const [day, state] of daily.entries()) {
     const weekIndex = diffDays(start, day) < 7 ? 0 : 1;
     const grossRoundedMinutes = roundDailyMinutes(state.grossMinutes);
-    let spanMinutes = grossRoundedMinutes;
-    if (state.firstInMs != null && state.lastOutMs != null && state.lastOutMs >= state.firstInMs) {
-      spanMinutes = Math.max(grossRoundedMinutes, Math.round((state.lastOutMs - state.firstInMs) / 60000));
+    const intervals = [...state.intervals].sort((a, b) => a.inMs - b.inMs);
+    let existingBreakMinutes = 0;
+    let previousOutMs = null;
+
+    for (const interval of intervals) {
+      if (previousOutMs != null && interval.inMs > previousOutMs) {
+        existingBreakMinutes += Math.round((interval.inMs - previousOutMs) / 60000);
+      }
+      previousOutMs = previousOutMs == null
+        ? interval.outMs
+        : Math.max(previousOutMs, interval.outMs);
     }
-    const existingBreakMinutes = Math.max(0, spanMinutes - grossRoundedMinutes);
     const waiver = waiverMap.get(day) || null;
     const waived = Boolean(waiver);
     const deductionMinutes = configuredLunchMinutes > 0 && state.hasWork && !waived
