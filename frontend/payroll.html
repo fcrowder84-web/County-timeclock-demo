@@ -968,6 +968,7 @@
                     firstIndex: index,
                     firstIn: null,
                     lastOut: null,
+                    intervals: [],
                     forcedEnabled: false,
                     lunchMinutes: 0,
                     waived: false
@@ -978,6 +979,7 @@
                 const outMs = row.clock_out_raw ? new Date(row.clock_out_raw).getTime() : NaN;
                 if (Number.isFinite(inMs)) group.firstIn = group.firstIn == null ? inMs : Math.min(group.firstIn, inMs);
                 if (Number.isFinite(outMs)) group.lastOut = group.lastOut == null ? outMs : Math.max(group.lastOut, outMs);
+                if (Number.isFinite(inMs) && Number.isFinite(outMs) && outMs >= inMs) group.intervals.push({ inMs, outMs });
                 group.forcedEnabled = row.forced_lunch_enabled === true || String(row.forced_lunch_enabled) === "true";
                 group.lunchMinutes = Math.max(group.lunchMinutes, Number(row.forced_lunch_minutes || 0));
                 group.waived = group.waived || row.lunch_waived === true || String(row.lunch_waived) === "true";
@@ -986,10 +988,15 @@
             const lunchDeductionByFirstRow = {};
             Object.values(dailyGroups).forEach(group => {
                 const grossMinutes = roundDailyMinutes(group.minutes);
-                const spanMinutes = group.firstIn != null && group.lastOut != null
-                    ? Math.max(grossMinutes, Math.round((group.lastOut - group.firstIn) / 60000))
-                    : grossMinutes;
-                const existingBreakMinutes = Math.max(0, spanMinutes - grossMinutes);
+                const intervals = [...group.intervals].sort((a, b) => a.inMs - b.inMs);
+                let existingBreakMinutes = 0;
+                let previousOutMs = null;
+                intervals.forEach(interval => {
+                    if (previousOutMs != null && interval.inMs > previousOutMs) {
+                        existingBreakMinutes += Math.round((interval.inMs - previousOutMs) / 60000);
+                    }
+                    previousOutMs = previousOutMs == null ? interval.outMs : Math.max(previousOutMs, interval.outMs);
+                });
                 const deductionMinutes = group.forcedEnabled && !group.waived
                     ? Math.min(grossMinutes, Math.max(0, group.lunchMinutes - existingBreakMinutes))
                     : 0;
