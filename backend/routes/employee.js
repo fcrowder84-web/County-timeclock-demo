@@ -175,10 +175,13 @@ function createEmployeeRouter({ requireUser, requireAnyPermission, pool, audit, 
            tcr.*,
            to_char(requested_clock_in, 'MM/DD/YYYY HH12:MI AM') AS requested_clock_in_display,
            to_char(requested_clock_out, 'MM/DD/YYYY HH12:MI AM') AS requested_clock_out_display,
-           to_char(created_at, 'MM/DD/YYYY HH12:MI AM') AS created_at_display,
-           to_char(reviewed_at, 'MM/DD/YYYY HH12:MI AM') AS reviewed_at_display
+           to_char(tcr.created_at, 'MM/DD/YYYY HH12:MI AM') AS created_at_display,
+           to_char(tcr.reviewed_at, 'MM/DD/YYYY HH12:MI AM') AS reviewed_at_display,
+           reviewer.first_name AS supervisor_first_name,
+           reviewer.last_name AS supervisor_last_name
          FROM time_change_requests tcr
-        WHERE employee_id=$1
+         LEFT JOIN employees reviewer ON reviewer.id=tcr.supervisor_id
+        WHERE tcr.employee_id=$1
         ORDER BY created_at DESC`,
         [req.user.id],
       );
