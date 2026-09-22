@@ -200,6 +200,34 @@ function compact(sql) { return String(sql).replace(/\s+/g, ' ').trim(); }
   assert.match(res.body.error, /wait/i);
   assert(!cooldownQueries.some((text) => text.startsWith('UPDATE time_entries SET clock_out=NOW()')));
 
+  // The same cooldown applies in the other direction: a recent clock-out
+  // prevents an immediate new clock-in.
+  const clockInCooldownPool = {
+    query: async (sql) => {
+      const text = compact(sql);
+      if (text.includes('FROM pay_period_approvals')) return { rows: [] };
+      if (text.startsWith('SELECT id,clock_in,') && text.includes('requires_correction')) return { rows: [] };
+      if (text.includes('AS remaining_seconds') && text.includes('AS cooldown_until')) {
+        return { rows: [{
+          clock_in: '2026-09-22T12:00:00Z',
+          clock_out: '2026-09-22T13:00:00Z',
+          last_punch_at: '2026-09-22T13:00:00Z',
+          remaining_seconds: 121,
+          cooldown_until: '2026-09-22T13:05:00Z',
+        }] };
+      }
+      if (text.startsWith('INSERT INTO time_entries')) throw new Error('cooldown must block clock-in insert');
+      throw new Error(`unexpected clock-in cooldown query: ${text}`);
+    },
+    connect: async () => { throw new Error('connect not expected'); },
+  };
+  const clockInCooldownRouter = createQuickPunchRouter({ requireUser: noop, requireAnyPermission: allow, pool: clockInCooldownPool, audit: async () => {} });
+  res = makeRes();
+  await handlerFor(clockInCooldownRouter, 'post', '/clock-in')({ user: { id: 7, first_name: 'Pat' } }, res);
+  assert.strictEqual(res.statusCode, 409);
+  assert.strictEqual(res.body.code, 'PUNCH_COOLDOWN');
+  assert.strictEqual(res.body.cooldown_seconds_remaining, 121);
+
   const duplicateError = Object.assign(new Error('duplicate open punch'), { code: '23505' });
   const racePool = {
     query: async (sql) => {
