@@ -920,7 +920,7 @@ function createSupervisorRouter({
           payrollOverride ? 'payroll_edit_time_entry' : 'supervisor_edit_time_entry',
           'time_entry',
           timeEntryId,
-          { reason, invalidated_approval_ids: invalidated.map((row) => row.id), reopened_finalized_card_ids: finalized.map(card => card.id) },
+          { reason, invalidated_approval_ids: invalidated.rows.map((row) => row.id), reopened_finalized_card_ids: finalized.map(card => card.id) },
         );
         return res.json({ message: 'Time entry updated', entry: result.rows[0] });
       } catch (err) {
