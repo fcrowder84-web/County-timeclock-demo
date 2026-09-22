@@ -24,6 +24,7 @@ const { createPayrollRouter } = require("./routes/payroll");
 const { createTeamStructureRouter } = require("./routes/team-structure");
 const { createLeaveRouter } = require("./routes/leave");
 const { createLunchRouter } = require("./routes/lunch");
+const { fetchPortalAuthorization } = require("./lib/portal-authorization");
 
 const app = express();
 app.use(express.json({ limit: "1mb" }));
@@ -38,7 +39,80 @@ async function getPayPeriodConfig() { const result = await pool.query(`SELECT MA
 async function getPayPeriod(requestedStart = null) { const config = await getPayPeriodConfig(); return resolvePayPeriod({ anchorDate: config.anchor_date, periodDays: config.period_days, targetDate: config.current_date, requestedStart }); }
 async function getCurrentPayPeriod() { return getPayPeriod(); }
 async function getRequestedPayPeriod(req) { return getPayPeriod(req.query?.period_start || req.body?.period_start || null); }
-async function getUserById(id) { const result = await pool.query(`SELECT e.*, d.name AS department_name FROM employees e LEFT JOIN departments d ON d.id=e.department_id WHERE e.id=$1`, [id]); return result.rows[0] || null; }
+async function getUserByIdLocal(id) {
+  const result = await pool.query(
+    `SELECT e.*, d.name AS department_name
+       FROM employees e
+       LEFT JOIN departments d ON d.id=e.department_id
+      WHERE e.id=$1`,
+    [id],
+  );
+  return result.rows[0] || null;
+}
+async function refreshPortalAuthorization(user) {
+  if (!user || String(user.auth_source || '').toLowerCase() !== 'portal' || !user.portal_user_id) {
+    return user;
+  }
+
+  const current = await fetchPortalAuthorization({
+    directoryUrl: PORTAL_DIRECTORY_URL,
+    apiKey: PORTAL_DIRECTORY_API_KEY,
+    portalUserId: user.portal_user_id,
+  });
+
+  if (!current.exists) {
+    await pool.query(
+      `UPDATE employees
+          SET portal_permissions='[]'::jsonb,
+              role='employee',
+              app_admin_scope='own',
+              active=FALSE,
+              is_active=FALSE,
+              access_removed_at=COALESCE(access_removed_at,NOW()),
+              directory_sync_state='removed',
+              last_portal_sync_at=NOW()
+        WHERE id=$1`,
+      [user.id],
+    );
+    return getUserByIdLocal(user.id);
+  }
+
+  const synced = await syncPortalUser({
+    sub: current.portal_user_id,
+    employee_number: current.employee_number,
+    email: current.email,
+    first_name: current.first_name,
+    last_name: current.last_name,
+    department_id: current.portal_department_id,
+    department_name: current.department_name,
+    permissions: current.timeclock_access ? current.permissions : [],
+    timeclock_role: current.timeclock_access ? current.timeclock_role : 'employee',
+    app_admin_scope: current.timeclock_access ? current.app_admin_scope : 'own',
+  });
+
+  if (!current.is_active || !current.timeclock_access) {
+    await pool.query(
+      `UPDATE employees
+          SET portal_permissions='[]'::jsonb,
+              role='employee',
+              app_admin_scope='own',
+              active=FALSE,
+              is_active=FALSE,
+              access_removed_at=COALESCE(access_removed_at,NOW()),
+              directory_sync_state='removed',
+              last_portal_sync_at=NOW()
+        WHERE id=$1`,
+      [synced.user.id],
+    );
+  }
+
+  return getUserByIdLocal(synced.user.id);
+}
+async function getUserById(id) {
+  const user = await getUserByIdLocal(id);
+  if (!user) return null;
+  return refreshPortalAuthorization(user);
+}
 async function requireUser(req,res,next) {
   try {
     const token=getBearerToken(req);
@@ -70,7 +144,12 @@ async function requireUser(req,res,next) {
     req.user=user;
     req.sessionToken=token;
     next();
-  } catch(err){next(err);}
+  } catch(err){
+    if (err?.statusCode === 503) {
+      return res.status(503).json({error:err.message});
+    }
+    next(err);
+  }
 }
 function selfApprovalRouteAllowed(req,keys){
   if(String(req.method||"").toUpperCase()!=="POST"||!roleCanSelfApprove(req.user)) return false;
