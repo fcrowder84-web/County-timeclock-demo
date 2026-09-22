@@ -1,6 +1,10 @@
 'use strict';
 
 const { insertPunchIntoSequence } = require('./punch-sequence');
+const {
+  requireReopenForFinalized,
+  invalidateApprovals,
+} = require('./payroll-approval-lock');
 
 function punchTimestamp(request) {
   return request.requested_clock_in || request.requested_clock_out || null;
@@ -79,6 +83,14 @@ function createApproveSinglePunchHandler({ pool, audit, canAccessEmployee }) {
             return res.status(400).json({ error: 'The requested punches are not in a valid order' });
           }
 
+          const affectedApprovals=await requireReopenForFinalized({
+            db:client,
+            user:req.user,
+            employeeId:request.employee_id,
+            timestamps:[firstAt,secondAt],
+            canAccessEmployee,
+          });
+
           const inserted = await client.query(
             `INSERT INTO time_entries(employee_id,clock_in,clock_out,notes,status)
              VALUES($1,$2,$3,$4,'closed') RETURNING *`,
@@ -91,17 +103,7 @@ function createApproveSinglePunchHandler({ pool, audit, canAccessEmployee }) {
             [inserted.rows[0].id, req.user.id, firstAt, secondAt, `${request.employee_reason || ''}${companion.employee_reason ? ` | ${companion.employee_reason}` : ''}`],
           );
 
-          const invalidated = await client.query(
-            `UPDATE pay_period_approvals
-                SET supervisor_approved_at=NULL,supervisor_employee_id=NULL,
-                    payroll_finalized_at=NULL,payroll_finalized_by=NULL,
-                    status=CASE WHEN employee_signed_at IS NULL THEN 'open' ELSE 'employee_submitted' END
-              WHERE employee_id=$1
-                AND $2::timestamp >= pay_period_start
-                AND $2::timestamp < (pay_period_end + INTERVAL '1 day')
-              RETURNING id`,
-            [request.employee_id, firstAt],
-          );
+          const invalidated=await invalidateApprovals(client,affectedApprovals);
 
           const reviewed = await client.query(
             `UPDATE time_change_requests
@@ -119,7 +121,7 @@ function createApproveSinglePunchHandler({ pool, audit, canAccessEmployee }) {
             clock_in: firstAt,
             clock_out: secondAt,
             self_approved: Number(req.user.id) === Number(request.employee_id),
-            invalidated_approval_ids: invalidated.rows.map((row) => row.id),
+            invalidated_approval_ids: invalidated.map((row) => row.id),
           });
           return res.json({
             message: 'Both pending punches for this work period were approved',
@@ -128,6 +130,14 @@ function createApproveSinglePunchHandler({ pool, audit, canAccessEmployee }) {
           });
         }
       }
+
+      const affectedApprovals=await requireReopenForFinalized({
+        db:client,
+        user:req.user,
+        employeeId:request.employee_id,
+        timestamps:[punchAt],
+        canAccessEmployee,
+      });
 
       const placed = await insertPunchIntoSequence({
         client,
@@ -138,17 +148,7 @@ function createApproveSinglePunchHandler({ pool, audit, canAccessEmployee }) {
         ignoreRequestId: requestId,
       });
 
-      const invalidated = await client.query(
-        `UPDATE pay_period_approvals
-            SET supervisor_approved_at=NULL,supervisor_employee_id=NULL,
-                payroll_finalized_at=NULL,payroll_finalized_by=NULL,
-                status=CASE WHEN employee_signed_at IS NULL THEN 'open' ELSE 'employee_submitted' END
-          WHERE employee_id=$1
-            AND $2::timestamp >= pay_period_start
-            AND $2::timestamp < (pay_period_end + INTERVAL '1 day')
-          RETURNING id`,
-        [request.employee_id, punchAt],
-      );
+      const invalidated=await invalidateApprovals(client,affectedApprovals);
 
       const reviewed = await client.query(
         `UPDATE time_change_requests
@@ -164,7 +164,7 @@ function createApproveSinglePunchHandler({ pool, audit, canAccessEmployee }) {
         punch_at: punchAt,
         inferred_punch_type: placed.inferred_punch_type,
         self_approved: Number(req.user.id) === Number(request.employee_id),
-        invalidated_approval_ids: invalidated.rows.map((row) => row.id),
+        invalidated_approval_ids: invalidated.map((row) => row.id),
       });
       return res.json({
         message: `Punch approved and placed as ${placed.inferred_punch_type === 'clock_out' ? 'clock out' : 'clock in'}`,
