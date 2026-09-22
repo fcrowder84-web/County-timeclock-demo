@@ -6,6 +6,10 @@ const { summarizeTimecard } = require('../lib/timecard-summary');
 const { insertPunchIntoSequence } = require('../lib/punch-sequence');
 const { createApproveSinglePunchHandler } = require('../lib/approve-single-punch');
 const { userHasPermission } = require('../lib/permissions');
+const {
+  requireReopenForFinalized,
+  invalidateApprovals,
+} = require('../lib/payroll-approval-lock');
 
 function validDate(value) {
   if (!value) return null;
@@ -657,6 +661,14 @@ function createEmployeeRouter({ requireUser, requireAnyPermission, pool, audit, 
           }
         }
 
+        const affectedApprovals=await requireReopenForFinalized({
+          db:client,
+          user:req.user,
+          employeeId,
+          timestamps:[punchAt,legacyClockIn,legacyClockOut],
+          canAccessEmployee,
+        });
+
         if (!punchAt) {
           const parsedIn = validDate(legacyClockIn);
           const parsedOut = legacyClockOut ? validDate(legacyClockOut) : null;
@@ -674,8 +686,13 @@ function createEmployeeRouter({ requireUser, requireAnyPermission, pool, audit, 
              RETURNING *`,
             [employeeId, legacyClockIn, legacyClockOut, reason],
           );
+          const invalidated=await invalidateApprovals(client,affectedApprovals);
           await client.query('COMMIT');
-          await audit(req.user.id, 'add_time_entry_legacy', 'time_entry', result.rows[0].id, { employee_id: employeeId, reason });
+          await audit(req.user.id, 'add_time_entry_legacy', 'time_entry', result.rows[0].id, {
+            employee_id: employeeId,
+            reason,
+            invalidated_approval_ids:invalidated.map(row=>row.id),
+          });
           return res.json({ message: 'Time entry added', entry: result.rows[0] });
         }
 
@@ -686,25 +703,13 @@ function createEmployeeRouter({ requireUser, requireAnyPermission, pool, audit, 
           actorEmployeeId: req.user.id,
           reason,
         });
-        const invalidated = await client.query(
-          `UPDATE pay_period_approvals
-              SET supervisor_approved_at=NULL,
-                  supervisor_employee_id=NULL,
-                  payroll_finalized_at=NULL,
-                  payroll_finalized_by=NULL,
-                  status=CASE WHEN employee_signed_at IS NULL THEN 'open' ELSE 'employee_submitted' END
-            WHERE employee_id=$1
-              AND $2::timestamp >= pay_period_start
-              AND $2::timestamp < (pay_period_end + INTERVAL '1 day')
-            RETURNING id`,
-          [employeeId, punchAt],
-        );
+        const invalidated=await invalidateApprovals(client,affectedApprovals);
         await client.query('COMMIT');
         await audit(req.user.id, 'add_single_punch', 'employee', employeeId, {
           punch_at: punchAt,
           inferred_punch_type: placed.inferred_punch_type,
           reason,
-          invalidated_approval_ids: invalidated.rows.map((row) => row.id),
+          invalidated_approval_ids: invalidated.map((row) => row.id),
         });
         return res.json({
           message: `Punch added as ${placed.inferred_punch_type === 'clock_out' ? 'clock out' : 'clock in'}`,
