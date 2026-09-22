@@ -102,6 +102,7 @@ function createAuthRouter({
       });
       return res.json({token});
     }catch(err){
+      if(err?.statusCode===503) return res.status(503).json({error:err.message});
       return res.status(401).json({error:'Trusted phone sign-in is invalid'});
     }
   });
@@ -190,8 +191,16 @@ function createAuthRouter({
       return res.json({message:'Employee Portal login successful',token,device_credential:deviceCredential,user,permissions,app_admin_scope:synced.appAdminScope,auth_source:'portal'});
     }catch(err){
       console.error('Portal login error',err);
-      const status=err.name==='TokenExpiredError'||/token|signature|issuer|audience|algorithm/i.test(err.message)?401:500;
-      return res.status(status).json({error:status===401?'Employee Portal login link is invalid or expired':'Employee Portal login failed'});
+      const status=err?.statusCode===503
+        ? 503
+        : (err.name==='TokenExpiredError'||/token|signature|issuer|audience|algorithm/i.test(err.message)?401:500);
+      return res.status(status).json({
+        error:status===401
+          ? 'Employee Portal login link is invalid or expired'
+          : status===503
+            ? err.message
+            : 'Employee Portal login failed'
+      });
     }
   });
 
