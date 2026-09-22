@@ -25,6 +25,7 @@ const { createTeamStructureRouter } = require("./routes/team-structure");
 const { createLeaveRouter } = require("./routes/leave");
 const { createLunchRouter } = require("./routes/lunch");
 const { fetchPortalAuthorization } = require("./lib/portal-authorization");
+const { canManageTeamStructureScope } = require("./lib/team-scope");
 
 const app = express();
 app.use(express.json({ limit: "1mb" }));
@@ -177,23 +178,7 @@ async function isDepartmentHead(user,departmentId=null){
 }
 async function isAssignedEmployee(user,employeeId){const result=await pool.query(`SELECT 1 FROM supervisor_employee_assignments sea WHERE sea.employee_id=$1 AND sea.supervisor_employee_id=$2 AND sea.active=TRUE LIMIT 1`,[employeeId,user.id]);return result.rows.length>0;}
 async function canManageTeamStructure(user,departmentId=null){
-  const role=String(user?.role||'').toLowerCase();
-  const canManage=
-    userHasPermission(user,'manage_supervisor_assignments')
-    || userHasPermission(user,'manage_employee_lunch_settings');
-  if(!canManage) return false;
-
-  if(userHasPermission(user,'app_admin')){
-    if(user.app_admin_scope==='all') return true;
-    if(departmentId==null) return Number(user.department_id)>0;
-    return Number(user.department_id)>0&&Number(user.department_id)===Number(departmentId);
-  }
-  if(role==='timeclock_manager'||role==='payroll') return true;
-  if(await isDepartmentHead(user,departmentId)) return true;
-
-  // Department structure changes are reserved for management roles. A custom
-  // permission does not widen Employee or Supervisor scope to the department.
-  return false;
+  return canManageTeamStructureScope(user,departmentId);
 }
 // Supervisor/dept-head scope is explicit. Permission grants no longer create
 // hidden structural assignments as a side effect of portal synchronization.
