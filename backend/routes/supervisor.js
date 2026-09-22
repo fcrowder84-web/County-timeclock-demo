@@ -3,6 +3,10 @@
 const express = require('express');
 const { canEditPunch } = require('../lib/punch-edit-authority');
 const { summarizeTimecard } = require('../lib/timecard-summary');
+const {
+  requireReopenForFinalized,
+  invalidateApprovals,
+} = require('../lib/payroll-approval-lock');
 
 function parsePositiveInt(value, label) {
   const parsed = Number(value);
@@ -270,6 +274,19 @@ function createSupervisorRouter({
           }
         }
 
+        const affectedApprovals=await requireReopenForFinalized({
+          db:client,
+          user:req.user,
+          employeeId:request.employee_id,
+          timestamps:[
+            existing?.clock_in,
+            existing?.clock_out,
+            newClockIn,
+            newClockOut,
+          ],
+          canAccessEmployee,
+        });
+
         let updatedEntry;
         if (existing) {
           await client.query(
@@ -347,23 +364,7 @@ function createSupervisorRouter({
           );
         }
 
-        const oldClockInForPeriod = existing?.clock_in ?? newClockIn;
-        const invalidated = await client.query(
-          `UPDATE pay_period_approvals
-              SET supervisor_approved_at=NULL,
-                  supervisor_employee_id=NULL,
-                  payroll_finalized_at=NULL,
-                  payroll_finalized_by=NULL,
-                  status=CASE WHEN employee_signed_at IS NULL THEN 'open' ELSE 'employee_submitted' END
-            WHERE employee_id=$1
-              AND (
-                ($2::timestamp >= pay_period_start AND $2::timestamp < (pay_period_end + INTERVAL '1 day'))
-                OR
-                ($3::timestamp >= pay_period_start AND $3::timestamp < (pay_period_end + INTERVAL '1 day'))
-              )
-            RETURNING id`,
-          [request.employee_id, oldClockInForPeriod, newClockIn],
-        );
+        const invalidated=await invalidateApprovals(client,affectedApprovals);
 
         const reviewed = await client.query(
           `UPDATE time_change_requests
@@ -379,7 +380,7 @@ function createSupervisorRouter({
           employee_id: request.employee_id,
           time_entry_id: updatedEntry.rows[0].id,
           created_new_entry: !existing,
-          invalidated_approval_ids: invalidated.rows.map((row) => row.id),
+          invalidated_approval_ids: invalidated.map((row) => row.id),
         });
         return res.json({
           message: existing ? 'Request approved' : 'Missing time request approved and punch created',
@@ -919,7 +920,7 @@ function createSupervisorRouter({
           payrollOverride ? 'payroll_edit_time_entry' : 'supervisor_edit_time_entry',
           'time_entry',
           timeEntryId,
-          { reason, invalidated_approval_ids: invalidated.rows.map((row) => row.id), reopened_finalized_card_ids: finalized.map(card => card.id) },
+          { reason, invalidated_approval_ids: invalidated.map((row) => row.id), reopened_finalized_card_ids: finalized.map(card => card.id) },
         );
         return res.json({ message: 'Time entry updated', entry: result.rows[0] });
       } catch (err) {
