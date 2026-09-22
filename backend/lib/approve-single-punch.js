@@ -8,12 +8,23 @@ function permissionSet(user) {
 
 async function canReviewEmployee(pool, user, employeeId) {
   const permissions = permissionSet(user);
+
+  // App Admin is the master TimeClock permission.
+  // Countywide scope may review any employee; department scope remains local.
+  if (permissions.has('app_admin') && user.app_admin_scope === 'all') {
+    return true;
+  }
+
   const targetResult = await pool.query(
     `SELECT department_id FROM employees WHERE id=$1 LIMIT 1`,
     [employeeId],
   );
   if (!targetResult.rows.length) return false;
   const targetDepartmentId = targetResult.rows[0].department_id;
+
+  if (permissions.has('app_admin')) {
+    return Number(user?.department_id) === Number(targetDepartmentId);
+  }
 
   const departmentHeadResult = await pool.query(
     `SELECT 1 FROM department_heads
