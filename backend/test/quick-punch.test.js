@@ -32,7 +32,15 @@ function compact(sql) { return String(sql).replace(/\s+/g, ' ').trim(); }
     if (text.startsWith('SELECT id,clock_in,') && text.includes('requires_correction')) {
       return { rows: [{ id: 1, clock_in: '2026-08-20T17:44:27Z', requires_correction: false }] };
     }
-    if (text.startsWith('SELECT clock_in,clock_out FROM time_entries')) return { rows: [{ clock_in: '2026-08-20T17:42:00Z', clock_out: '2026-08-20T17:42:09Z' }] };
+    if (text.includes('AS remaining_seconds') && text.includes('AS cooldown_until')) {
+      return { rows: [{
+        clock_in: '2026-08-20T17:42:00Z',
+        clock_out: '2026-08-20T17:42:09Z',
+        last_punch_at: '2026-08-20T17:42:09Z',
+        remaining_seconds: 0,
+        cooldown_until: '2026-08-20T17:47:09Z',
+      }] };
+    }
     if (text.startsWith('SELECT * FROM time_entries') && text.includes('FOR UPDATE')) return { rows: [{ id: 9, employee_id: 7, clock_in: '2026-08-20T17:44:27Z', clock_out: null, status: 'open' }] };
     if (text.includes('FROM pay_period_approvals')) return { rows: [] };
     if (text.startsWith('UPDATE time_entries SET deleted_at=NOW()')) return { rows: [{ id: 9 }] };
@@ -62,6 +70,9 @@ function compact(sql) { return String(sql).replace(/\s+/g, ' ').trim(); }
   assert.strictEqual(res.body.timecard_locked, false);
   assert.strictEqual(res.body.last_punch_type, 'clock_out');
   assert.strictEqual(res.body.last_punch_at, '2026-08-20T17:42:09Z');
+  assert.strictEqual(res.body.punch_cooldown_active, false);
+  assert.strictEqual(res.body.punch_cooldown_seconds, 300);
+  assert.strictEqual(res.body.punch_cooldown_seconds_remaining, 0);
 
   res = makeRes();
   await handlerFor(router, 'post', '/delete-punch')({ user: { id: 7, permissions: ['void_own_unapproved_punch'] }, body: { time_entry_id: 9, reason: 'Accidental punch' } }, res);
@@ -98,7 +109,13 @@ function compact(sql) { return String(sql).replace(/\s+/g, ' ').trim(); }
         return { rows: [{ id: 12, status: 'employee_submitted', employee_signed_at: '2026-08-21T09:00:00-04:00', supervisor_approved_at: null, payroll_finalized_at: null }] };
       }
       if (text.startsWith('SELECT id,clock_in,') && text.includes('requires_correction')) return { rows: [] };
-      if (text.startsWith('SELECT clock_in,clock_out FROM time_entries')) return { rows: [{ clock_in: '2026-08-21T08:00:00-04:00', clock_out: '2026-08-21T08:30:00-04:00' }] };
+      if (text.includes('AS remaining_seconds') && text.includes('AS cooldown_until')) return { rows: [{
+        clock_in: '2026-08-21T08:00:00-04:00',
+        clock_out: '2026-08-21T08:30:00-04:00',
+        last_punch_at: '2026-08-21T08:30:00-04:00',
+        remaining_seconds: 0,
+        cooldown_until: '2026-08-21T08:35:00-04:00',
+      }] };
       throw new Error(`unexpected locked query: ${text}`);
     },
     connect: async () => { throw new Error('connect not expected'); },
@@ -141,12 +158,55 @@ function compact(sql) { return String(sql).replace(/\s+/g, ' ').trim(); }
   assert.strictEqual(res.body.code, 'STALE_OPEN_PUNCH');
   assert.strictEqual(res.body.time_entry_id, 77);
 
+  const cooldownQueries = [];
+  const cooldownPool = {
+    query: async (sql) => {
+      const text = compact(sql);
+      cooldownQueries.push(text);
+      if (text.includes('FROM pay_period_approvals')) return { rows: [] };
+      if (text.startsWith('SELECT id,clock_in,') && text.includes('requires_correction')) {
+        return { rows: [{ id: 88, clock_in: '2026-09-22T12:00:00Z', requires_correction: false }] };
+      }
+      if (text.includes('AS remaining_seconds') && text.includes('AS cooldown_until')) {
+        return { rows: [{
+          clock_in: '2026-09-22T12:00:00Z',
+          clock_out: null,
+          last_punch_at: '2026-09-22T12:00:00Z',
+          remaining_seconds: 287,
+          cooldown_until: '2026-09-22T12:05:00Z',
+        }] };
+      }
+      if (text.startsWith('UPDATE time_entries SET clock_out=NOW()')) {
+        throw new Error('cooldown must block clock-out update');
+      }
+      throw new Error(`unexpected cooldown query: ${text}`);
+    },
+    connect: async () => { throw new Error('connect not expected'); },
+  };
+  const cooldownRouter = createQuickPunchRouter({ requireUser: noop, requireAnyPermission: allow, pool: cooldownPool, audit: async () => {} });
+
+  res = makeRes();
+  await handlerFor(cooldownRouter, 'get', '/quick-status')({ user: { id: 7 } }, res);
+  assert.strictEqual(res.statusCode, 200);
+  assert.strictEqual(res.body.punch_cooldown_active, true);
+  assert.strictEqual(res.body.punch_cooldown_seconds_remaining, 287);
+  assert.strictEqual(res.body.punch_cooldown_seconds, 300);
+
+  res = makeRes();
+  await handlerFor(cooldownRouter, 'post', '/clock-out')({ user: { id: 7, first_name: 'Pat' } }, res);
+  assert.strictEqual(res.statusCode, 409);
+  assert.strictEqual(res.body.code, 'PUNCH_COOLDOWN');
+  assert.strictEqual(res.body.cooldown_seconds_remaining, 287);
+  assert.match(res.body.error, /wait/i);
+  assert(!cooldownQueries.some((text) => text.startsWith('UPDATE time_entries SET clock_out=NOW()')));
+
   const duplicateError = Object.assign(new Error('duplicate open punch'), { code: '23505' });
   const racePool = {
     query: async (sql) => {
       const text = compact(sql);
       if (text.includes('FROM pay_period_approvals')) return { rows: [] };
       if (text.startsWith('SELECT id,clock_in,') && text.includes('requires_correction')) return { rows: [] };
+      if (text.includes('AS remaining_seconds') && text.includes('AS cooldown_until')) return { rows: [] };
       if (text.startsWith('INSERT INTO time_entries(employee_id,clock_in,status)')) throw duplicateError;
       throw new Error(`unexpected race query: ${text}`);
     },
