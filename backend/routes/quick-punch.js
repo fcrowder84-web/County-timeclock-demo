@@ -116,7 +116,7 @@ function createQuickPunchRouter({ requireUser, requireAnyPermission, pool, audit
 
   router.get('/quick-status', requireUser, canPunch, async (req, res) => {
     try {
-      const [openResult, lastResult, lock] = await Promise.all([
+      const [openResult, cooldown, lock] = await Promise.all([
         pool.query(
           `SELECT id,clock_in,
                   (clock_in::date < CURRENT_DATE OR clock_in <= NOW() - INTERVAL '23 hours') AS requires_correction
@@ -129,20 +129,11 @@ function createQuickPunchRouter({ requireUser, requireAnyPermission, pool, audit
             LIMIT 1`,
           [req.user.id],
         ),
-        pool.query(
-          `SELECT clock_in,clock_out
-             FROM time_entries
-            WHERE employee_id=$1
-              AND deleted_at IS NULL
-            ORDER BY GREATEST(clock_in,COALESCE(clock_out,clock_in)) DESC
-            LIMIT 1`,
-          [req.user.id],
-        ),
+        punchCooldown(req.user.id),
         currentTimecardLock(req.user.id),
       ]);
 
       const openEntry = openResult.rows[0] || null;
-      const latest = lastResult.rows[0] || null;
       const clockedIn = Boolean(openEntry);
 
       return res.json({
@@ -154,8 +145,12 @@ function createQuickPunchRouter({ requireUser, requireAnyPermission, pool, audit
         timecard_locked: lock.locked,
         timecard_status: lock.approval?.status || null,
         employee_signed_at: lock.approval?.employee_signed_at || null,
-        last_punch_type: latest ? (latest.clock_out ? 'clock_out' : 'clock_in') : null,
-        last_punch_at: latest ? (latest.clock_out || latest.clock_in) : null,
+        last_punch_type: cooldown.last_punch_type,
+        last_punch_at: cooldown.last_punch_at,
+        punch_cooldown_active: cooldown.active,
+        punch_cooldown_seconds: PUNCH_COOLDOWN_SECONDS,
+        punch_cooldown_seconds_remaining: cooldown.remaining_seconds,
+        punch_cooldown_until: cooldown.cooldown_until,
       });
     } catch (err) {
       console.error(err);
@@ -337,6 +332,9 @@ function createQuickPunchRouter({ requireUser, requireAnyPermission, pool, audit
         return res.status(400).json({ error: 'You are already clocked in' });
       }
 
+      const cooldown=await punchCooldown(req.user.id);
+      if(cooldown.active) return cooldownResponse(res,cooldown);
+
       const result = await pool.query(
         `INSERT INTO time_entries(employee_id,clock_in,status) VALUES($1,NOW(),'open') RETURNING *`,
         [req.user.id],
@@ -383,6 +381,9 @@ function createQuickPunchRouter({ requireUser, requireAnyPermission, pool, audit
         });
       }
 
+      const cooldown=await punchCooldown(req.user.id);
+      if(cooldown.active) return cooldownResponse(res,cooldown);
+
       const result = await pool.query(
         `UPDATE time_entries SET clock_out=NOW(),status='closed'
           WHERE id=$1 AND employee_id=$2 AND deleted_at IS NULL AND clock_out IS NULL RETURNING *`,
@@ -401,4 +402,4 @@ function createQuickPunchRouter({ requireUser, requireAnyPermission, pool, audit
   return router;
 }
 
-module.exports = { createQuickPunchRouter };
+module.exports = { createQuickPunchRouter, PUNCH_COOLDOWN_SECONDS };
