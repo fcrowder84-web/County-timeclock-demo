@@ -5,9 +5,58 @@ const { canEditPunch, hasPayrollOverride } = require('../lib/punch-edit-authorit
 const { recordPunchMetadata } = require('../lib/punch-metadata');
 const { userHasPermission } = require('../lib/permissions');
 
+const PUNCH_COOLDOWN_SECONDS = 5 * 60;
+
 function createQuickPunchRouter({ requireUser, requireAnyPermission, pool, audit }) {
   const router = express.Router();
   const canPunch = requireAnyPermission('clock_in_out');
+
+  async function punchCooldown(employeeId, db = pool) {
+    const result = await db.query(
+      `SELECT clock_in,clock_out,
+              GREATEST(clock_in,COALESCE(clock_out,clock_in)) AS last_punch_at,
+              GREATEST(
+                0,
+                CEIL(EXTRACT(EPOCH FROM (
+                  GREATEST(clock_in,COALESCE(clock_out,clock_in))
+                  + ($2::int * INTERVAL '1 second')
+                  - NOW()
+                )))
+              )::int AS remaining_seconds,
+              GREATEST(clock_in,COALESCE(clock_out,clock_in))
+                + ($2::int * INTERVAL '1 second') AS cooldown_until
+         FROM time_entries
+        WHERE employee_id=$1
+          AND deleted_at IS NULL
+        ORDER BY GREATEST(clock_in,COALESCE(clock_out,clock_in)) DESC
+        LIMIT 1`,
+      [employeeId,PUNCH_COOLDOWN_SECONDS],
+    );
+    const latest=result.rows[0]||null;
+    const remaining=Number(latest?.remaining_seconds||0);
+    return {
+      active:remaining>0,
+      remaining_seconds:remaining,
+      cooldown_until:latest?.cooldown_until||null,
+      last_punch_at:latest?.last_punch_at||null,
+      last_punch_type:latest ? (latest.clock_out ? 'clock_out' : 'clock_in') : null,
+    };
+  }
+
+  function cooldownResponse(res,cooldown) {
+    const seconds=Math.max(1,Number(cooldown?.remaining_seconds||0));
+    const minutes=Math.floor(seconds/60);
+    const remainder=seconds%60;
+    const waitText=minutes>0
+      ? minutes+' minute'+(minutes===1?'':'s')+(remainder?' '+remainder+' seconds':'')
+      : remainder+' seconds';
+    return res.status(409).json({
+      error:'Please wait '+waitText+' before punching again.',
+      code:'PUNCH_COOLDOWN',
+      cooldown_seconds_remaining:seconds,
+      cooldown_until:cooldown?.cooldown_until||null,
+    });
+  }
 
   async function currentTimecardLock(employeeId, db = pool) {
     const result = await db.query(
