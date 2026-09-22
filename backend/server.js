@@ -191,8 +191,8 @@ async function canManageTeamStructure(user,departmentId=null){
   if(role==='timeclock_manager'||role==='payroll') return true;
   if(await isDepartmentHead(user,departmentId)) return true;
 
-  // A custom supervisor-management grant is limited to the user's department.
-  if(departmentId&&Number(user.department_id)===Number(departmentId)) return true;
+  // Department structure changes are reserved for management roles. A custom
+  // permission does not widen Employee or Supervisor scope to the department.
   return false;
 }
 // Supervisor/dept-head scope is explicit. Permission grants no longer create
