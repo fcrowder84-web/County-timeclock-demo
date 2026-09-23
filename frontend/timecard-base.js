@@ -1,7 +1,7 @@
 "use strict";
 const apiBase="/api";
 const qs=new URLSearchParams(location.search);
-let currentUser=null,currentPermissions=new Set(),periods=[],employees=[],selectedPeriodStart=qs.get("periodStart")||null,selectedEmployeeId=Number(qs.get("employeeId")||0)||null,currentData=null,currentMode="employee",activeEntry=null,entryModalMode=null;
+let currentUser=null,currentPermissions=new Set(),periods=[],employees=[],selectedPeriodStart=qs.get("periodStart")||null,selectedEmployeeId=Number(qs.get("employeeId")||0)||null,currentData=null,currentMode="employee",activeEntry=null,entryModalMode=null,activeLeave=null,leaveModalMode="add";
 
 const punchSvg='<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M12 7v5l3 2"/></svg>';
 const leaveSvg='<svg viewBox="0 0 24 24"><rect x="4" y="6" width="16" height="14" rx="1"/><path d="M8 4v4M16 4v4M4 10h16"/><path d="M9 14h6"/></svg>';
@@ -113,10 +113,26 @@ function punchCells(day,entries){
   });
   const cells=[];for(let i=0;i<4;i++){let items=[];if(i<3)items=punches[i]?[punches[i]]:[];else items=punches.slice(3);cells.push(`<td>${items.map(p=>`<span class="punch ${p.cls}" data-entry-id="${Number(p.entry.id)}" data-kind="${p.kind}">${esc(p.label)}</span>`).join(" ")}</td>`)}return cells.join("")
 }
+function leaveMatchesColumn(entry,type){
+  return type==="other"
+    ? !["holiday","vacation","sick","floating_holiday"].includes(entry.leave_type)
+    : entry.leave_type===type
+}
 function leaveCell(day,type){
-  const approved=approvedLeaveHours(day,type),pending=pendingLeaveHours(day,type);if(!approved&&!pending)return"<td></td>";const title=pending?` title="${pending.toFixed(2)} pending"`:"";return `<td class="${pending?"pending-cell":""}"${title}>${approved?approved.toFixed(2):""}${pending?`${approved?" + ":""}${pending.toFixed(2)} P`:""}</td>`
+  const items=(currentData.leave_entries||[]).filter(l=>dateOnly(l.leave_date_iso||l.leave_date)===day&&["pending","approved"].includes(l.status)&&leaveMatchesColumn(l,type));
+  if(!items.length)return"<td></td>";
+  const pending=items.some(l=>l.status==="pending");
+  const canManage=has("add_employee_leave")&&has("void_employee_leave")&&currentData.can_edit_entries!==false&&(!selectedIsSelf()||selfApprovalRoleAllowed());
+  const content=items.map(l=>{
+    const label=`${num(l.hours).toFixed(2)}${l.status==="pending"?" P":""}`;
+    if(canManage&&l.status==="approved"){
+      return `<button type="button" class="leave-entry-action" data-leave-id="${Number(l.id)}" title="Edit or void this leave entry" style="border:0;background:transparent;padding:0;color:inherit;text-decoration:underline;cursor:pointer;font:inherit">${label}</button>`;
+    }
+    return label;
+  }).join(" + ");
+  return `<td class="${pending?"pending-cell":""}">${content}</td>`
 }
 function otherTotal(map){return Object.entries(map||{}).filter(([k])=>!["holiday","vacation","sick","floating_holiday"].includes(k)).reduce((a,[,v])=>a+num(v),0)}
 function totalRow(label,summary,klass){
-  const m=summary?.leave_hours_by_type||{};return `<tr class="${klass}"><td class="left" colspan="5">${esc(label)}</td><td>${fmt(summary?.regular_worked_hours)}</td><td>${fmt(summary?.overtime_hours)}</td><td>${fmt(m.holiday)}</td><td>${fmt(m.vacation)}</td><td>${fmt(m.sick)}</td><td>${fmt(m.floating_holiday)}</td><td>${fmt(otherTotal(m))}</td><td>${fmt(summary?.total_paid_hours)}</td></tr>`
+  const m=summary?.leave_hours_by_type||{};return `<tr class="${klass}"><td class="left" colspan="5">${esc(label)}</td><td>${fmt(num(summary?.regular_worked_hours)+num(summary?.forced_lunch_hours))}</td><td>${num(summary?.forced_lunch_hours)>0?"-"+fmt(summary.forced_lunch_hours):""}</td><td>${fmt(summary?.overtime_hours)}</td><td>${fmt(m.holiday)}</td><td>${fmt(m.vacation)}</td><td>${fmt(m.sick)}</td><td>${fmt(m.floating_holiday)}</td><td>${fmt(otherTotal(m))}</td><td>${fmt(summary?.total_paid_hours)}</td></tr>`
 }

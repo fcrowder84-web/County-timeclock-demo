@@ -184,6 +184,7 @@
             }
         }
     </style>
+<link rel="stylesheet" href="/app-shell.css?v=20260923-1">
 </head>
 
 <body>
@@ -284,6 +285,15 @@
             return `${Math.floor(minutes / 60)}h ${String(minutes % 60).padStart(2, "0")}m`;
         }
 
+        function rulePunchMs(value) {
+            const ms = value ? new Date(value).getTime() : NaN;
+            if (!Number.isFinite(ms)) return null;
+            const d = new Date(ms);
+            const elapsed = (((d.getMinutes() % 15) * 60 + d.getSeconds()) * 1000) + d.getMilliseconds();
+            const start = ms - elapsed;
+            return elapsed < 8 * 60 * 1000 ? start : start + 15 * 60 * 1000;
+        }
+
         function roundedDailyHours(entries, dateField) {
             const days = {};
             entries.forEach(entry => {
@@ -298,12 +308,19 @@
                     waived: false
                 };
                 const item = days[day];
-                item.minutes += durationMinutes(entry.hours_worked);
+                // Totals use ruled punch endpoints; raw duration remains display/audit only.
                 const inMs = entry.clock_in_raw ? new Date(entry.clock_in_raw).getTime() : NaN;
                 const outMs = entry.clock_out_raw ? new Date(entry.clock_out_raw).getTime() : NaN;
                 if (Number.isFinite(inMs)) item.firstIn = item.firstIn == null ? inMs : Math.min(item.firstIn, inMs);
                 if (Number.isFinite(outMs)) item.lastOut = item.lastOut == null ? outMs : Math.max(item.lastOut, outMs);
-                if (Number.isFinite(inMs) && Number.isFinite(outMs) && outMs >= inMs) item.intervals.push({ inMs, outMs });
+                if (Number.isFinite(inMs) && Number.isFinite(outMs) && outMs >= inMs) {
+                    const ruledInMs = rulePunchMs(inMs);
+                    const ruledOutMs = rulePunchMs(outMs);
+                    if (ruledInMs != null && ruledOutMs != null && ruledOutMs >= ruledInMs) {
+                        item.minutes += Math.round((ruledOutMs - ruledInMs) / 60000);
+                        item.intervals.push({ inMs, outMs, ruledInMs, ruledOutMs });
+                    }
+                }
                 item.forcedEnabled = entry.forced_lunch_enabled === true || String(entry.forced_lunch_enabled) === "true";
                 item.lunchMinutes = Math.max(item.lunchMinutes, Number(entry.forced_lunch_minutes || 0));
                 item.waived = item.waived || entry.lunch_waived === true || String(entry.lunch_waived) === "true";
@@ -315,10 +332,10 @@
                 let existingBreakMinutes = 0;
                 let previousOutMs = null;
                 intervals.forEach(interval => {
-                    if (previousOutMs != null && interval.inMs > previousOutMs) {
-                        existingBreakMinutes += Math.round((interval.inMs - previousOutMs) / 60000);
+                    if (previousOutMs != null && interval.ruledInMs > previousOutMs) {
+                        existingBreakMinutes += Math.round((interval.ruledInMs - previousOutMs) / 60000);
                     }
-                    previousOutMs = previousOutMs == null ? interval.outMs : Math.max(previousOutMs, interval.outMs);
+                    previousOutMs = previousOutMs == null ? interval.ruledOutMs : Math.max(previousOutMs, interval.ruledOutMs);
                 });
                 const deductionMinutes = item.forcedEnabled && !item.waived
                     ? Math.min(grossMinutes, Math.max(0, item.lunchMinutes - existingBreakMinutes))
@@ -370,8 +387,8 @@
                     <tr class="${dayClass}">
                         <td>${entry.work_date || ""}</td>
                         <td>${entry.clock_in || ""}</td>
-                        <td>${entry.clock_out || ""}</td>
-                        <td>${formatExactDuration(hours)}</td>
+                        <td>${entry.clock_out || "OPEN"}</td>
+                        <td>${entry.clock_out_raw ? formatExactDuration(hours) : "OPEN"}</td>
                     </tr>
                 `;
             });
@@ -558,6 +575,7 @@
         loadTimecards();
     </script>
 
+<script src="/app-shell.js?v=20260923-1"></script>
 </body>
 
 </html>

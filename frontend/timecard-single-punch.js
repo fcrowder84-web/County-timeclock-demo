@@ -74,12 +74,18 @@
     for(let i=0;i<4;i++){
       const items=i<3?(events[i]?[events[i]]:[]):events.slice(3);
       cells.push(`<td>${items.map(p=>p.pending
-        ? `<span class="punch missing pending-request" title="Punch request received and pending supervisor approval">${esc(p.label)}</span>`
+        ? `<span class="punch missing pending-request pending-request-action" data-request-id="${Number(p.request.id)}" title="Click to withdraw this pending punch request">${esc(p.label)}</span>`
         : `<span class="punch ${p.cls||""}" data-entry-id="${Number(p.entry.id)}" data-kind="${p.kind}">${esc(p.label)}</span>`
       ).join(" ")}</td>`);
     }
     return cells.join("");
   };
+
+  document.addEventListener("click",event=>{
+    const target=event.target.closest(".pending-request-action");
+    if(!target||!selectedIsSelf()||currentMode!=="employee"||!has("withdraw_own_pending_request"))return;
+    withdrawPendingItem("change",Number(target.dataset.requestId));
+  });
 
   const originalReviewChange=reviewChange;
   reviewChange=async function(id,status){
@@ -181,6 +187,6 @@
   },true);
 
   const style=document.createElement("style");
-  style.textContent='.pending-request{color:#a61f1f!important;background:#fff0f0!important;border-color:#e1abab!important;font-weight:bold}.pending-request::after{content:""}';
+  style.textContent='.pending-request{color:#a61f1f!important;background:#fff0f0!important;border-color:#e1abab!important;font-weight:bold}.pending-request::after{content:""}.pending-request-action{cursor:pointer}';
   document.head.appendChild(style);
 })();

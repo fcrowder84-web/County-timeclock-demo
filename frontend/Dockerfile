@@ -15,6 +15,8 @@ COPY logs.html /usr/share/nginx/html/logs.html
 COPY timecard-summary-ui.js /usr/share/nginx/html/timecard-summary-ui.js
 COPY timecard.html /usr/share/nginx/html/timecard.html
 COPY timecard.css /usr/share/nginx/html/timecard.css
+COPY app-shell.css /usr/share/nginx/html/app-shell.css
+COPY app-shell.js /usr/share/nginx/html/app-shell.js
 COPY timecard-base.js /usr/share/nginx/html/timecard-base.js
 COPY timecard-actions.js /usr/share/nginx/html/timecard-actions.js
 COPY timecard-single-punch.js /usr/share/nginx/html/timecard-single-punch.js

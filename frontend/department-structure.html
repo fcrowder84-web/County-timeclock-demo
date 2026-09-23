@@ -13,6 +13,7 @@ button,a.btn{padding:9px 14px;border:0;border-radius:6px;cursor:pointer;text-dec
 select{width:100%;padding:10px;margin:6px 0 10px;box-sizing:border-box;font-size:15px}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px}.supervisor-card{border:1px solid #d5dbe3;border-radius:10px;padding:14px;background:#fafbfc}
 .muted{color:#667085}.notice{display:none;padding:12px;border-radius:6px;margin-bottom:20px}.notice.show{display:block}.error{background:#f8d7da;color:#721c24}.success{background:#d4edda;color:#155724}ul{padding-left:20px}.row-action{margin-left:8px;padding:4px 8px}.restricted{max-width:700px;margin:80px auto;text-align:center}.lunch-settings{margin-top:18px;border-top:1px solid #d5dbe3;padding-top:14px}.lunch-row{display:grid;grid-template-columns:minmax(180px,1fr) auto 110px 170px auto;gap:10px;align-items:center;padding:8px 0;border-bottom:1px solid #eef1f4}.lunch-row input[type="number"],.lunch-row input[type="date"]{width:100%;padding:8px;box-sizing:border-box}.lunch-row label{display:flex;align-items:center;gap:6px}@media(max-width:700px){.lunch-row{grid-template-columns:1fr 1fr}.lunch-row .employee-name{grid-column:1/-1}}
 </style>
+<link rel="stylesheet" href="/app-shell.css?v=20260923-1">
 </head>
 <body>
 <div class="topbar">
@@ -91,5 +92,6 @@ async function assignEmployee(departmentId){const employeeId=document.getElement
 async function unassignEmployee(employeeId,departmentId){if(!confirm("Remove this employee from their assigned supervisor?"))return;try{const data=await jsonOrError(await apiFetch(`${apiBase}/supervisor/team-structure/unassign`,{method:"POST",body:JSON.stringify({employee_id:employeeId,department_id:departmentId})}));showMessage(data.message||"Employee unassigned");await loadStructure()}catch(err){showMessage(err.message,true)}}
 init();
 </script>
+<script src="/app-shell.js?v=20260923-1"></script>
 </body>
 </html>

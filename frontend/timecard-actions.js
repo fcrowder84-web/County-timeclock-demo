@@ -65,7 +65,7 @@ async function withdrawPendingItem(type,id){
 function renderTimecard(){
   const data=currentData,employee=data.employee||currentUser,entries=data.entries||[],start=dateOnly(data.pay_period_start||selectedPeriodStart),summary=data.timecard_summary||{weeks:[],period:{},days:[]};
   const summaryDays=new Map((summary.days||[]).map(item=>[dateOnly(item.work_date),item]));
-  const days=Array.from({length:14},(_,i)=>{const date=addDays(start,i),dayEntries=entries.filter(e=>dateOnly(e.entry_date_iso||e.clock_in)===date),daySummary=summaryDays.get(date);return{date,entries:dayEntries,worked:daySummary?num(daySummary.total_worked_hours):dailyWorked(dayEntries)}}),allocated=allocateDailyWork(days);
+  const days=Array.from({length:14},(_,i)=>{const date=addDays(start,i),dayEntries=entries.filter(e=>dateOnly(e.entry_date_iso||e.clock_in)===date),daySummary=summaryDays.get(date);return{date,entries:dayEntries,worked:daySummary?num(daySummary.total_worked_hours):dailyWorked(dayEntries),forcedLunch:daySummary?num(daySummary.forced_lunch_deduction_hours):0}}),allocated=allocateDailyWork(days);
   const today=new Date().toLocaleDateString("en-CA",{timeZone:"America/New_York"});
   let html="";
   days.forEach((d,i)=>{
@@ -78,12 +78,12 @@ function renderTimecard(){
     const punchEnabled=employeePunchRequestEnabled||supervisorPunchEnabled;
     const punchTitle=employeePunchRequestEnabled?"Request missing time for this date":supervisorPunchEnabled?"Add punch entry":"Punch request not available for this date";
     const leaveEnabled=(employeeCanModify&&ownTimecard&&has("request_leave"))||(!ownTimecard&&currentMode==="supervisor"&&has("add_employee_leave"));
-    html+=`<tr class="${leavePresent?"leave-day":""}"><td class="left"><div class="datecell"><button class="icon-button day-punch" data-date="${d.date}" ${punchEnabled?"":"disabled"} title="${punchTitle}">${punchSvg}</button><button class="icon-button leave day-leave" data-date="${d.date}" ${leaveEnabled?"":"disabled"} title="Add leave">${leaveSvg}</button><span class="date-label"><strong>${esc(dayName(d.date))}</strong> ${esc(localDateLabel(d.date))}${lunchStatusHtml(d.date)}</span></div></td>${punchCells(d.date,d.entries)}<td>${fmt(work.regular)}</td><td>${fmt(work.ot)}</td>${leaveCell(d.date,"holiday")}${leaveCell(d.date,"vacation")}${leaveCell(d.date,"sick")}${leaveCell(d.date,"floating_holiday")}${leaveCell(d.date,"other")}<td><strong>${fmt(dailyTotal)}</strong></td></tr>`;
+    html+=`<tr class="${leavePresent?"leave-day":""}"><td class="left"><div class="datecell"><button class="icon-button day-punch" data-date="${d.date}" ${punchEnabled?"":"disabled"} title="${punchTitle}">${punchSvg}</button><button class="icon-button leave day-leave" data-date="${d.date}" ${leaveEnabled?"":"disabled"} title="Add leave">${leaveSvg}</button><span class="date-label"><strong>${esc(dayName(d.date))}</strong> ${esc(localDateLabel(d.date))}${lunchStatusHtml(d.date)}</span></div></td>${punchCells(d.date,d.entries)}<td>${fmt(work.regular+d.forcedLunch)}</td><td>${d.forcedLunch>0?"-"+fmt(d.forcedLunch):""}</td><td>${fmt(work.ot)}</td>${leaveCell(d.date,"holiday")}${leaveCell(d.date,"vacation")}${leaveCell(d.date,"sick")}${leaveCell(d.date,"floating_holiday")}${leaveCell(d.date,"other")}<td><strong>${fmt(dailyTotal)}</strong></td></tr>`;
     if(i===6)html+=totalRow("Week 1 Total",summary.weeks?.[0],"week-total");
     if(i===13)html+=totalRow("Week 2 Total",summary.weeks?.[1],"week-total");
   });
   html+=totalRow("Pay Period Total",summary.period,"period-total");document.getElementById("timeRows").innerHTML=html;
-  document.getElementById("employeeNumber").textContent=employee.employee_number||"—";document.getElementById("departmentName").textContent=employee.department_name||employee.department||"—";document.getElementById("timecardStatus").textContent=statusLabel(data.approval);document.getElementById("workedRule").textContent=`${fmt(summary.period?.total_worked_hours)||"0.00"} worked${num(summary.period?.forced_lunch_hours)>0?` after ${fmt(summary.period.forced_lunch_hours)} forced lunch`:``} / OT after ${fmt(summary.overtime_threshold_hours)||"40.00"} worked hrs/week`;document.getElementById("periodLabel").textContent=`${localDateLabel(data.pay_period_start)} – ${localDateLabel(data.pay_period_end)}`;document.getElementById("modeLabel").textContent=selectedIsSelf()?"Viewing your own timecard":currentMode==="supervisor"?`Viewing as ${payrollView()?"Payroll / Admin":"Supervisor"}`:"Viewing your own timecard";
+  document.getElementById("employeeNumber").textContent=employee.employee_number||"—";document.getElementById("departmentName").textContent=employee.department_name||employee.department||"—";document.getElementById("timecardStatus").textContent=statusLabel(data.approval);document.getElementById("workedRule").textContent=`${fmt(summary.period?.total_worked_hours)||"0.00"} worked / OT after ${fmt(summary.overtime_threshold_hours)||"40.00"} worked hrs/week`;document.getElementById("periodLabel").textContent=`${localDateLabel(data.pay_period_start)} – ${localDateLabel(data.pay_period_end)}`;document.getElementById("modeLabel").textContent=selectedIsSelf()?"Viewing your own timecard":currentMode==="supervisor"?`Viewing as ${payrollView()?"Payroll / Admin":"Supervisor"}`:"Viewing your own timecard";
   renderSignatures();renderDenied();renderPending();bindRowActions();syncNavButtons();
 }
 function statusLabel(a){if(!a)return"In Progress";return({open:"In Progress",employee_submitted:"Employee Submitted",returned_to_employee:"Returned to Employee",supervisor_approved:"Supervisor Approved",payroll_finalized:"Payroll Finalized"})[a.status]||String(a.status||"In Progress").replaceAll("_"," ")}
@@ -187,6 +187,7 @@ function bindRowActions(){
   document.querySelectorAll(".punch").forEach(el=>el.addEventListener("click",ev=>openPunchMenu(ev,Number(el.dataset.entryId),el.dataset.kind)));
   document.querySelectorAll(".day-punch:not(:disabled)").forEach(b=>b.addEventListener("click",()=>openAddEntry(b.dataset.date)));
   document.querySelectorAll(".day-leave:not(:disabled)").forEach(b=>b.addEventListener("click",()=>openLeave(b.dataset.date)));
+  document.querySelectorAll(".leave-entry-action").forEach(b=>b.addEventListener("click",()=>openEditLeave(b.dataset.leaveId)));
   document.querySelectorAll(".lunch-request").forEach(b=>b.addEventListener("click",()=>requestLunchWaiver(b.dataset.date)));
   document.querySelectorAll(".lunch-waive").forEach(b=>b.addEventListener("click",()=>waiveForcedLunch(b.dataset.date)));
   document.querySelectorAll(".lunch-withdraw").forEach(b=>b.addEventListener("click",()=>withdrawPendingItem("lunch",b.dataset.id)));
@@ -261,13 +262,93 @@ document.getElementById("entrySubmitBtn").addEventListener("click",async()=>{
   }catch(err){showEntryModalMessage(err.message||"Unable to save punch request",true)}
 });
 async function deleteEntry(entry){
-  const reason=prompt("Reason for voiding this punch entry:");if(!reason)return;try{await jsonOrError(await apiFetch(`${apiBase}/delete-punch`,{method:"POST",body:JSON.stringify({time_entry_id:entry.id,reason})}));showMessage("Punch voided. Original record remains in the audit trail.");await loadTimecard()}catch(err){showMessage(err.message,"error")}
+  const kind=entry?.clickedKind==="out"?"out":"in";
+  const label=kind==="out"?"clock-out":"clock-in";
+  const reason=prompt(`Reason for voiding this ${label} punch:`);
+  if(!reason)return;
+  try{
+    const data=await jsonOrError(await apiFetch(`${apiBase}/delete-punch`,{method:"POST",body:JSON.stringify({time_entry_id:entry.id,punch_kind:kind,reason})}));
+    showMessage(data.message||"Punch voided. Original record remains in the audit trail.");
+    await loadTimecard();
+  }catch(err){showMessage(err.message,"error")}
 }
-function openLeave(day){document.getElementById("leaveDate").value=day;document.getElementById("leaveType").value="vacation";document.getElementById("leaveHours").value="8";document.getElementById("leaveNote").value="";modal("leaveModal",true)}
-document.getElementById("leaveSubmitBtn").addEventListener("click",()=>submitLeave(false));
-async function submitLeave(override){
-  const date=document.getElementById("leaveDate").value,type=document.getElementById("leaveType").value,hours=Number(document.getElementById("leaveHours").value),note=document.getElementById("leaveNote").value.trim();const body={employee_id:selectedEmployeeId,start_date:date,end_date:date,leave_type:type,hours,note};if(override){body.override_daily_hours=true;body.override_reason=prompt("Reason for exceeding the normal daily paid-hours warning:")||""}
-  try{await jsonOrError(await apiFetch(`${apiBase}/leave`,{method:"POST",body:JSON.stringify(body)}));modal("leaveModal",false);showMessage(selectedIsSelf()&&currentMode==="employee"?"Leave submitted for approval":"Leave added");await loadTimecard()}catch(err){if(err.status===409&&err.data?.requires_confirmation&&!override){if(confirm(`${err.message}\n\nSubmit anyway for supervisor review?`))return submitLeave(true)}showMessage(err.message,"error")}
+function openLeave(day){
+  leaveModalMode="add";activeLeave=null;
+  document.getElementById("leaveModalTitle").textContent="Add Leave";
+  document.getElementById("leaveDate").value=day;
+  document.getElementById("leaveType").value="vacation";
+  document.getElementById("leaveHours").value="8";
+  document.getElementById("leaveNote").value="";
+  document.getElementById("leaveSubmitBtn").textContent="Submit Leave";
+  document.getElementById("leaveVoidBtn").classList.add("hidden");
+  modal("leaveModal",true)
+}
+function openEditLeave(id){
+  const entry=(currentData.leave_entries||[]).find(l=>Number(l.id)===Number(id));
+  if(!entry||entry.status!=="approved"){showMessage("Only approved leave can be edited directly.","warning");return}
+  leaveModalMode="edit";activeLeave=entry;
+  document.getElementById("leaveModalTitle").textContent="Edit Leave";
+  document.getElementById("leaveDate").value=dateOnly(entry.leave_date_iso||entry.leave_date);
+  document.getElementById("leaveType").value=entry.leave_type;
+  document.getElementById("leaveHours").value=Number(entry.hours||0);
+  document.getElementById("leaveNote").value=entry.note||"";
+  document.getElementById("leaveSubmitBtn").textContent="Save Changes";
+  document.getElementById("leaveVoidBtn").classList.remove("hidden");
+  modal("leaveModal",true)
+}
+document.getElementById("leaveSubmitBtn").addEventListener("click",()=>submitLeave(false,null));
+document.getElementById("leaveVoidBtn").addEventListener("click",()=>voidActiveLeave());
+async function submitLeave(override,existingReason){
+  const date=document.getElementById("leaveDate").value,type=document.getElementById("leaveType").value,hours=Number(document.getElementById("leaveHours").value),note=document.getElementById("leaveNote").value.trim();
+  if(leaveModalMode==="edit"){
+    if(!activeLeave)return;
+    let reason=existingReason;
+    if(!reason){
+      const entered=prompt("Reason for editing this leave entry:");
+      if(entered===null)return;
+      reason=entered.trim();
+      if(!reason){showMessage("A reason is required when editing leave.","error");return}
+    }
+    const body={leave_date:date,leave_type:type,hours,note,reason};
+    if(override){body.override_daily_hours=true;body.override_reason=prompt("Reason for exceeding the normal daily paid-hours warning:")||""}
+    try{
+      await jsonOrError(await apiFetch(`${apiBase}/leave/${Number(activeLeave.id)}`,{method:"PATCH",body:JSON.stringify(body)}));
+      modal("leaveModal",false);showMessage("Leave entry updated. Audit history preserved.");await loadTimecard()
+    }catch(err){
+      if(err.status===409&&err.data?.requires_confirmation&&!override){
+        if(confirm(`${err.message}\n\nSave this management correction anyway?`))return submitLeave(true,reason)
+      }
+      showMessage(err.message,"error")
+    }
+    return;
+  }
+  const body={employee_id:selectedEmployeeId,start_date:date,end_date:date,leave_type:type,hours,note};
+  if(override){body.override_daily_hours=true;body.override_reason=prompt("Reason for exceeding the normal daily paid-hours warning:")||""}
+  try{
+    await jsonOrError(await apiFetch(`${apiBase}/leave`,{method:"POST",body:JSON.stringify(body)}));
+    modal("leaveModal",false);
+    showMessage(selectedIsSelf()&&currentMode==="employee"?"Leave submitted for approval":"Leave added");
+    await loadTimecard()
+  }catch(err){
+    if(err.status===409&&err.data?.requires_confirmation&&!override){
+      if(confirm(`${err.message}\n\nSubmit anyway for supervisor review?`))return submitLeave(true,null)
+    }
+    showMessage(err.message,"error")
+  }
+}
+async function voidActiveLeave(){
+  if(!activeLeave)return;
+  const entered=prompt("Reason for voiding this leave entry:");
+  if(entered===null)return;
+  const reason=entered.trim();
+  if(!reason){showMessage("A reason is required when voiding leave.","error");return}
+  if(!confirm("Void this leave entry? The original record will remain in the audit history."))return;
+  try{
+    await jsonOrError(await apiFetch(`${apiBase}/leave/${Number(activeLeave.id)}`,{method:"DELETE",body:JSON.stringify({reason})}));
+    modal("leaveModal",false);
+    showMessage("Leave entry voided. Original record remains in the audit history.");
+    await loadTimecard()
+  }catch(err){showMessage(err.message,"error")}
 }
 async function reviewLeave(id,status){const note=status==="denied"?(prompt("Reason for denying leave:")||""):"";try{await jsonOrError(await apiFetch(`${apiBase}/leave/${id}/review`,{method:"POST",body:JSON.stringify({status,review_note:note})}));showMessage(`Leave ${status}`);await loadTimecard()}catch(err){showMessage(err.message,"error")}}
 async function reviewChange(id,status){
@@ -347,7 +428,7 @@ document.getElementById("quickPunchBtn").addEventListener("click",async()=>{
     if(!currentData)btn.textContent=prior
   }
 });
-document.getElementById("logoutBtn").addEventListener("click",()=>location.href="/global-logout.html");
+document.getElementById("logoutBtn")?.addEventListener("click",()=>location.href="/global-logout.html");
 init().then(()=>{
   const params=new URLSearchParams(location.search);
   if(params.get("addEntry")==="1"&&currentMode==="supervisor"&&!selectedIsSelf()&&currentData?.can_edit_entries===true&&canAddEntries()){

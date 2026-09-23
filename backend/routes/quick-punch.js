@@ -187,8 +187,10 @@ function createQuickPunchRouter({ requireUser, requireAnyPermission, pool, audit
   router.post('/delete-punch', requireUser, async (req, res) => {
     const entryId = Number(req.body?.time_entry_id);
     const reason = String(req.body?.reason || '').trim();
+    const punchKind = String(req.body?.punch_kind || 'entry').trim().toLowerCase();
 
     if (!Number.isInteger(entryId) || entryId <= 0) return res.status(400).json({ error: 'Valid time entry is required' });
+    if (!['in', 'out', 'entry'].includes(punchKind)) return res.status(400).json({ error: 'Valid punch kind is required' });
     if (reason.length < 3) return res.status(400).json({ error: 'Void reason is required' });
     if (reason.length > 500) return res.status(400).json({ error: 'Void reason must be 500 characters or less' });
 
@@ -233,8 +235,9 @@ function createQuickPunchRouter({ requireUser, requireAnyPermission, pool, audit
 
       if (Number(req.user.id) !== Number(entry.employee_id)) {
         const payroll = hasPayrollOverride(req.user);
-        const supervisorStage = approval?.status === 'employee_submitted'
-          && approval.employee_signed_at && !approval.supervisor_approved_at && !approval.payroll_finalized_at;
+        const supervisorStage = !approval?.supervisor_approved_at
+          && !approval?.payroll_finalized_at
+          && (!approval || ['open', 'returned_to_employee', 'employee_submitted'].includes(approval.status));
         if ((!payroll && !supervisorStage)
             || (payroll && approval?.payroll_finalized_at && !userHasPermission(req.user,'reopen_timecard'))) {
           await client.query('ROLLBACK');
@@ -242,13 +245,37 @@ function createQuickPunchRouter({ requireUser, requireAnyPermission, pool, audit
         }
       }
 
-      const deleted = await client.query(
-        `UPDATE time_entries
-            SET deleted_at=NOW(),deleted_by_employee_id=$2,deletion_reason=$3
-          WHERE id=$1 AND deleted_at IS NULL RETURNING id`,
-        [entry.id, req.user.id, reason],
-      );
-      if (!deleted.rows.length) {
+      let punchMutation;
+      let softDelete = false;
+
+      if (punchKind === 'out') {
+        if (!entry.clock_out) {
+          await client.query('ROLLBACK');
+          return res.status(409).json({ error: 'This entry does not have a clock-out punch to void.' });
+        }
+        punchMutation = await client.query(
+          `UPDATE time_entries
+              SET clock_out=NULL,status='open'
+            WHERE id=$1 AND deleted_at IS NULL AND clock_out IS NOT NULL RETURNING id`,
+          [entry.id],
+        );
+      } else {
+        if (punchKind === 'in' && entry.clock_out) {
+          await client.query('ROLLBACK');
+          return res.status(409).json({
+            error: 'Void the clock-out punch first. A clock-in cannot be removed while its clock-out remains.',
+          });
+        }
+        softDelete = true;
+        punchMutation = await client.query(
+          `UPDATE time_entries
+              SET deleted_at=NOW(),deleted_by_employee_id=$2,deletion_reason=$3
+            WHERE id=$1 AND deleted_at IS NULL RETURNING id`,
+          [entry.id, req.user.id, reason],
+        );
+      }
+
+      if (!punchMutation.rows.length) {
         await client.query('ROLLBACK');
         return res.status(409).json({ error: 'Punch was already voided or could not be voided' });
       }
@@ -281,15 +308,20 @@ function createQuickPunchRouter({ requireUser, requireAnyPermission, pool, audit
         original_clock_out: entry.clock_out,
         original_status: entry.status,
         reason,
+        punch_kind: punchKind,
         approval_reopened: Boolean(approval),
         previous_approval_status: approval?.status || null,
         cancelled_change_request_ids: cancelledRequests.rows.map((row) => row.id),
-        soft_delete: true,
+        soft_delete: softDelete,
       };
 
       await client.query('COMMIT');
       await audit(req.user.id, 'void_time_entry', 'time_entry', entry.id, auditDetails);
-      return res.json({ message: 'Punch voided. The original record remains in the audit trail.' });
+      return res.json({
+        message: punchKind === 'out'
+          ? 'Clock-out punch voided. The clock-in remains open and the original clock-out remains in the audit trail.'
+          : 'Punch voided. The original record remains in the audit trail.',
+      });
     } catch (err) {
       if (client) await client.query('ROLLBACK').catch(() => {});
       console.error(err);

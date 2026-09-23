@@ -36,6 +36,15 @@ function durationMinutes(hours) {
   return Math.max(0, Math.round(number(hours) * 60));
 }
 
+function rulePunchMs(value) {
+  const ms = timestampMs(value);
+  if (ms == null) return null;
+  const d = new Date(ms);
+  const elapsed = (((d.getMinutes() % 15) * 60 + d.getSeconds()) * 1000) + d.getMilliseconds();
+  const start = ms - elapsed;
+  return elapsed < 8 * 60 * 1000 ? start : start + 15 * 60 * 1000;
+}
+
 function roundDailyMinutes(minutes) {
   const safe = Math.max(0, Math.round(number(minutes)));
   const completedQuarters = Math.floor(safe / 15) * 15;
@@ -81,6 +90,7 @@ function summarizeTimecard({
   forcedLunchMinutes = 0,
   forcedLunchSettings = null,
   lunchWaivers = [],
+  asOf = new Date(),
 }) {
   const start = dateOnly(payPeriodStart);
   if (!start) throw new Error('payPeriodStart is required');
@@ -131,15 +141,23 @@ function summarizeTimecard({
       hasWork: false,
       intervals: [],
     };
-    state.grossMinutes += durationMinutes(entry.hours_worked);
     state.hasWork = true;
 
     const inMs = timestampMs(entry.clock_in);
-    const outMs = timestampMs(entry.clock_out || entry.pending_clock_out);
+    const actualOutMs = timestampMs(entry.clock_out || entry.pending_clock_out);
+    const calculationOutMs = inMs != null && actualOutMs == null ? timestampMs(asOf) : actualOutMs;
     if (inMs != null) state.firstInMs = state.firstInMs == null ? inMs : Math.min(state.firstInMs, inMs);
-    if (outMs != null) state.lastOutMs = state.lastOutMs == null ? outMs : Math.max(state.lastOutMs, outMs);
-    if (inMs != null && outMs != null && outMs >= inMs) {
-      state.intervals.push({ inMs, outMs });
+    if (actualOutMs != null) state.lastOutMs = state.lastOutMs == null ? actualOutMs : Math.max(state.lastOutMs, actualOutMs);
+
+    if (inMs != null && calculationOutMs != null && calculationOutMs >= inMs) {
+      const ruledInMs = rulePunchMs(inMs);
+      const ruledOutMs = rulePunchMs(calculationOutMs);
+      if (ruledInMs != null && ruledOutMs != null && ruledOutMs >= ruledInMs) {
+        state.grossMinutes += Math.round((ruledOutMs - ruledInMs) / 60000);
+        state.intervals.push({ inMs, outMs: calculationOutMs, ruledInMs, ruledOutMs });
+      }
+    } else {
+      state.grossMinutes += durationMinutes(entry.hours_worked);
     }
     daily.set(day, state);
   }
@@ -151,15 +169,15 @@ function summarizeTimecard({
     const configuredLunchMinutes = configuredLunchMinutesForDay(day);
     const intervals = [...state.intervals].sort((a, b) => a.inMs - b.inMs);
     let existingBreakMinutes = 0;
-    let previousOutMs = null;
+    let previousRuledOutMs = null;
 
     for (const interval of intervals) {
-      if (previousOutMs != null && interval.inMs > previousOutMs) {
-        existingBreakMinutes += Math.round((interval.inMs - previousOutMs) / 60000);
+      if (previousRuledOutMs != null && interval.ruledInMs > previousRuledOutMs) {
+        existingBreakMinutes += Math.round((interval.ruledInMs - previousRuledOutMs) / 60000);
       }
-      previousOutMs = previousOutMs == null
-        ? interval.outMs
-        : Math.max(previousOutMs, interval.outMs);
+      previousRuledOutMs = previousRuledOutMs == null
+        ? interval.ruledOutMs
+        : Math.max(previousRuledOutMs, interval.ruledOutMs);
     }
     const waiver = waiverMap.get(day) || null;
     const waived = Boolean(waiver);

@@ -258,6 +258,7 @@
             }
         }
     </style>
+<link rel="stylesheet" href="/app-shell.css?v=20260923-1">
 </head>
 
 <body>
@@ -778,6 +779,15 @@
             return `${Math.floor(minutes / 60)}h ${String(minutes % 60).padStart(2, "0")}m`;
         }
 
+        function rulePunchMs(value) {
+            const ms = value ? new Date(value).getTime() : NaN;
+            if (!Number.isFinite(ms)) return null;
+            const d = new Date(ms);
+            const elapsed = (((d.getMinutes() % 15) * 60 + d.getSeconds()) * 1000) + d.getMilliseconds();
+            const start = ms - elapsed;
+            return elapsed < 8 * 60 * 1000 ? start : start + 15 * 60 * 1000;
+        }
+
         function roundDailyMinutes(minutes) {
             const completedQuarters = Math.floor(minutes / 15) * 15;
             return completedQuarters + (minutes % 15 > 5 ? 15 : 0);
@@ -1044,15 +1054,24 @@
                     intervals: [],
                     forcedEnabled: false,
                     lunchMinutes: 0,
-                    waived: false
+                    waived: false,
+                    hasOpen: false
                 };
                 const group = dailyGroups[key];
-                group.minutes += durationMinutes(row.hours_worked);
+                // Payroll totals are derived from independently ruled punch endpoints, never raw elapsed duration.
                 const inMs = row.clock_in_raw ? new Date(row.clock_in_raw).getTime() : NaN;
                 const outMs = row.clock_out_raw ? new Date(row.clock_out_raw).getTime() : NaN;
+                if (Number.isFinite(inMs) && !Number.isFinite(outMs)) group.hasOpen = true;
                 if (Number.isFinite(inMs)) group.firstIn = group.firstIn == null ? inMs : Math.min(group.firstIn, inMs);
                 if (Number.isFinite(outMs)) group.lastOut = group.lastOut == null ? outMs : Math.max(group.lastOut, outMs);
-                if (Number.isFinite(inMs) && Number.isFinite(outMs) && outMs >= inMs) group.intervals.push({ inMs, outMs });
+                if (Number.isFinite(inMs) && Number.isFinite(outMs) && outMs >= inMs) {
+                    const ruledInMs = rulePunchMs(inMs);
+                    const ruledOutMs = rulePunchMs(outMs);
+                    if (ruledInMs != null && ruledOutMs != null && ruledOutMs >= ruledInMs) {
+                        group.minutes += Math.round((ruledOutMs - ruledInMs) / 60000);
+                        group.intervals.push({ inMs, outMs, ruledInMs, ruledOutMs });
+                    }
+                }
                 group.forcedEnabled = row.forced_lunch_enabled === true || String(row.forced_lunch_enabled) === "true";
                 group.lunchMinutes = Math.max(group.lunchMinutes, Number(row.forced_lunch_minutes || 0));
                 group.waived = group.waived || row.lunch_waived === true || String(row.lunch_waived) === "true";
@@ -1065,16 +1084,20 @@
                 let existingBreakMinutes = 0;
                 let previousOutMs = null;
                 intervals.forEach(interval => {
-                    if (previousOutMs != null && interval.inMs > previousOutMs) {
-                        existingBreakMinutes += Math.round((interval.inMs - previousOutMs) / 60000);
+                    if (previousOutMs != null && interval.ruledInMs > previousOutMs) {
+                        existingBreakMinutes += Math.round((interval.ruledInMs - previousOutMs) / 60000);
                     }
-                    previousOutMs = previousOutMs == null ? interval.outMs : Math.max(previousOutMs, interval.outMs);
+                    previousOutMs = previousOutMs == null ? interval.ruledOutMs : Math.max(previousOutMs, interval.ruledOutMs);
                 });
                 const deductionMinutes = group.forcedEnabled && !group.waived
                     ? Math.min(grossMinutes, Math.max(0, group.lunchMinutes - existingBreakMinutes))
                     : 0;
-                creditedHoursByFirstRow[group.firstIndex] = ((grossMinutes - deductionMinutes) / 60).toFixed(2);
-                lunchDeductionByFirstRow[group.firstIndex] = deductionMinutes ? (deductionMinutes / 60).toFixed(2) : "";
+                creditedHoursByFirstRow[group.firstIndex] = group.hasOpen
+                    ? "OPEN"
+                    : ((grossMinutes - deductionMinutes) / 60).toFixed(2);
+                lunchDeductionByFirstRow[group.firstIndex] = group.hasOpen
+                    ? "OPEN"
+                    : (deductionMinutes ? (deductionMinutes / 60).toFixed(2) : "");
             });
 
             rows.forEach((row, index) => {
@@ -1085,8 +1108,8 @@
                     csvValue(row.department),
                     csvValue(row.work_date),
                     csvValue(row.clock_in),
-                    csvValue(row.clock_out),
-                    csvValue(formatExactDuration(row.hours_worked)),
+                    csvValue(row.clock_out || "OPEN"),
+                    csvValue(row.clock_out_raw ? formatExactDuration(row.hours_worked) : "OPEN"),
                     csvValue(lunchDeductionByFirstRow[index] || ""),
                     csvValue(creditedHoursByFirstRow[index] || ""),
                     csvValue(row.timecard_status)
@@ -1134,6 +1157,7 @@
         checkExistingLogin();
     </script>
 
+<script src="/app-shell.js?v=20260923-1"></script>
 </body>
 
 </html>

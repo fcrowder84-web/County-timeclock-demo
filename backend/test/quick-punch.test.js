@@ -88,6 +88,38 @@ function compact(sql) { return String(sql).replace(/\s+/g, ' ').trim(); }
   assert(queries.some((item) => item.text === 'COMMIT'));
   assert(queries.some((item) => item.text.includes('FOR UPDATE')));
 
+  // Clicking a visible clock-out punch must clear only clock_out, not soft-delete the paired clock-in.
+  {
+    const outQueries = [];
+    const outAudits = [];
+    async function outQuery(sql, args) {
+      const text = compact(sql);
+      outQueries.push({ text, args });
+      if (text === 'BEGIN' || text === 'COMMIT' || text === 'ROLLBACK') return { rows: [] };
+      if (text.startsWith('SELECT * FROM time_entries') && text.includes('FOR UPDATE')) {
+        return { rows: [{ id: 19, employee_id: 7, clock_in: '2026-09-23T08:44:00-04:00', clock_out: '2026-09-23T11:45:00-04:00', status: 'closed' }] };
+      }
+      if (text.includes('FROM pay_period_approvals')) return { rows: [] };
+      if (text.startsWith('UPDATE time_entries SET clock_out=NULL')) return { rows: [{ id: 19 }] };
+      if (text.startsWith('UPDATE time_change_requests SET status=')) return { rows: [] };
+      throw new Error(`unexpected clock-out void query: ${text}`);
+    }
+    const outClient = { query: outQuery, release() {} };
+    const outPool = { query: outQuery, connect: async () => outClient };
+    const outRouter = createQuickPunchRouter({ requireUser: noop, requireAnyPermission: allow, pool: outPool, audit: async (...args) => outAudits.push(args) });
+    const outRes = makeRes();
+    await handlerFor(outRouter, 'post', '/delete-punch')({
+      user: { id: 7, permissions: ['void_own_unapproved_punch'] },
+      body: { time_entry_id: 19, punch_kind: 'out', reason: 'Wrong clock out' },
+    }, outRes);
+    assert.strictEqual(outRes.statusCode, 200);
+    assert.match(outRes.body.message, /clock-in remains open/i);
+    assert(outQueries.some((item) => item.text.startsWith('UPDATE time_entries SET clock_out=NULL')));
+    assert(!outQueries.some((item) => item.text.includes('SET deleted_at=NOW()')));
+    assert.strictEqual(outAudits[0][4].punch_kind, 'out');
+    assert.strictEqual(outAudits[0][4].soft_delete, false);
+  }
+
   res = makeRes();
   await handlerFor(router, 'post', '/clock-in')({ user: { id: 7, first_name: 'Pat' } }, res);
   assert.strictEqual(res.statusCode, 400);

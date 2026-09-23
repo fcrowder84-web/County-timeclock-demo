@@ -400,6 +400,184 @@ function createLeaveRouter({ requireUser, pool, audit, canAccessEmployee, getReq
     }
   });
 
+  router.patch('/leave/:id', requireUser, async (req, res) => {
+    const client=await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const existing=await client.query(
+        'SELECT * FROM leave_entries WHERE id=$1 FOR UPDATE',
+        [req.params.id],
+      );
+      if(!existing.rows.length){
+        await client.query('ROLLBACK');
+        return res.status(404).json({error:'Leave entry not found'});
+      }
+
+      const entry=existing.rows[0];
+      if(entry.status!=='approved'){
+        await client.query('ROLLBACK');
+        return res.status(409).json({error:'Only approved leave entries can be directly edited. Pending requests must be reviewed or voided.'});
+      }
+
+      await requireScopedCapability(req.user,entry.employee_id,'add_employee_leave');
+      requireCapability(req.user,'void_employee_leave','Void Employee Leave permission required');
+
+      const reason=String(req.body?.reason||'').trim();
+      if(!reason){
+        await client.query('ROLLBACK');
+        return res.status(400).json({error:'Reason is required when editing leave'});
+      }
+      if(reason.length>500){
+        await client.query('ROLLBACK');
+        return res.status(400).json({error:'Reason must be 500 characters or less'});
+      }
+
+      const type=String(req.body?.leave_type||'').toLowerCase();
+      if(!LEAVE_TYPES.includes(type)){
+        await client.query('ROLLBACK');
+        return res.status(400).json({error:'Select a valid leave type'});
+      }
+
+      const quarterHours=parseQuarterHours(req.body?.hours);
+      const dates=datesBetween(req.body?.leave_date,req.body?.leave_date,false);
+      const date=dates[0];
+      let note=String(req.body?.note||'').trim()||null;
+      const overrideConfirmed=req.body?.override_daily_hours===true;
+      const overrideReason=String(req.body?.override_reason||'').trim();
+      const supervisorReviewedHours=type==='holiday'||type==='floating_holiday';
+
+      if(type==='holiday'){
+        validateFixedHolidayDates([date]);
+        if(!note) note=findFixedHoliday(date)?.name||null;
+      }
+      if(type==='floating_holiday'){
+        validateFloatingHolidayRequest([date]);
+        const year=holidayYear(date);
+        const duplicate=await client.query(
+          `SELECT id
+             FROM leave_entries
+            WHERE employee_id=$1
+              AND leave_type='floating_holiday'
+              AND EXTRACT(YEAR FROM leave_date)=$2
+              AND id<>$3
+              AND status IN ('pending','approved')
+            LIMIT 1`,
+          [entry.employee_id,year,entry.id],
+        );
+        if(duplicate.rows.length){
+          await client.query('ROLLBACK');
+          return res.status(409).json({error:`This employee already has a pending or approved Floating Holiday for ${year}`});
+        }
+        if(!note) note='Annual Floating Holiday';
+      }
+
+      const originalDate=entry.leave_date instanceof Date
+        ? entry.leave_date.toISOString().slice(0,10)
+        : String(entry.leave_date).slice(0,10);
+
+      const totals=await client.query(
+        `SELECT
+           COALESCE(
+             FLOOR(SUM(EXTRACT(EPOCH FROM (COALESCE(clock_out,NOW()) - clock_in)) / 900))
+             + CASE
+                 WHEN MOD(ROUND(SUM(EXTRACT(EPOCH FROM (COALESCE(clock_out,NOW()) - clock_in)) / 60))::int,15)>5
+                 THEN 1 ELSE 0
+               END,
+             0
+           )::int AS worked_quarters,
+           COALESCE((
+             SELECT SUM(quarter_hours)
+               FROM leave_entries
+              WHERE employee_id=$1
+                AND leave_date=$2::date
+                AND id<>$3
+                AND status IN ('pending','approved')
+           ),0)::int AS leave_quarters
+         FROM time_entries
+        WHERE employee_id=$1
+          AND deleted_at IS NULL
+          AND clock_in >= $2::date
+          AND clock_in < ($2::date + INTERVAL '1 day')`,
+        [entry.employee_id,date,entry.id],
+      );
+
+      const check=assessDailyPaidHours({
+        workedQuarterHours:Number(totals.rows[0]?.worked_quarters||0),
+        existingLeaveQuarterHours:Number(totals.rows[0]?.leave_quarters||0),
+        proposedQuarterHours:quarterHours,
+      });
+      if(check.exceeds_standard_day&&!supervisorReviewedHours&&!overrideConfirmed){
+        await client.query('ROLLBACK');
+        return res.status(409).json({
+          error:'Worked time plus leave exceeds 8 hours on this day',
+          code:'DAILY_PAID_HOURS_WARNING',
+          requires_confirmation:true,
+          daily_checks:[{date,...check}],
+        });
+      }
+      if(check.exceeds_standard_day&&!supervisorReviewedHours&&!overrideReason){
+        await client.query('ROLLBACK');
+        return res.status(400).json({
+          error:'An override reason is required when total paid time exceeds 8 hours',
+          code:'OVERRIDE_REASON_REQUIRED',
+          daily_checks:[{date,...check}],
+        });
+      }
+
+      const invalidatedApprovalIds=await invalidateApprovalsForDates(
+        client,req.user,entry.employee_id,[originalDate,date],
+      );
+
+      const result=await client.query(
+        `UPDATE leave_entries
+            SET leave_date=$1::date,
+                leave_type=$2,
+                quarter_hours=$3,
+                note=$4,
+                status='approved',
+                reviewed_by_employee_id=$5,
+                reviewed_at=NOW(),
+                updated_at=NOW()
+          WHERE id=$6 AND status='approved'
+          RETURNING *,ROUND(quarter_hours / 4.0,2) AS hours`,
+        [date,type,quarterHours,note,req.user.id,entry.id],
+      );
+      if(!result.rows.length){
+        await client.query('ROLLBACK');
+        return res.status(409).json({error:'Leave entry changed while it was being edited'});
+      }
+
+      await client.query('COMMIT');
+      await audit(req.user.id,'edit_leave_entry','leave_entry',entry.id,{
+        employee_id:entry.employee_id,
+        reason,
+        old:{
+          leave_date:originalDate,
+          leave_type:entry.leave_type,
+          hours:Number(entry.quarter_hours||0)/4,
+          note:entry.note||null,
+          status:entry.status,
+        },
+        new:{
+          leave_date:date,
+          leave_type:type,
+          hours:quarterHours/4,
+          note,
+          status:'approved',
+        },
+        daily_hours_override:check.exceeds_standard_day,
+        override_reason:overrideReason||null,
+        invalidated_approval_ids:invalidatedApprovalIds,
+      });
+      return res.json({message:'Leave entry updated',leave_entry:result.rows[0]});
+    } catch(err) {
+      await client.query('ROLLBACK').catch(()=>{});
+      return res.status(err.statusCode||500).json({error:err.message||'Leave edit failed'});
+    } finally {
+      client.release();
+    }
+  });
+
   router.post('/leave/:id/review', requireUser, async (req, res) => {
     const client=await pool.connect();
     try {
@@ -510,6 +688,16 @@ function createLeaveRouter({ requireUser, pool, audit, canAccessEmployee, getReq
         auditAction='void_leave';
       }
 
+      const reason=String(req.body?.reason||'').trim()||null;
+      if(!ownEntry&&!reason){
+        await client.query('ROLLBACK');
+        return res.status(400).json({error:'Reason is required when voiding leave'});
+      }
+      if(reason&&reason.length>500){
+        await client.query('ROLLBACK');
+        return res.status(400).json({error:'Reason must be 500 characters or less'});
+      }
+
       let invalidatedApprovalIds=[];
       if(entry.status==='approved'){
         invalidatedApprovalIds=await invalidateApprovalsForDates(
@@ -517,7 +705,6 @@ function createLeaveRouter({ requireUser, pool, audit, canAccessEmployee, getReq
         );
       }
 
-      const reason=String(req.body?.reason||'').trim()||null;
       const result=await client.query(
         `UPDATE leave_entries
             SET status=$1,archived_at=NOW(),archived_by_employee_id=$2,

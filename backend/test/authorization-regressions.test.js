@@ -223,5 +223,14 @@ function compact(sql){return String(sql).replace(/\s+/g,' ').trim();}
     assert.strictEqual(released,true);
   }
 
+  // Leave management regression: approved leave has an audited edit route.
+  {
+    const fs=require('fs');
+    const leaveSource=fs.readFileSync(require.resolve('../routes/leave'),'utf8');
+    assert.match(leaveSource,/router\.patch\('\/leave\/:id'/);
+    assert.match(leaveSource,/edit_leave_entry/);
+    assert.match(leaveSource,/Reason is required when voiding leave/);
+  }
+
   console.log('authorization regression tests: PASS');
 })().catch(err=>{console.error(err);process.exitCode=1;});

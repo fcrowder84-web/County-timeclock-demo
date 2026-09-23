@@ -18,11 +18,12 @@ select{min-width:280px;max-width:100%;padding:9px;border:1px solid #aeb9c2;borde
 .action{font-weight:700;color:var(--blue)}.details{white-space:pre-wrap;font-family:Consolas,monospace;font-size:12px;max-width:500px}.empty{padding:24px;text-align:center;color:var(--muted)}
 @media(max-width:700px){.topbar{padding:14px 16px}.page{padding:18px 10px}select{min-width:220px}}
 </style>
+<link rel="stylesheet" href="/app-shell.css?v=20260923-1">
 </head>
 <body>
 <header class="topbar">
   <h1>TimeClock Activity Logs</h1>
-  <div class="actions"><a class="btn" href="/timecard.html">Timecard</a><a class="btn" href="/index.html">Home</a></div>
+
 </header>
 <main class="page">
   <div id="notice" class="notice"></div>
@@ -45,6 +46,7 @@ select{min-width:280px;max-width:100%;padding:9px;border:1px solid #aeb9c2;borde
     <div id="emptyState" class="empty" style="display:none">No activity logs found.</div>
   </section>
 </main>
+<script src="/app-shell.js?v=20260923-1"></script>
 <script src="/mobile-pairing.js?v=20260921-2"></script>
 <script>
 const apiBase='/api';
@@ -57,11 +59,10 @@ const esc=v=>String(v??'').replace(/[&<>"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'
 const actionLabel=value=>String(value||'activity').replaceAll('_',' ').replace(/\b\w/g,c=>c.toUpperCase());
 function showError(message){const n=document.getElementById('notice');n.textContent=message;n.className='notice error'}
 async function json(url){const r=await fetch(url,{headers:headers()});let d={};try{d=await r.json()}catch(_){d={}}if(!r.ok)throw new Error(d.error||`Request failed (${r.status})`);return d}
-function detailText(details){
-  if(!details)return '-';
-  const entries=Object.entries(details).filter(([,v])=>v!==null&&v!==undefined&&v!=='');
-  if(!entries.length)return '-';
-  return entries.map(([k,v])=>`${k.replaceAll('_',' ')}: ${typeof v==='object'?JSON.stringify(v):v}`).join('\n');
+function employeeNameById(value){const id=Number(value);if(!Number.isInteger(id))return null;const found=employees.find(e=>Number(e.id)===id);return found?found.first_name+' '+found.last_name:null}
+function detailText(details,currentEmployee){
+  if(!details)return '-';const entries=Object.entries(details).filter(([,v])=>v!==null&&v!==undefined&&v!=='');if(!entries.length)return '-';
+  return entries.map(([k,v])=>{const label=k.replaceAll('_',' ');if(k==='employee_id')return 'employee: '+(employeeNameById(v)||currentEmployee||v);if(k.endsWith('_employee_id'))return label.replace(/ employee id$/,'')+': '+(employeeNameById(v)||v);return label+': '+(typeof v==='object'?JSON.stringify(v):v)}).join('\n');
 }
 function renderPicker(selectedId){
   const picker=document.getElementById('employeePicker');
@@ -83,7 +84,7 @@ async function loadLog(employeeId){
       <td class="action">${esc(actionLabel(item.action))}</td>
       <td>${esc([item.actor_first_name,item.actor_last_name].filter(Boolean).join(' ')||'System')}</td>
       <td>${esc(`${employeeDisplay} — ${recordType}`)}</td>
-      <td class="details">${esc(detailText(item.details))}</td>
+      <td class="details">${esc(detailText(item.details,employeeDisplay))}</td>
     </tr>`;
   }).join('');
 }

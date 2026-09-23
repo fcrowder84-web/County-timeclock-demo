@@ -1,7 +1,13 @@
 'use strict';
 
 function uniqueTimestamps(values) {
-  return [...new Set((values || []).filter(Boolean).map(value => String(value)))];
+  return [...new Set((values || []).filter(Boolean).map(value => {
+    if (value instanceof Date) {
+      const pad=n=>String(n).padStart(2,'0');
+      return `${value.getFullYear()}-${pad(value.getMonth()+1)}-${pad(value.getDate())} ${pad(value.getHours())}:${pad(value.getMinutes())}:${pad(value.getSeconds())}`;
+    }
+    return String(value);
+  }))];
 }
 
 async function lockApprovalsForTimestamps(db, employeeId, timestamps) {

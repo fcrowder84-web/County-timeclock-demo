@@ -321,16 +321,16 @@ function createEmployeeRouter({ requireUser, requireAnyPermission, pool, audit, 
               (a.target_type='employee' AND a.target_id=$1::text)
               OR a.details->>'employee_id'=$1::text
               OR (a.target_type='time_entry' AND EXISTS (
-                SELECT 1 FROM time_entries te WHERE te.id::text=a.target_id AND te.employee_id=$1
+                SELECT 1 FROM time_entries te WHERE te.id::text=a.target_id AND te.employee_id=$1::int
               ))
               OR (a.target_type='time_change_request' AND EXISTS (
-                SELECT 1 FROM time_change_requests tcr WHERE tcr.id::text=a.target_id AND tcr.employee_id=$1
+                SELECT 1 FROM time_change_requests tcr WHERE tcr.id::text=a.target_id AND tcr.employee_id=$1::int
               ))
               OR (a.target_type='leave_entry' AND EXISTS (
-                SELECT 1 FROM leave_entries le WHERE le.id::text=a.target_id AND le.employee_id=$1
+                SELECT 1 FROM leave_entries le WHERE le.id::text=a.target_id AND le.employee_id=$1::int
               ))
               OR (a.target_type='forced_lunch_waiver_request' AND EXISTS (
-                SELECT 1 FROM forced_lunch_waiver_requests flr WHERE flr.id::text=a.target_id AND flr.employee_id=$1
+                SELECT 1 FROM forced_lunch_waiver_requests flr WHERE flr.id::text=a.target_id AND flr.employee_id=$1::int
               ))
               OR (
                 a.target_type='pay_period'
@@ -654,7 +654,7 @@ function createEmployeeRouter({ requireUser, requireAnyPermission, pool, audit, 
           return res.status(403).json({ error: 'Reopen permission is required for a finalized timecard.' });
         }
         if (!payrollOverride) {
-          const supervisorUnlocked = approval?.employee_signed_at && !approval?.supervisor_approved_at && !approval?.payroll_finalized_at && approval?.status === 'employee_submitted';
+          const supervisorUnlocked = !approval?.supervisor_approved_at && !approval?.payroll_finalized_at && (!approval || ['open', 'returned_to_employee', 'employee_submitted'].includes(approval.status));
           if (!supervisorUnlocked) {
             await client.query('ROLLBACK');
             return res.status(409).json({ error: 'This timecard is locked for supervisor editing. Return it to the correct stage before adding a punch.' });

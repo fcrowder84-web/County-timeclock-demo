@@ -259,3 +259,12 @@ function compact(sql) { return String(sql).replace(/\s+/g, ' ').trim(); }
   console.error(err.stack || err.message);
   process.exit(1);
 });
+
+// Regression: activity-log must cast employee IDs explicitly when the same
+// PostgreSQL parameter is also compared as text.
+{
+  const fs = require('fs');
+  const routeSource = fs.readFileSync(require.resolve('../routes/employee'), 'utf8');
+  const integerComparisons = routeSource.match(/employee_id=\$1::int/g) || [];
+  assert.ok(integerComparisons.length >= 4);
+}

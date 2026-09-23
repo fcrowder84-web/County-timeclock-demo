@@ -570,10 +570,9 @@ function createSupervisorRouter({
           userHasPermission(req.user, 'edit_payroll_time');
         const supervisorCanEdit =
           userHasPermission(req.user, 'edit_employee_time') &&
-          Boolean(approval?.employee_signed_at) &&
           !approval?.supervisor_approved_at &&
           !approval?.payroll_finalized_at &&
-          approval?.status === 'employee_submitted';
+          (!approval || ['open', 'returned_to_employee', 'employee_submitted'].includes(approval.status));
 
         return res.json({
           employee: employeeResult.rows[0],
@@ -861,10 +860,9 @@ function createSupervisorRouter({
 
         if (!payrollOverride) {
           const supervisorUnlocked =
-            approval?.employee_signed_at &&
             !approval?.supervisor_approved_at &&
             !approval?.payroll_finalized_at &&
-            approval?.status === 'employee_submitted';
+            (!approval || ['open', 'returned_to_employee', 'employee_submitted'].includes(approval.status));
           if (!supervisorUnlocked) {
             await client.query('ROLLBACK');
             return res.status(409).json({
