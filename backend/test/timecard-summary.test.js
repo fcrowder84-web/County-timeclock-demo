@@ -166,4 +166,44 @@ const changedLunchDuration = summarizeTimecard({
 assert.strictEqual(changedLunchDuration.days.find(day => day.work_date === '2026-10-04').forced_lunch_deduction_hours, 0.5);
 assert.strictEqual(changedLunchDuration.days.find(day => day.work_date === '2026-10-05').forced_lunch_deduction_hours, 1);
 
+
+// Regression: actual punches remain exact, but worked time is calculated
+// from each punch ruled independently using the county 7-minute rule.
+const ruledDavidPunch = summarizeTimecard({
+  payPeriodStart: '2026-09-21',
+  forcedLunchEnabled: true,
+  forcedLunchMinutes: 60,
+  entries: [
+    {
+      entry_date_iso: '2026-09-22',
+      clock_in: '2026-09-22T08:27:06-04:00',
+      clock_out: '2026-09-22T17:07:29-04:00',
+      hours_worked: 8.67,
+    },
+  ],
+});
+
+assert.strictEqual(ruledDavidPunch.days[0].gross_worked_hours, 8.5);
+assert.strictEqual(ruledDavidPunch.days[0].forced_lunch_deduction_hours, 1);
+assert.strictEqual(ruledDavidPunch.days[0].total_worked_hours, 7.5);
+
+// 7:55 and 5:02 both rule to the hour.
+const ruledBoundaryPunch = summarizeTimecard({
+  payPeriodStart: '2026-09-21',
+  forcedLunchEnabled: true,
+  forcedLunchMinutes: 60,
+  entries: [
+    {
+      entry_date_iso: '2026-09-23',
+      clock_in: '2026-09-23T07:55:00-04:00',
+      clock_out: '2026-09-23T17:02:00-04:00',
+      hours_worked: 9.12,
+    },
+  ],
+});
+
+assert.strictEqual(ruledBoundaryPunch.days[0].gross_worked_hours, 9);
+assert.strictEqual(ruledBoundaryPunch.days[0].forced_lunch_deduction_hours, 1);
+assert.strictEqual(ruledBoundaryPunch.days[0].total_worked_hours, 8);
+
 console.log("timecard summary tests passed");

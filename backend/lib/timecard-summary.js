@@ -42,6 +42,25 @@ function roundDailyMinutes(minutes) {
   return completedQuarters + (safe % 15 > 5 ? 15 : 0);
 }
 
+function rulePunchMs(value) {
+  const ms = timestampMs(value);
+  if (ms == null) return null;
+
+  const date = new Date(ms);
+  const secondsIntoQuarter =
+    ((date.getMinutes() % 15) * 60) +
+    date.getSeconds() +
+    (date.getMilliseconds() / 1000);
+
+  const quarterStartMs = ms - (secondsIntoQuarter * 1000);
+
+  // County 7-minute rule: 0-7 minutes stays at the quarter-hour;
+  // 8-14 minutes advances to the next quarter-hour.
+  return secondsIntoQuarter < 8 * 60
+    ? quarterStartMs
+    : quarterStartMs + (15 * 60 * 1000);
+}
+
 function timestampMs(value) {
   if (!value) return null;
   const parsed = value instanceof Date ? value : new Date(value);
@@ -131,16 +150,33 @@ function summarizeTimecard({
       hasWork: false,
       intervals: [],
     };
-    state.grossMinutes += durationMinutes(entry.hours_worked);
-    state.hasWork = true;
 
     const inMs = timestampMs(entry.clock_in);
     const outMs = timestampMs(entry.clock_out || entry.pending_clock_out);
+
+    if (inMs != null && outMs != null && outMs >= inMs) {
+      const ruledInMs = rulePunchMs(entry.clock_in);
+      const ruledOutMs = rulePunchMs(entry.clock_out || entry.pending_clock_out);
+
+      if (ruledInMs != null && ruledOutMs != null) {
+        state.grossMinutes += Math.max(
+          0,
+          Math.round((ruledOutMs - ruledInMs) / 60000)
+        );
+      }
+
+      state.intervals.push({ inMs, outMs });
+    } else {
+      // Preserve compatibility for summary inputs that provide only
+      // hours_worked and no usable punch pair.
+      state.grossMinutes += durationMinutes(entry.hours_worked);
+    }
+
+    state.hasWork = true;
+
     if (inMs != null) state.firstInMs = state.firstInMs == null ? inMs : Math.min(state.firstInMs, inMs);
     if (outMs != null) state.lastOutMs = state.lastOutMs == null ? outMs : Math.max(state.lastOutMs, outMs);
-    if (inMs != null && outMs != null && outMs >= inMs) {
-      state.intervals.push({ inMs, outMs });
-    }
+
     daily.set(day, state);
   }
 

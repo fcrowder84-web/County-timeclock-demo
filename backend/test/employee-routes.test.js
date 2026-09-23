@@ -43,6 +43,9 @@ function compact(sql) { return String(sql).replace(/\s+/g, ' ').trim(); }
     [
       'post /submit-timecard',
       'get /employee/my-timecard',
+        'get /employee/denied-change-requests',
+        'post /employee/denied-change-requests/:requestId/acknowledge',
+        'get /employee/activity-log',
       'post /employee/edit-time-entry',
       'post /employee/request-time-change',
       'post /supervisor/add-time-entry',
@@ -228,6 +231,9 @@ function compact(sql) { return String(sql).replace(/\s+/g, ' ').trim(); }
         if (text.includes('FROM time_entries')) return { rows: [] };
         if (text.includes('FROM leave_entries')) return { rows: [] };
         if (text.includes('FROM time_change_requests')) return { rows: [] };
+          if (text.includes('FROM forced_lunch_setting_history')) return { rows: [] };
+          if (text.includes('FROM forced_lunch_waivers')) return { rows: [] };
+          if (text.includes('FROM forced_lunch_waiver_requests')) return { rows: [] };
         throw new Error(`unexpected timecard query: ${text}`);
       },
     },
