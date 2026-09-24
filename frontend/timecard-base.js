@@ -79,7 +79,8 @@ document.getElementById("nextPeriodBtn").addEventListener("click",()=>{const i=p
 
 async function loadTimecard(){
   closeMenu();
-  const useSupervisor=elevatedView()&&(!selectedIsSelf()||!has("view_own_time"));
+  const supervisorRequested=qs.get("mode")==="supervisor";
+  const useSupervisor=elevatedView()&&(supervisorRequested||!selectedIsSelf()||!has("view_own_time"));
   currentMode=useSupervisor?"supervisor":"employee";
   const endpoint=useSupervisor?`${apiBase}/supervisor/employee-timecard/${selectedEmployeeId}`:`${apiBase}/employee/my-timecard`;
   try{

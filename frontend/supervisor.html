@@ -492,6 +492,7 @@
             const params = new URLSearchParams();
             params.set("employeeId", employeeId);
             if (selectedPeriodStart) params.set("periodStart", selectedPeriodStart);
+            params.set("mode", "supervisor");
             window.location.href = `/timecard.html?${params.toString()}`;
         }
 
@@ -500,6 +501,7 @@
             params.set("employeeId", employeeId);
             if (selectedPeriodStart) params.set("periodStart", selectedPeriodStart);
             params.set("addEntry", "1");
+            params.set("mode", "supervisor");
             window.location.href = `/timecard.html?${params.toString()}`;
         }
 
