@@ -4,3 +4,5 @@
 @media print{body{background:#fff}.shell{border:0;margin:0}.top-actions,.statusbar,.notice,.pending-panel,.foot,.icon-button{display:none!important}.nav{background:#fff}.tablewrap{overflow:visible}table{min-width:0;font-size:9px}.signatures{padding-top:18px}}
 
 .day-punch-modal{width:560px}.day-punch-row{display:grid;grid-template-columns:32px 1fr 42px;gap:8px;align-items:center;margin:7px 0}.day-punch-number{font-weight:700;text-align:center;color:var(--muted)}.day-punch-row input{font-variant-numeric:tabular-nums}.day-punch-add{margin:8px 0}.day-punch-preview{margin:10px 0;padding:10px;border:1px solid var(--line);background:#f7f9fa;line-height:1.5}.day-punch-warning{margin-top:6px;color:#8a1c1c;font-weight:700}.day-punch-message{display:none;margin-top:10px;padding:8px}.day-punch-message.error{display:block;background:#fff3f3;border:1px solid #e0a3a3;color:#7e1515}
+
+.punch.edited{color:#1f5f8b;font-weight:bold;background:#eef6fb;border-color:#9fc3dc}.edited-tag{font-size:8px;margin-left:3px;letter-spacing:.25px;vertical-align:1px}.pending-request.edited{color:#a61f1f!important;background:#fff0f0!important;border-color:#e1abab!important}

@@ -104,14 +104,15 @@ function allocateDailyWork(days){
 function punchCells(day,entries){
   const punches=[];
   entries.forEach(e=>{
-    punches.push({label:entryInDisplay(e),entry:e,kind:"in",cls:""});
-    if(e.clock_out)punches.push({label:entryOutDisplay(e),entry:e,kind:"out",cls:""});
+    const editCls=e.was_edited?"edited":"";
+    punches.push({label:entryInDisplay(e),entry:e,kind:"in",cls:editCls});
+    if(e.clock_out)punches.push({label:entryOutDisplay(e),entry:e,kind:"out",cls:editCls});
     else{
       const age=Date.now()-new Date(e.clock_in).getTime(),isOld=day<new Date().toISOString().slice(0,10)||age>=23*3600000;
       punches.push({label:isOld?"MISSING OUT":"OPEN",entry:e,kind:"out",cls:isOld?"missing":"open"});
     }
   });
-  const cells=[];for(let i=0;i<4;i++){let items=[];if(i<3)items=punches[i]?[punches[i]]:[];else items=punches.slice(3);cells.push(`<td>${items.map(p=>`<span class="punch ${p.cls}" data-entry-id="${Number(p.entry.id)}" data-kind="${p.kind}">${esc(p.label)}</span>`).join(" ")}</td>`)}return cells.join("")
+  const cells=[];for(let i=0;i<4;i++){let items=[];if(i<3)items=punches[i]?[punches[i]]:[];else items=punches.slice(3);cells.push(`<td>${items.map(p=>`<span class="punch ${p.cls}" data-entry-id="${Number(p.entry.id)}" data-kind="${p.kind}"${p.entry.was_edited?' title="Edited punch — audit history available"':''}>${esc(p.label)}${p.entry.was_edited?' <small class="edited-tag">EDITED</small>':''}</span>`).join(" ")}</td>`)}return cells.join("")
 }
 function leaveMatchesColumn(entry,type){
   return type==="other"

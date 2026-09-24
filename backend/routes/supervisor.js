@@ -494,7 +494,7 @@ function createSupervisorRouter({
           ),
           pool.query(
             `SELECT
-               id,clock_in,clock_out,pending_clock_in,pending_clock_out,
+               id,EXISTS (SELECT 1 FROM time_entry_audit tea WHERE tea.time_entry_id=time_entries.id) AS was_edited,clock_in,clock_out,pending_clock_in,pending_clock_out,
                to_char(clock_in,'YYYY-MM-DD') AS entry_date_iso,
                to_char(clock_in,'MM/DD/YYYY') AS entry_date,
                to_char(clock_in,'HH12:MI AM') AS clock_in_time,

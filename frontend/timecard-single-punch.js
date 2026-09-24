@@ -52,9 +52,10 @@
 
     const events=[];
     entries.forEach(e=>{
-      events.push({ts:e.clock_in,label:entryInDisplay(e),entry:e,kind:"in",cls:"",pending:false});
+      const editCls=e.was_edited?"edited":"";
+      events.push({ts:e.clock_in,label:entryInDisplay(e),entry:e,kind:"in",cls:editCls,pending:false});
       if(e.clock_out){
-        events.push({ts:e.clock_out,label:entryOutDisplay(e),entry:e,kind:"out",cls:"",pending:false});
+        events.push({ts:e.clock_out,label:entryOutDisplay(e),entry:e,kind:"out",cls:editCls,pending:false});
       }else{
         const hasPendingOut=allRequests().some(r=>r.status==="pending"&&Number(r.time_entry_id)===Number(e.id)&&r.requested_clock_out&&!sameInstant(r.requested_clock_out,e.clock_in));
         if(!hasPendingOut){
@@ -75,7 +76,7 @@
       const items=i<3?(events[i]?[events[i]]:[]):events.slice(3);
       cells.push(`<td>${items.map(p=>p.pending
         ? `<span class="punch missing pending-request pending-request-action" data-request-id="${Number(p.request.id)}" title="Click to withdraw this pending punch request">${esc(p.label)}</span>`
-        : `<span class="punch ${p.cls||""}" data-entry-id="${Number(p.entry.id)}" data-kind="${p.kind}">${esc(p.label)}</span>`
+        : `<span class="punch ${p.cls||""}" data-entry-id="${Number(p.entry.id)}" data-kind="${p.kind}"${p.entry.was_edited?' title="Edited punch — audit history available"':''}>${esc(p.label)}${p.entry.was_edited?' <small class="edited-tag">EDITED</small>':''}</span>`
       ).join(" ")}</td>`);
     }
     return cells.join("");

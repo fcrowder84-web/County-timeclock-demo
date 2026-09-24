@@ -127,6 +127,7 @@ function createEmployeeRouter({ requireUser, requireAnyPermission, pool, audit, 
       const entriesResult = await pool.query(
         `SELECT
            id,
+           EXISTS (SELECT 1 FROM time_entry_audit tea WHERE tea.time_entry_id=time_entries.id) AS was_edited,
            clock_in,
            clock_out,
            pending_clock_in,
