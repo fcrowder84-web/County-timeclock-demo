@@ -3,7 +3,7 @@
 const express = require('express');
 const { canEditPunch, hasPayrollOverride } = require('../lib/punch-edit-authority');
 const { summarizeTimecard } = require('../lib/timecard-summary');
-const { insertPunchIntoSequence } = require('../lib/punch-sequence');
+const { insertPunchIntoSequence, replaceDayPunchSequence } = require('../lib/punch-sequence');
 const { createApproveSinglePunchHandler } = require('../lib/approve-single-punch');
 const { userHasPermission } = require('../lib/permissions');
 const {
@@ -623,6 +623,27 @@ function createEmployeeRouter({ requireUser, requireAnyPermission, pool, audit, 
       }
     },
   );
+
+  router.post(
+    '/supervisor/replace-day-punches', requireUser,
+    requireAnyPermission('add_employee_entry', 'edit_employee_time', 'edit_payroll_time'),
+    async (req,res)=>{
+      const employeeId=Number(req.body?.employee_id),workDate=String(req.body?.work_date||'').trim(),punches=Array.isArray(req.body?.punches)?req.body.punches:null,reason=String(req.body?.reason||'').trim();
+      if(!Number.isInteger(employeeId)||employeeId<=0)return res.status(400).json({error:'Valid employee is required'});
+      if(!/^\d{4}-\d{2}-\d{2}$/.test(workDate)||!punches)return res.status(400).json({error:'Valid work date and punch list are required'});
+      if(!reason)return res.status(400).json({error:'Reason is required'}); if(reason.length>500)return res.status(400).json({error:'Reason must be 500 characters or less'});
+      if(!(await canDirectEditEmployee(pool,req.user,employeeId)))return res.status(403).json({error:'Access denied'});
+      const today=new Intl.DateTimeFormat('en-CA',{timeZone:'America/New_York',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
+      if(workDate<today&&punches.length%2)return res.status(409).json({error:'Past dates must have complete in/out punch pairs before saving.'});
+      const normalized=[];for(const v of punches){const t=String(v||'').trim();if(!t.startsWith(workDate+' ')||!validDate(t))return res.status(400).json({error:'Every punch must be a valid time on the selected date'});normalized.push(t);}
+      const client=await pool.connect();try{await client.query('BEGIN');const ar=await approvalForTimestamp(client,employeeId,workDate+' 12:00:00',true),approval=ar.rows[0]||null,payrollOverride=hasPayrollOverride(req.user);
+        if(payrollOverride&&approval?.payroll_finalized_at&&!userHasPermission(req.user,'reopen_timecard')){await client.query('ROLLBACK');return res.status(403).json({error:'Reopen permission is required for a finalized timecard.'});}
+        if(!payrollOverride){const unlocked=!approval?.supervisor_approved_at&&!approval?.payroll_finalized_at&&(!approval||['open','returned_to_employee','employee_submitted'].includes(approval.status));if(!unlocked){await client.query('ROLLBACK');return res.status(409).json({error:'This timecard is locked for supervisor editing. Return it to the correct stage before changing punches.'});}}
+        const affected=await requireReopenForFinalized({db:client,user:req.user,employeeId,timestamps:[workDate+' 12:00:00'],canAccessEmployee});
+        const result=await replaceDayPunchSequence({client,employeeId,workDate,punches:normalized,actorEmployeeId:req.user.id,reason});const invalidated=await invalidateApprovals(client,affected);await client.query('COMMIT');
+        await audit(req.user.id,'replace_day_punches','employee',employeeId,{work_date:workDate,punches:normalized,reason,invalidated_approval_ids:invalidated.map(r=>r.id)});return res.json({message:'Day punches updated',entries:result.entries});
+      }catch(err){await client.query('ROLLBACK').catch(()=>{});if(err.statusCode)return res.status(err.statusCode).json({error:err.message});if(err.code==='23505')return res.status(409).json({error:'The final punch sequence conflicts with another open punch for this employee.'});console.error(err);return res.status(500).json({error:'Unable to update day punches'});}finally{client.release();}
+    });
 
   router.post(
     '/supervisor/add-time-entry',

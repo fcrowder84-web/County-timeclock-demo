@@ -185,7 +185,7 @@ function renderPending(){
 }
 function bindRowActions(){
   document.querySelectorAll(".punch").forEach(el=>el.addEventListener("click",ev=>openPunchMenu(ev,Number(el.dataset.entryId),el.dataset.kind)));
-  document.querySelectorAll(".day-punch:not(:disabled)").forEach(b=>b.addEventListener("click",()=>openAddEntry(b.dataset.date)));
+  document.querySelectorAll(".day-punch:not(:disabled)").forEach(b=>b.addEventListener("click",()=>selectedIsSelf()?openAddEntry(b.dataset.date):openDayPunchEditor(b.dataset.date)));
   document.querySelectorAll(".day-leave:not(:disabled)").forEach(b=>b.addEventListener("click",()=>openLeave(b.dataset.date)));
   document.querySelectorAll(".leave-entry-action").forEach(b=>b.addEventListener("click",()=>openEditLeave(b.dataset.leaveId)));
   document.querySelectorAll(".lunch-request").forEach(b=>b.addEventListener("click",()=>requestLunchWaiver(b.dataset.date)));
@@ -196,12 +196,12 @@ function findEntry(id){return(currentData.entries||[]).find(e=>Number(e.id)===Nu
 function openPunchMenu(ev,id,kind){
   const entry=findEntry(id);if(!entry)return;activeEntry={...entry,clickedKind:kind};const menu=document.getElementById("contextMenu");let buttons=[];
   if(selectedIsSelf()&&currentData.can_edit_entries!==false){if(has("request_punch_correction"))buttons.push(["Request Change","request"]);if(has("void_own_unapproved_punch"))buttons.push(["Void Punch","delete"])}
-  if(!selectedIsSelf()&&currentMode==="supervisor"&&currentData.can_edit_entries===true&&hasAny(["edit_employee_time","edit_payroll_time"])){buttons.push(["Edit","edit"]);buttons.push(["Void Punch","delete"])}
+  if(!selectedIsSelf()&&currentMode==="supervisor"&&currentData.can_edit_entries===true&&hasAny(["edit_employee_time","edit_payroll_time"])){buttons.push(["Edit Day Punches","edit-day"])}
   if(!buttons.length)buttons=[["View only","none"]];
   menu.innerHTML=buttons.map(([label,action])=>`<button data-action="${action}">${esc(label)}</button>`).join("");menu.querySelectorAll("button").forEach(b=>b.addEventListener("click",()=>handlePunchAction(b.dataset.action)));const x=Math.min(ev.clientX,innerWidth-180),y=Math.min(ev.clientY+8,innerHeight-160);menu.style.left=x+"px";menu.style.top=y+"px";menu.style.display="block";ev.stopPropagation()
 }
 function closeMenu(){document.getElementById("contextMenu").style.display="none"}document.addEventListener("click",closeMenu);
-function handlePunchAction(action){closeMenu();if(action==="request")openEntryModal("request",activeEntry);if(action==="edit")openEntryModal("edit",activeEntry);if(action==="delete")deleteEntry(activeEntry)}
+function handlePunchAction(action){closeMenu();if(action==="request")openEntryModal("request",activeEntry);if(action==="edit")openEntryModal("edit",activeEntry);if(action==="delete")deleteEntry(activeEntry);if(action==="edit-day"&&activeEntry)openDayPunchEditor(dateOnly(activeEntry.entry_date_iso||activeEntry.clock_in))}
 function modal(id,show){document.getElementById(id).classList.toggle("show",show)}document.querySelectorAll("[data-close]").forEach(b=>b.addEventListener("click",()=>modal(b.dataset.close,false)));
 
 function entryModalMessageElement(){
@@ -235,6 +235,15 @@ function openAddEntry(day){
   const employeeRequest=selectedIsSelf();
   entryModalMode=employeeRequest?"request-add":"add";activeEntry=null;clearEntryModalMessage();document.getElementById("entryModalTitle").textContent=employeeRequest?"Request Missing Time":"Add Time for Employee";document.getElementById("entryInDate").value=day;document.getElementById("entryInTime").value="08:00";document.getElementById("entryOutDate").value=day;document.getElementById("entryOutTime").value="";document.getElementById("entryReason").value="";modal("entryModal",true)
 }
+let dayPunchEditDate=null;
+function dayPunchTimes(day){const a=[];(currentData.entries||[]).filter(e=>dateOnly(e.entry_date_iso||e.clock_in)===day).forEach(e=>{if(e.clock_in)a.push(entryIn24(e).slice(0,5));if(e.clock_out)a.push(entryOut24(e).slice(0,5))});return a.sort()}
+function readDayPunchTimes(){return Array.from(document.querySelectorAll("#dayPunchRows .day-punch-time")).map(i=>i.value).filter(Boolean).sort()}
+function renderDayPunchRows(times){const rows=document.getElementById("dayPunchRows");rows.innerHTML=times.map((t,i)=>`<div class="day-punch-row"><span class="day-punch-number">${i+1}</span><input type="time" step="60" value="${esc(t)}" class="day-punch-time"><button type="button" class="btn btn-danger day-punch-remove" title="Remove punch">−</button></div>`).join("");rows.querySelectorAll(".day-punch-remove").forEach((b,i)=>b.addEventListener("click",()=>{const n=readDayPunchTimes();n.splice(i,1);renderDayPunchRows(n);updateDayPunchPreview()}));rows.querySelectorAll(".day-punch-time").forEach(i=>i.addEventListener("input",updateDayPunchPreview))}
+function updateDayPunchPreview(){const t=readDayPunchTimes(),pairs=[];for(let i=0;i<t.length;i+=2)pairs.push(`${t[i]}–${t[i+1]||"OPEN"}`);const today=new Date().toLocaleDateString("en-CA",{timeZone:"America/New_York"}),warning=t.length%2&&dayPunchEditDate<today?"Past dates must end with complete IN/OUT pairs.":"";document.getElementById("dayPunchPreview").innerHTML=`<strong>Result:</strong> ${pairs.length?pairs.map(esc).join(" | "):"No punches"}${warning?`<div class="day-punch-warning">${esc(warning)}</div>`:""}`}
+function openDayPunchEditor(day){dayPunchEditDate=day;document.getElementById("dayPunchModalTitle").textContent=`Edit Day Punches — ${localDateLabel(day)}`;document.getElementById("dayPunchReason").value="";document.getElementById("dayPunchMessage").textContent="";renderDayPunchRows(dayPunchTimes(day));updateDayPunchPreview();modal("dayPunchModal",true)}
+document.getElementById("dayPunchAddBtn").addEventListener("click",()=>{const t=readDayPunchTimes();t.push("12:00");renderDayPunchRows(t);updateDayPunchPreview()});
+document.getElementById("dayPunchSaveBtn").addEventListener("click",async()=>{const times=readDayPunchTimes(),reason=document.getElementById("dayPunchReason").value.trim(),box=document.getElementById("dayPunchMessage");box.textContent="";box.className="day-punch-message";try{if(!reason)throw new Error("Reason is required");const today=new Date().toLocaleDateString("en-CA",{timeZone:"America/New_York"});if(times.length%2&&dayPunchEditDate<today)throw new Error("Past dates must have complete in/out punch pairs before saving.");const punches=times.map(t=>timestamp(dayPunchEditDate,t));await jsonOrError(await apiFetch(`${apiBase}/supervisor/replace-day-punches`,{method:"POST",body:JSON.stringify({employee_id:selectedEmployeeId,work_date:dayPunchEditDate,punches,reason})}));modal("dayPunchModal",false);showMessage("Day punches updated");await loadTimecard()}catch(err){box.textContent=err.message||"Unable to update day punches";box.className="day-punch-message error"}});
+
 function defaultAddEntryDate(){const start=dateOnly(currentData?.pay_period_start||selectedPeriodStart),end=dateOnly(currentData?.pay_period_end),today=new Date().toLocaleDateString("en-CA",{timeZone:"America/New_York"});return start&&end&&today>=start&&today<=end?today:start}
 document.getElementById("addTimeBtn").addEventListener("click",()=>openAddEntry(defaultAddEntryDate()));
 function timestamp(date,time){return date&&time?`${date} ${time}:00`:null}

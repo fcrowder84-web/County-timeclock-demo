@@ -231,4 +231,16 @@ async function removePunchFromSequence({ client, employeeId, timeEntryId, punchK
   return {removed_timestamp:removeAt,entries:rebuilt.rows};
 }
 
-module.exports = { insertPunchIntoSequence, removePunchFromSequence, parsePunchTimestamp };
+
+async function replaceDayPunchSequence({ client, employeeId, workDate, punches, actorEmployeeId, reason }) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(workDate || '')) || !Array.isArray(punches)) { const e=new Error('Valid work date and punch list are required'); e.statusCode=400; throw e; }
+  const events=punches.map((v)=>({raw:String(v),date:parsePunchTimestamp(v)})).sort((a,b)=>a.date-b.date);
+  for(let i=0;i<events.length;i+=1){ if(!events[i].raw.startsWith(workDate+' ')){const e=new Error('All punches must be on the selected work date');e.statusCode=400;throw e;} if(i&&events[i].date.getTime()===events[i-1].date.getTime()){const e=new Error('Duplicate punch times are not allowed');e.statusCode=409;throw e;} }
+  const old=(await client.query(`SELECT * FROM time_entries WHERE employee_id=$1 AND deleted_at IS NULL AND clock_in::date=$2::date ORDER BY clock_in,id FOR UPDATE`,[employeeId,workDate])).rows;
+  if(old.length){const pending=await client.query(`SELECT id FROM time_change_requests WHERE employee_id=$1 AND status='pending' AND time_entry_id=ANY($2::int[]) LIMIT 1`,[employeeId,old.map(r=>Number(r.id))]);if(pending.rows.length){const e=new Error('Resolve pending punch corrections on this date before editing the day');e.statusCode=409;throw e;}}
+  for(const row of old){await client.query(`INSERT INTO time_entry_audit(time_entry_id,changed_by_employee_id,old_clock_in,old_clock_out,new_clock_in,new_clock_out,reason) VALUES($1,$2,$3,$4,NULL,NULL,$5)`,[row.id,actorEmployeeId,row.clock_in,row.clock_out,reason]);await client.query(`UPDATE time_entries SET deleted_at=NOW(),deleted_by_employee_id=$2,deletion_reason=$3 WHERE id=$1 AND deleted_at IS NULL`,[row.id,actorEmployeeId,reason]);}
+  const created=[];for(let i=0;i<events.length;i+=2){const ci=events[i].date,co=events[i+1]?.date||null;const row=(await client.query(`INSERT INTO time_entries(employee_id,clock_in,clock_out,notes,status) VALUES($1,$2,$3,$4,CASE WHEN $3::timestamp IS NULL THEN 'open' ELSE 'closed' END) RETURNING *`,[employeeId,ci,co,reason])).rows[0];created.push(row);await client.query(`INSERT INTO time_entry_audit(time_entry_id,changed_by_employee_id,old_clock_in,old_clock_out,new_clock_in,new_clock_out,reason) VALUES($1,$2,NULL,NULL,$3,$4,$5)`,[row.id,actorEmployeeId,row.clock_in,row.clock_out,reason]);}
+  return {entries:created,punch_count:events.length};
+}
+
+module.exports = { insertPunchIntoSequence, removePunchFromSequence, replaceDayPunchSequence, parsePunchTimestamp };
