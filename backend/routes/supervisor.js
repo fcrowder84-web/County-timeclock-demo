@@ -828,8 +828,11 @@ function createSupervisorRouter({
           return res.status(403).json({ error: 'Access denied' });
         }
 
+        // App Admin inherits broad capabilities, including edit_payroll_time.
+        // A supervisor-side admin edit must not be forced into payroll approval.
         const payrollOverride =
-          userHasPermission(req.user, 'edit_payroll_time');
+          userHasPermission(req.user, 'edit_payroll_time')
+          && !userHasPermission(req.user, 'app_admin');
         // Lock both source and destination cards before any audit or mutation.
         const approvalResult = await client.query(
           `SELECT *,

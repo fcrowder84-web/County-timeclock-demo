@@ -170,4 +170,65 @@ async function insertPunchIntoSequence({
   };
 }
 
-module.exports = { insertPunchIntoSequence, parsePunchTimestamp };
+
+async function removePunchFromSequence({ client, employeeId, timeEntryId, punchKind, actorEmployeeId, reason }) {
+  const targetResult = await client.query(
+    `SELECT * FROM time_entries WHERE id=$1 AND employee_id=$2 AND deleted_at IS NULL LIMIT 1 FOR UPDATE`,
+    [timeEntryId, employeeId],
+  );
+  const target = targetResult.rows[0] || null;
+  if (!target) { const error=new Error('Time entry not found'); error.statusCode=404; throw error; }
+  const removeAt = punchKind === 'out' ? target.clock_out : target.clock_in;
+  if (!removeAt) { const error=new Error('Selected punch does not exist'); error.statusCode=409; throw error; }
+
+  const entriesResult = await client.query(
+    `SELECT * FROM time_entries WHERE employee_id=$1 AND deleted_at IS NULL AND clock_in::date=$2::timestamp::date ORDER BY clock_in,id FOR UPDATE`,
+    [employeeId, removeAt],
+  );
+  const entries=entriesResult.rows;
+  const events=[];
+  for (const entry of entries) {
+    events.push({timestamp:entry.clock_in,source_entry_id:Number(entry.id),source_kind:'in'});
+    if(entry.clock_out) events.push({timestamp:entry.clock_out,source_entry_id:Number(entry.id),source_kind:'out'});
+  }
+  const removeIndex=events.findIndex((event)=>Number(event.source_entry_id)===Number(timeEntryId)&&event.source_kind===punchKind&&sameTimestamp(event.timestamp,removeAt));
+  if(removeIndex<0){const error=new Error('Punch could not be located in the day sequence');error.statusCode=409;throw error;}
+  events.splice(removeIndex,1);
+  events.sort((a,b)=>new Date(a.timestamp)-new Date(b.timestamp));
+  const desired=[];
+  for(let i=0;i<events.length;i+=2) desired.push({clock_in:events[i].timestamp,clock_out:events[i+1]?.timestamp||null});
+
+  // Retire surplus rows before rebuilding so an old open row cannot collide
+  // with the one-open-punch unique index during the transaction.
+  for(let i=desired.length;i<entries.length;i+=1){
+    const oldRow=entries[i];
+    await client.query(
+      `INSERT INTO time_entry_audit(time_entry_id,changed_by_employee_id,old_clock_in,old_clock_out,new_clock_in,new_clock_out,reason) VALUES($1,$2,$3,$4,NULL,NULL,$5)`,
+      [oldRow.id,actorEmployeeId,oldRow.clock_in,oldRow.clock_out,reason],
+    );
+    await client.query(
+      `UPDATE time_entries SET deleted_at=NOW(),deleted_by_employee_id=$2,deletion_reason=$3 WHERE id=$1 AND deleted_at IS NULL`,
+      [oldRow.id,actorEmployeeId,reason],
+    );
+  }
+  for(let i=0;i<desired.length;i+=1){
+    const oldRow=entries[i],next=desired[i];
+    const changed=!sameTimestamp(oldRow.clock_in,next.clock_in)||Boolean(oldRow.clock_out)!==Boolean(next.clock_out)||(oldRow.clock_out&&next.clock_out&&!sameTimestamp(oldRow.clock_out,next.clock_out));
+    if(!changed) continue;
+    await client.query(
+      `INSERT INTO time_entry_audit(time_entry_id,changed_by_employee_id,old_clock_in,old_clock_out,new_clock_in,new_clock_out,reason) VALUES($1,$2,$3,$4,$5,$6,$7)`,
+      [oldRow.id,actorEmployeeId,oldRow.clock_in,oldRow.clock_out,next.clock_in,next.clock_out,reason],
+    );
+    await client.query(
+      `UPDATE time_entries SET clock_in=$1,clock_out=$2,status=CASE WHEN $2::timestamp IS NULL THEN 'open' ELSE 'closed' END WHERE id=$3 AND deleted_at IS NULL`,
+      [next.clock_in,next.clock_out,oldRow.id],
+    );
+  }
+  const rebuilt=await client.query(
+    `SELECT * FROM time_entries WHERE employee_id=$1 AND deleted_at IS NULL AND clock_in::date=$2::timestamp::date ORDER BY clock_in,id`,
+    [employeeId,removeAt],
+  );
+  return {removed_timestamp:removeAt,entries:rebuilt.rows};
+}
+
+module.exports = { insertPunchIntoSequence, removePunchFromSequence, parsePunchTimestamp };

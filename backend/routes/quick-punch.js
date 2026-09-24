@@ -4,6 +4,7 @@ const express = require('express');
 const { canEditPunch, hasPayrollOverride } = require('../lib/punch-edit-authority');
 const { recordPunchMetadata } = require('../lib/punch-metadata');
 const { userHasPermission } = require('../lib/permissions');
+const { removePunchFromSequence } = require('../lib/punch-sequence');
 
 const PUNCH_COOLDOWN_SECONDS = 5 * 60;
 
@@ -247,8 +248,16 @@ function createQuickPunchRouter({ requireUser, requireAnyPermission, pool, audit
 
       let punchMutation;
       let softDelete = false;
+      const managementSequenceEdit = Number(req.user.id) !== Number(entry.employee_id) && ['in','out'].includes(punchKind);
 
-      if (punchKind === 'out') {
+      if (managementSequenceEdit) {
+        const rebuilt = await removePunchFromSequence({
+          client, employeeId: entry.employee_id, timeEntryId: entry.id, punchKind,
+          actorEmployeeId: req.user.id, reason,
+        });
+        punchMutation = { rows: [{ id: entry.id }] };
+        auditDetails = { sequence_rebuilt: true, rebuilt_entries: rebuilt.entries.map((row) => row.id) };
+      } else if (punchKind === 'out') {
         if (!entry.clock_out) {
           await client.query('ROLLBACK');
           return res.status(409).json({ error: 'This entry does not have a clock-out punch to void.' });
@@ -303,6 +312,7 @@ function createQuickPunchRouter({ requireUser, requireAnyPermission, pool, audit
       }
 
       auditDetails = {
+        ...(auditDetails || {}),
         employee_id: entry.employee_id,
         original_clock_in: entry.clock_in,
         original_clock_out: entry.clock_out,
@@ -318,9 +328,11 @@ function createQuickPunchRouter({ requireUser, requireAnyPermission, pool, audit
       await client.query('COMMIT');
       await audit(req.user.id, 'void_time_entry', 'time_entry', entry.id, auditDetails);
       return res.json({
-        message: punchKind === 'out'
-          ? 'Clock-out punch voided. The clock-in remains open and the original clock-out remains in the audit trail.'
-          : 'Punch voided. The original record remains in the audit trail.',
+        message: managementSequenceEdit
+          ? 'Punch voided and the remaining punches were safely re-paired. Original values remain in the audit trail.'
+          : (punchKind === 'out'
+            ? 'Clock-out punch voided. The clock-in remains open and the original clock-out remains in the audit trail.'
+            : 'Punch voided. The original record remains in the audit trail.'),
       });
     } catch (err) {
       if (client) await client.query('ROLLBACK').catch(() => {});

@@ -1,7 +1,7 @@
 'use strict';
 
 const assert = require('assert');
-const { insertPunchIntoSequence } = require('../lib/punch-sequence');
+const { insertPunchIntoSequence, removePunchFromSequence } = require('../lib/punch-sequence');
 
 function compact(sql) { return String(sql).replace(/\s+/g, ' ').trim(); }
 function iso(value) { return value == null ? null : new Date(value).toISOString(); }
@@ -16,6 +16,10 @@ function makeClient(initialEntries = []) {
     audits,
     async query(sql, params = []) {
       const text = compact(sql);
+      if (text.startsWith('SELECT * FROM time_entries WHERE id=$1') && text.includes('FOR UPDATE')) {
+        const [id, employeeId] = params;
+        return { rows: entries.filter((row) => Number(row.id)===Number(id) && Number(row.employee_id)===Number(employeeId) && !row.deleted_at).map((row)=>({...row})) };
+      }
       if (text.includes('FROM time_entries') && text.includes('(clock_in=$2::timestamp OR clock_out=$2::timestamp)')) {
         const [, punchAt] = params;
         return { rows: entries.filter((row) => !row.deleted_at && (iso(row.clock_in) === iso(punchAt) || iso(row.clock_out) === iso(punchAt))).slice(0, 1) };
@@ -31,6 +35,12 @@ function makeClient(initialEntries = []) {
       if (text.startsWith('INSERT INTO time_entry_audit')) {
         audits.push(params);
         return { rows: [] };
+      }
+      if (text.startsWith('UPDATE time_entries SET deleted_at=NOW()')) {
+        const [id] = params;
+        const row=entries.find((item)=>Number(item.id)===Number(id));
+        row.deleted_at='now';
+        return {rows:[{...row}]};
       }
       if (text.startsWith('UPDATE time_entries')) {
         const [clockIn, clockOut, id] = params;
@@ -99,6 +109,26 @@ function makeClient(initialEntries = []) {
   assert.strictEqual(result.entries.length, 1);
   assert.strictEqual(iso(result.entries[0].clock_in), '2026-08-13T08:00:00.000Z');
   assert.strictEqual(result.entries[0].clock_out, null);
+
+
+  // Management removal operates on the day's chronological punch sequence.
+  // Dan regression: 09:00,11:14,11:16,14:29,17:36 -> remove 11:14
+  // must become 09:00-11:16 and 14:29-17:36, with no open row.
+  client=makeClient([
+    {id:202,employee_id:21,clock_in:'2026-09-23T09:00:00-04:00',clock_out:'2026-09-23T11:14:43-04:00',status:'closed',deleted_at:null},
+    {id:214,employee_id:21,clock_in:'2026-09-23T11:16:59-04:00',clock_out:'2026-09-23T14:29:31-04:00',status:'closed',deleted_at:null},
+    {id:230,employee_id:21,clock_in:'2026-09-23T17:36:32-04:00',clock_out:null,status:'open',deleted_at:null},
+  ]);
+  result=await removePunchFromSequence({
+    client,employeeId:21,timeEntryId:202,punchKind:'out',
+    actorEmployeeId:2,reason:'Correct first punch',
+  });
+  assert.strictEqual(result.entries.length,2);
+  assert.strictEqual(iso(result.entries[0].clock_in),'2026-09-23T13:00:00.000Z');
+  assert.strictEqual(iso(result.entries[0].clock_out),'2026-09-23T15:16:59.000Z');
+  assert.strictEqual(iso(result.entries[1].clock_in),'2026-09-23T18:29:31.000Z');
+  assert.strictEqual(iso(result.entries[1].clock_out),'2026-09-23T21:36:32.000Z');
+  assert.strictEqual(result.entries.filter((row)=>!row.clock_out).length,0);
 
   console.log('punch sequence tests: PASS');
 })().catch((err) => {
