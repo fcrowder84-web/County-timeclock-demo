@@ -185,7 +185,16 @@ function renderPending(){
 }
 function bindRowActions(){
   document.querySelectorAll(".punch").forEach(el=>el.addEventListener("click",ev=>openPunchMenu(ev,Number(el.dataset.entryId),el.dataset.kind)));
-  document.querySelectorAll(".day-punch:not(:disabled)").forEach(b=>b.addEventListener("click",()=>selectedIsSelf()?openAddEntry(b.dataset.date):openDayPunchEditor(b.dataset.date)));
+  document.querySelectorAll(".day-punch:not(:disabled)").forEach(b=>b.addEventListener("click",()=>{
+  const managementEditor=
+    currentMode==="supervisor"
+    && currentData.can_edit_entries===true
+    && hasAny(["edit_employee_time","edit_payroll_time"]);
+
+  managementEditor
+    ? openDayPunchEditor(b.dataset.date)
+    : openAddEntry(b.dataset.date);
+}));
   document.querySelectorAll(".day-leave:not(:disabled)").forEach(b=>b.addEventListener("click",()=>openLeave(b.dataset.date)));
   document.querySelectorAll(".leave-entry-action").forEach(b=>b.addEventListener("click",()=>openEditLeave(b.dataset.leaveId)));
   document.querySelectorAll(".lunch-request").forEach(b=>b.addEventListener("click",()=>requestLunchWaiver(b.dataset.date)));
