@@ -1,7 +1,7 @@
 'use strict';
 
 const net=require('net');
-const trustedNetworkConfig=require('../../config/trusted-networks.json');
+const trustedNetworkConfig=require('../config/trusted-networks.json');
 const LOCATION_STATUSES=new Set(['captured','denied','unavailable','timeout','error']);
 function firstHeaderValue(value){if(Array.isArray(value))value=value[0];if(typeof value!=='string')return null;const first=value.split(',')[0].trim();return first||null;}
 function normalizeIp(value){let ip=firstHeaderValue(value);if(!ip)return null;if(ip.startsWith('::ffff:'))ip=ip.slice(7);return net.isIP(ip)?ip:null;}
