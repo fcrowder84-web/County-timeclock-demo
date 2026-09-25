@@ -133,10 +133,19 @@ function createQuickPunchRouter({ requireUser, requireAnyPermission, pool, audit
     } catch (err) {
       console.error('Rejected punch GPS audit error', err);
     }
+    const outsideGeofence=gate.reason==='outside_geofence';
+    if(outsideGeofence){
+      details.reason='GPS location is outside configured geofences';
+      details.nearest_geofence_distance_feet=gate.nearest_geofence_distance_feet;
+      try{await audit(req.user.id,'punch_rejected_outside_geofence','employee',req.user.id,details);}catch(err){console.error('Rejected punch geofence audit error',err);}
+    }
     res.status(403).json({
-      error: 'Location access is required to clock in or out when you are not connected to a County network. Enable location services and allow location access, then try again.',
-      code: 'GPS_REQUIRED',
+      error: outsideGeofence
+        ? 'Your current location is outside an approved TimeClock location.'
+        : 'Location access is required to clock in or out when you are not connected to a County network. Enable location services and allow location access, then try again.',
+      code: outsideGeofence ? 'OUTSIDE_GEOFENCE' : 'GPS_REQUIRED',
       location_status: gate.location_status,
+      nearest_geofence_distance_feet: gate.nearest_geofence_distance_feet ?? null,
     });
     return null;
   }
