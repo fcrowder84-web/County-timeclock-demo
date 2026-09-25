@@ -2,7 +2,7 @@
 
 const express = require('express');
 const { canEditPunch, hasPayrollOverride } = require('../lib/punch-edit-authority');
-const { recordPunchMetadata } = require('../lib/punch-metadata');
+const { recordPunchMetadata, punchLocationGate } = require('../lib/punch-metadata');
 const { userHasPermission } = require('../lib/permissions');
 const { removePunchFromSequence } = require('../lib/punch-sequence');
 
@@ -113,6 +113,32 @@ function createQuickPunchRouter({ requireUser, requireAnyPermission, pool, audit
       console.error('Punch metadata capture error', err);
       return null;
     }
+  }
+
+  async function requirePunchLocation(req, res, punchType) {
+    const gate = punchLocationGate(req);
+    if (gate.allowed) return gate;
+    const details = {
+      punch_type: punchType,
+      source_ip: gate.source_ip,
+      location_status: gate.location_status,
+      latitude: gate.latitude,
+      longitude: gate.longitude,
+      accuracy_meters: gate.accuracy_meters,
+      client_source: req.body?.client_source || 'web',
+      reason: 'GPS required outside trusted County network',
+    };
+    try {
+      await audit(req.user.id, 'punch_rejected_gps_required', 'employee', req.user.id, details);
+    } catch (err) {
+      console.error('Rejected punch GPS audit error', err);
+    }
+    res.status(403).json({
+      error: 'Location access is required to clock in or out when you are not connected to a County network. Enable location services and allow location access, then try again.',
+      code: 'GPS_REQUIRED',
+      location_status: gate.location_status,
+    });
+    return null;
   }
 
   router.get('/quick-status', requireUser, canPunch, async (req, res) => {
@@ -379,6 +405,9 @@ function createQuickPunchRouter({ requireUser, requireAnyPermission, pool, audit
       const cooldown=await punchCooldown(req.user.id);
       if(cooldown.active) return cooldownResponse(res,cooldown);
 
+      const locationGate = await requirePunchLocation(req, res, 'clock_in');
+      if (!locationGate) return;
+
       const result = await pool.query(
         `INSERT INTO time_entries(employee_id,clock_in,status) VALUES($1,NOW(),'open') RETURNING *`,
         [req.user.id],
@@ -427,6 +456,9 @@ function createQuickPunchRouter({ requireUser, requireAnyPermission, pool, audit
 
       const cooldown=await punchCooldown(req.user.id);
       if(cooldown.active) return cooldownResponse(res,cooldown);
+
+      const locationGate = await requirePunchLocation(req, res, 'clock_out');
+      if (!locationGate) return;
 
       const result = await pool.query(
         `UPDATE time_entries SET clock_out=NOW(),status='closed'
