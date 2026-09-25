@@ -260,6 +260,35 @@ function compact(sql) { return String(sql).replace(/\s+/g, ' ').trim(); }
   assert.strictEqual(res.body.code, 'PUNCH_COOLDOWN');
   assert.strictEqual(res.body.cooldown_seconds_remaining, 121);
 
+  // Off-network punches must provide a valid captured GPS location before mutation.
+  {
+    const gpsQueries = [];
+    const gpsAudits = [];
+    const gpsPool = {
+      query: async (sql) => {
+        const text = compact(sql);
+        gpsQueries.push(text);
+        if (text.includes('FROM pay_period_approvals')) return { rows: [] };
+        if (text.startsWith('SELECT id,clock_in,') && text.includes('requires_correction')) return { rows: [] };
+        if (text.includes('AS remaining_seconds') && text.includes('AS cooldown_until')) return { rows: [] };
+        if (text.startsWith('INSERT INTO time_entries')) throw new Error('GPS gate must block insert');
+        throw new Error(`unexpected GPS gate query: ${text}`);
+      },
+      connect: async () => { throw new Error('connect not expected'); },
+    };
+    const gpsRouter = createQuickPunchRouter({ requireUser: noop, requireAnyPermission: allow, pool: gpsPool, audit: async (...args) => gpsAudits.push(args) });
+    const gpsRes = makeRes();
+    await handlerFor(gpsRouter, 'post', '/clock-in')({
+      user: { id: 7, first_name: 'Pat' },
+      headers: { 'cf-connecting-ip': '192.0.2.25' },
+      body: { location_status: 'denied', client_source: 'mobile_pwa' },
+    }, gpsRes);
+    assert.strictEqual(gpsRes.statusCode, 403);
+    assert.strictEqual(gpsRes.body.code, 'GPS_REQUIRED');
+    assert(!gpsQueries.some((text) => text.startsWith('INSERT INTO time_entries')));
+    assert.strictEqual(gpsAudits[0][1], 'punch_rejected_gps_required');
+  }
+
   const duplicateError = Object.assign(new Error('duplicate open punch'), { code: '23505' });
   const racePool = {
     query: async (sql) => {
@@ -274,7 +303,7 @@ function compact(sql) { return String(sql).replace(/\s+/g, ' ').trim(); }
   };
   const raceRouter = createQuickPunchRouter({ requireUser: noop, requireAnyPermission: allow, pool: racePool, audit: async () => {} });
   res = makeRes();
-  await handlerFor(raceRouter, 'post', '/clock-in')({ user: { id: 7, first_name: 'Pat' } }, res);
+  await handlerFor(raceRouter, 'post', '/clock-in')({ user: { id: 7, first_name: 'Pat' }, headers: { 'cf-connecting-ip': '64.139.245.9' }, body: { location_status: 'denied' } }, res);
   assert.strictEqual(res.statusCode, 400);
   assert.strictEqual(res.body.error, 'You are already clocked in');
 
