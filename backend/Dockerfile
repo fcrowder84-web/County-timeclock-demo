@@ -8,6 +8,7 @@ RUN npm ci --omit=dev
 
 COPY server.js ./server.js
 COPY lib ./lib
+COPY config ./config
 COPY routes ./routes
 COPY scripts ./scripts
 COPY test ./test
