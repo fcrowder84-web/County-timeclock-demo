@@ -14,6 +14,26 @@ async function getSettingJson(pool,key,fallback){if(!pool)return fallback;try{co
 async function trustedNetworkIps(pool){return new Set((await trustedNetworks(pool)).map(item=>item.ip));}
 function distanceFeet(lat1,lon1,lat2,lon2){const rad=Math.PI/180,R=20902231;const dLat=(lat2-lat1)*rad,dLon=(lon2-lon1)*rad;const a=Math.sin(dLat/2)**2+Math.cos(lat1*rad)*Math.cos(lat2*rad)*Math.sin(dLon/2)**2;return 2*R*Math.atan2(Math.sqrt(a),Math.sqrt(1-a));}
 async function isTrustedRequest(req,pool){const sourceIp=getRequestIp(req);return Boolean(sourceIp&&(await trustedNetworkIps(pool)).has(sourceIp));}
-async function punchLocationGate(req,pool){const sourceIp=getRequestIp(req);const location=normalizeLocation(req.body||{});const trustedEnabled=(await getSettingJson(pool,'trusted_network_enforcement',true))===true;const trusted=trustedEnabled&&Boolean(sourceIp&&(await trustedNetworkIps(pool)).has(sourceIp));const hasGps=location.location_status==='captured'&&location.latitude!=null&&location.longitude!=null;if(trusted)return {allowed:true,trusted_network:true,trusted_network_enforcement:trustedEnabled,geofence_enforcement:false,source_ip:sourceIp,...location};if(!hasGps)return {allowed:false,reason:'gps_required',trusted_network:false,trusted_network_enforcement:trustedEnabled,geofence_enforcement:false,source_ip:sourceIp,...location};const geofenceEnabled=(await getSettingJson(pool,'geofence_enforcement',false))===true;if(!geofenceEnabled)return {allowed:true,trusted_network:false,trusted_network_enforcement:trustedEnabled,geofence_enforcement:false,source_ip:sourceIp,...location};const raw=await getSettingJson(pool,'geofences',[]);const geofences=Array.isArray(raw)?raw.filter(g=>g&&g.enabled!==false&&Number.isFinite(Number(g.latitude))&&Number.isFinite(Number(g.longitude))&&Number(g.radius_feet)>0):[];let match=null,bestDistance=null;for(const g of geofences){const distance=distanceFeet(location.latitude,location.longitude,Number(g.latitude),Number(g.longitude));if(bestDistance==null||distance<bestDistance)bestDistance=distance;if(distance<=Number(g.radius_feet)){match=g;break;}}return {allowed:Boolean(match),reason:match?null:'outside_geofence',trusted_network:false,trusted_network_enforcement:trustedEnabled,geofence_enforcement:true,matched_geofence:match?{id:match.id,name:match.name}:null,nearest_geofence_distance_feet:bestDistance==null?null:Math.round(bestDistance),source_ip:sourceIp,...location};}
+async function punchLocationGate(req,pool){
+  const sourceIp=getRequestIp(req);
+  const location=normalizeLocation(req.body||{});
+  const forceGps=(await getSettingJson(pool,'force_gps',true))===true;
+  const trusted=Boolean(sourceIp&&(await trustedNetworkIps(pool)).has(sourceIp));
+  const hasGps=location.location_status==='captured'&&location.latitude!=null&&location.longitude!=null;
+  if(!forceGps)return {allowed:true,trusted_network:trusted,force_gps:false,geofence_enforcement:false,source_ip:sourceIp,...location};
+  if(trusted)return {allowed:true,trusted_network:true,force_gps:true,geofence_enforcement:false,source_ip:sourceIp,...location};
+  if(!hasGps)return {allowed:false,reason:'gps_required',trusted_network:false,force_gps:true,geofence_enforcement:false,source_ip:sourceIp,...location};
+  const geofenceEnabled=(await getSettingJson(pool,'geofence_enforcement',false))===true;
+  if(!geofenceEnabled)return {allowed:true,trusted_network:false,force_gps:true,geofence_enforcement:false,source_ip:sourceIp,...location};
+  const raw=await getSettingJson(pool,'geofences',[]);
+  const geofences=Array.isArray(raw)?raw.filter(g=>g&&g.enabled!==false&&Number.isFinite(Number(g.latitude))&&Number.isFinite(Number(g.longitude))&&Number(g.radius_feet)>0):[];
+  let match=null,bestDistance=null;
+  for(const g of geofences){
+    const distance=distanceFeet(location.latitude,location.longitude,Number(g.latitude),Number(g.longitude));
+    if(bestDistance==null||distance<bestDistance)bestDistance=distance;
+    if(distance<=Number(g.radius_feet)){match=g;break;}
+  }
+  return {allowed:Boolean(match),reason:match?null:'outside_geofence',trusted_network:false,force_gps:true,geofence_enforcement:true,matched_geofence:match?{id:match.id,name:match.name}:null,nearest_geofence_distance_feet:bestDistance==null?null:Math.round(bestDistance),source_ip:sourceIp,...location};
+}
 async function recordPunchMetadata({pool,req,employeeId,timeEntryId,punchType}){const location=normalizeLocation(req.body||{});const sourceIp=getRequestIp(req);const forwardedFor=typeof req.headers?.['x-forwarded-for']==='string'?req.headers['x-forwarded-for'].slice(0,1000):null;const clientSource=normalizeClientSource(req.body?.client_source);await pool.query(`INSERT INTO time_punch_metadata(time_entry_id,employee_id,punch_type,source_ip,forwarded_for,latitude,longitude,accuracy_meters,location_status,client_source) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,[timeEntryId,employeeId,punchType,sourceIp,forwardedFor,location.latitude,location.longitude,location.accuracy_meters,location.location_status,clientSource]);return {source_ip:sourceIp,...location,client_source:clientSource};}
 module.exports={getRequestIp,normalizeIp,normalizeLocation,normalizeClientSource,defaultTrustedNetworks,trustedNetworks,trustedNetworkIps,isTrustedRequest,distanceFeet,punchLocationGate,recordPunchMetadata};
