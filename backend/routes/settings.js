@@ -20,11 +20,24 @@ function createSettingsRouter({requireUser,requireAnyPermission,pool,audit}){
     try{
       const networks=await getJson('trusted_networks',defaultTrustedNetworks());
       const geofences=await getJson('geofences',[]);
+      const forceGps=await getJson('force_gps',true);
       const enforcement=await getJson('geofence_enforcement',false);
-      res.json({trusted_networks:networks,geofences:Array.isArray(geofences)?geofences:[],geofence_enforcement:enforcement===true});
+      res.json({trusted_networks:networks,force_gps:forceGps===true,geofences:Array.isArray(geofences)?geofences:[],geofence_enforcement:enforcement===true});
     }catch(err){console.error(err);res.status(500).json({error:'Unable to load location settings'});}
   });
-  router.post('/admin/settings/location-toggles',requireUser,admin,async(req,res)=>{\n    try{\n      const key=req.body?.key;\n      if(!['trusted_network_enforcement','geofence_enforcement'].includes(key))return res.status(400).json({error:'Invalid location setting'});\n      const enabled=req.body?.enabled===true;\n      if(key==='geofence_enforcement'&&enabled){const geofences=await getJson('geofences',[]);if(!Array.isArray(geofences)||!geofences.some(g=>g&&g.enabled!==false))return res.status(409).json({error:'Add at least one enabled geofence before turning on geofence enforcement'});}\n      await putJson(key,enabled);\n      await audit(req.user.id,key+'_changed','settings',key,{enabled});\n      res.json({key,enabled});\n    }catch(err){console.error(err);res.status(500).json({error:'Unable to update location setting'});}\n  });\n  router.post('/admin/settings/trusted-networks',requireUser,admin,async(req,res)=>{
+  router.post('/admin/settings/location-toggles',requireUser,admin,async(req,res)=>{
+    try{
+      const key=req.body?.key;
+      if(!['force_gps','geofence_enforcement'].includes(key))return res.status(400).json({error:'Invalid location setting'});
+      const enabled=req.body?.enabled===true;
+      if(key==='geofence_enforcement'&&enabled){const forceGps=await getJson('force_gps',true);if(forceGps!==true)return res.status(409).json({error:'Turn on Force GPS before enabling geofence enforcement'});const geofences=await getJson('geofences',[]);if(!Array.isArray(geofences)||!geofences.some(g=>g&&g.enabled!==false))return res.status(409).json({error:'Add at least one enabled geofence before turning on geofence enforcement'});}
+      await putJson(key,enabled);
+      if(key==='force_gps'&&!enabled)await putJson('geofence_enforcement',false);
+      await audit(req.user.id,key+'_changed','settings',key,{enabled});
+      res.json({key,enabled});
+    }catch(err){console.error(err);res.status(500).json({error:'Unable to update location setting'});}
+  });
+  router.post('/admin/settings/trusted-networks',requireUser,admin,async(req,res)=>{
     try{
       const name=String(req.body?.name||'').trim();
       const ip=normalizeIp(req.body?.ip);
