@@ -126,7 +126,7 @@ function compact(sql) { return String(sql).replace(/\s+/g, ' ').trim(); }
   assert.strictEqual(res.body.error, 'You are already clocked in');
 
   res = makeRes();
-  await handlerFor(router, 'post', '/clock-out')({ user: { id: 7, first_name: 'Pat' } }, res);
+  await handlerFor(router, 'post', '/clock-out')({ user: { id: 7, first_name: 'Pat' }, headers: { 'cf-connecting-ip': '64.139.245.9' }, body: { location_status: 'denied' } }, res);
   assert.strictEqual(res.statusCode, 400);
   assert.strictEqual(res.body.error, 'You are not currently clocked in');
   const clockOutSql = queries.find((item) => item.text.startsWith('UPDATE time_entries SET clock_out=NOW()'))?.text || '';
