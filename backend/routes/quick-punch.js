@@ -128,16 +128,17 @@ function createQuickPunchRouter({ requireUser, requireAnyPermission, pool, audit
       client_source: req.body?.client_source || 'web',
       reason: 'GPS required outside trusted County network',
     };
-    try {
-      await audit(req.user.id, 'punch_rejected_gps_required', 'employee', req.user.id, details);
-    } catch (err) {
-      console.error('Rejected punch GPS audit error', err);
-    }
     const outsideGeofence=gate.reason==='outside_geofence';
     if(outsideGeofence){
       details.reason='GPS location is outside configured geofences';
       details.nearest_geofence_distance_feet=gate.nearest_geofence_distance_feet;
       try{await audit(req.user.id,'punch_rejected_outside_geofence','employee',req.user.id,details);}catch(err){console.error('Rejected punch geofence audit error',err);}
+    }else{
+      try {
+        await audit(req.user.id, 'punch_rejected_gps_required', 'employee', req.user.id, details);
+      } catch (err) {
+        console.error('Rejected punch GPS audit error', err);
+      }
     }
     res.status(403).json({
       error: outsideGeofence
