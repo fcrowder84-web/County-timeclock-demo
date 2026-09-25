@@ -116,7 +116,7 @@ function createQuickPunchRouter({ requireUser, requireAnyPermission, pool, audit
   }
 
   async function requirePunchLocation(req, res, punchType) {
-    const gate = punchLocationGate(req);
+    const gate = await punchLocationGate(req, pool);
     if (gate.allowed) return gate;
     const details = {
       punch_type: punchType,
