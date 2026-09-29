@@ -298,12 +298,7 @@
             <button id="exportButton" class="btn-export" onclick="exportPayrollCsv()">
                 Export CSV
             </button>
-
-            <button id="printSummaryButton" class="btn-print" onclick="window.print()">
-                Print / Save as PDF
-            </button>
-
-            <button id="printTimecardsButton" class="btn-print" onclick="openPrintableTimecards()">
+<button id="printTimecardsButton" class="btn-print" onclick="openPrintableTimecards()">
                 Print Payroll Timecards
             </button>
 
@@ -440,7 +435,6 @@
         function applyPermissionUi() {
             document.getElementById("exportButton").style.display = hasPermission("export_payroll") ? "inline-block" : "none";
             const canPrint = hasPermission("view_payroll_records");
-            document.getElementById("printSummaryButton").style.display = canPrint ? "inline-block" : "none";
             document.getElementById("printTimecardsButton").style.display = canPrint ? "inline-block" : "none";
             document.getElementById("finalizePeriodButton").style.display = hasPermission("finalize_pay_period") ? "inline-block" : "none";
         }
