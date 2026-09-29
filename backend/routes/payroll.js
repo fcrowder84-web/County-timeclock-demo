@@ -1,6 +1,7 @@
 'use strict';
 
 const express = require('express');
+const { summarizeTimecard } = require('../lib/timecard-summary');
 
 function positiveInt(value,label='employee'){
   const parsed=Number(value);
@@ -295,10 +296,72 @@ function createPayrollRouter({
         const rows=await filterRowsByScope(
           result.rows,'employee_id',req.user,'view_payroll_records',canAccessEmployee,
         );
+        const employeeIds=[...new Set(rows.map(row=>Number(row.employee_id)).filter(Number.isInteger))];
+        let leaveRows=[];
+        let lunchSettings=[];
+        let lunchWaivers=[];
+        if(employeeIds.length){
+          const [leaveResult,lunchSettingsResult,lunchWaiversResult]=await Promise.all([
+            pool.query(
+              `SELECT employee_id,to_char(leave_date,'YYYY-MM-DD') AS leave_date_iso,
+                      leave_type,quarter_hours,status
+                 FROM leave_entries
+                WHERE employee_id=ANY($1::int[])
+                  AND leave_date BETWEEN $2::date AND $3::date
+                  AND status IN ('pending','approved')
+                ORDER BY employee_id,leave_date,id`,
+              [employeeIds,period.pay_period_start,period.pay_period_end],
+            ),
+            pool.query(
+              `SELECT employee_id,to_char(effective_date,'YYYY-MM-DD') AS effective_date_iso,
+                      enabled,minutes
+                 FROM forced_lunch_setting_history
+                WHERE employee_id=ANY($1::int[])
+                  AND effective_date <= $2::date
+                ORDER BY employee_id,effective_date,id`,
+              [employeeIds,period.pay_period_end],
+            ),
+            pool.query(
+              `SELECT employee_id,to_char(work_date,'YYYY-MM-DD') AS work_date_iso,
+                      active,reason,source,waived_by_employee_id
+                 FROM forced_lunch_waivers
+                WHERE employee_id=ANY($1::int[])
+                  AND work_date BETWEEN $2::date AND $3::date
+                  AND active=TRUE
+                ORDER BY employee_id,work_date,id`,
+              [employeeIds,period.pay_period_start,period.pay_period_end],
+            ),
+          ]);
+          leaveRows=leaveResult.rows;
+          lunchSettings=lunchSettingsResult.rows;
+          lunchWaivers=lunchWaiversResult.rows;
+        }
+
+        const summaries={};
+        for(const employeeId of employeeIds){
+          const employeeEntries=rows
+            .filter(row=>Number(row.employee_id)===employeeId&&row.time_entry_id)
+            .map(row=>({
+              clock_in:row.clock_in_raw,
+              clock_out:row.clock_out_raw,
+              work_date:row.work_date_iso,
+              hours_worked:row.hours_worked,
+            }));
+          summaries[employeeId]=summarizeTimecard({
+            entries:employeeEntries,
+            leaveEntries:leaveRows.filter(row=>Number(row.employee_id)===employeeId),
+            payPeriodStart:period.pay_period_start,
+            forcedLunchSettings:lunchSettings.filter(row=>Number(row.employee_id)===employeeId),
+            lunchWaivers:lunchWaivers.filter(row=>Number(row.employee_id)===employeeId),
+          });
+        }
+
         return res.json({
           pay_period_start:period.pay_period_start,
           pay_period_end:period.pay_period_end,
           rows,
+          leave_entries:leaveRows,
+          timecard_summaries:summaries,
         });
       }catch(err){
         console.error(err);
