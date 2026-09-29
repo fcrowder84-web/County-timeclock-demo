@@ -97,10 +97,14 @@
 
         th,
         td {
-            padding: 5px;
+            padding: 4px;
             border: 1px solid #ccc;
-            text-align: left;
+            text-align: center;
+            white-space: nowrap;
+            font-size: 11px;
         }
+
+        th:first-child, td:first-child { text-align:left; }
 
         th {
             background: #ececec;
@@ -159,12 +163,12 @@
 
         @media print {
             @page {
-                size: letter portrait;
+                size: letter landscape;
                 margin: 0.3in;
             }
 
             body {
-               zoom: 0.68;
+               zoom: 0.72;
             }           
             
             body {
@@ -276,300 +280,134 @@
             return grouped;
         }
 
-        function durationMinutes(hours) {
-            return Math.max(0, Math.round(Number(hours || 0) * 60));
+        function num(value) { return Number(value || 0); }
+        function fmt(value) { return num(value).toFixed(2); }
+        function dateOnly(value) { return String(value || "").slice(0, 10); }
+        function otherTotal(map) {
+            return Object.entries(map || {})
+                .filter(([key]) => !["holiday","vacation","sick","floating_holiday"].includes(key))
+                .reduce((sum,[,value]) => sum + num(value), 0);
         }
-
-        function formatExactDuration(hours) {
-            const minutes = durationMinutes(hours);
-            return `${Math.floor(minutes / 60)}h ${String(minutes % 60).padStart(2, "0")}m`;
+        function leaveHours(leaves, day, type) {
+            return leaves
+                .filter(item => dateOnly(item.leave_date_iso) === day && item.status === "approved")
+                .filter(item => type === "other"
+                    ? !["holiday","vacation","sick","floating_holiday"].includes(item.leave_type)
+                    : item.leave_type === type)
+                .reduce((sum,item) => sum + num(item.quarter_hours) / 4, 0);
         }
-
-        function rulePunchMs(value) {
-            const ms = value ? new Date(value).getTime() : NaN;
-            if (!Number.isFinite(ms)) return null;
-            const d = new Date(ms);
-            const elapsed = (((d.getMinutes() % 15) * 60 + d.getSeconds()) * 1000) + d.getMilliseconds();
-            const start = ms - elapsed;
-            return elapsed < 8 * 60 * 1000 ? start : start + 15 * 60 * 1000;
-        }
-
-        function roundedDailyHours(entries, dateField) {
-            const days = {};
+        function punchList(entries) {
+            const punches = [];
             entries.forEach(entry => {
-                const day = entry[dateField] || "";
-                if (!days[day]) days[day] = {
-                    minutes: 0,
-                    firstIn: null,
-                    lastOut: null,
-                    intervals: [],
-                    forcedEnabled: false,
-                    lunchMinutes: 0,
-                    waived: false
-                };
-                const item = days[day];
-                // Totals use ruled punch endpoints; raw duration remains display/audit only.
-                const inMs = entry.clock_in_raw ? new Date(entry.clock_in_raw).getTime() : NaN;
-                const outMs = entry.clock_out_raw ? new Date(entry.clock_out_raw).getTime() : NaN;
-                if (Number.isFinite(inMs)) item.firstIn = item.firstIn == null ? inMs : Math.min(item.firstIn, inMs);
-                if (Number.isFinite(outMs)) item.lastOut = item.lastOut == null ? outMs : Math.max(item.lastOut, outMs);
-                if (Number.isFinite(inMs) && Number.isFinite(outMs) && outMs >= inMs) {
-                    const ruledInMs = rulePunchMs(inMs);
-                    const ruledOutMs = rulePunchMs(outMs);
-                    if (ruledInMs != null && ruledOutMs != null && ruledOutMs >= ruledInMs) {
-                        item.minutes += Math.round((ruledOutMs - ruledInMs) / 60000);
-                        item.intervals.push({ inMs, outMs, ruledInMs, ruledOutMs });
-                    }
-                }
-                item.forcedEnabled = entry.forced_lunch_enabled === true || String(entry.forced_lunch_enabled) === "true";
-                item.lunchMinutes = Math.max(item.lunchMinutes, Number(entry.forced_lunch_minutes || 0));
-                item.waived = item.waived || entry.lunch_waived === true || String(entry.lunch_waived) === "true";
+                if (entry.clock_in) punches.push(entry.clock_in);
+                punches.push(entry.clock_out || "OPEN");
             });
-            return Object.values(days).reduce((total, item) => {
-                const completedQuarters = Math.floor(item.minutes / 15) * 15;
-                const grossMinutes = completedQuarters + (item.minutes % 15 > 5 ? 15 : 0);
-                const intervals = [...item.intervals].sort((a, b) => a.inMs - b.inMs);
-                let existingBreakMinutes = 0;
-                let previousOutMs = null;
-                intervals.forEach(interval => {
-                    if (previousOutMs != null && interval.ruledInMs > previousOutMs) {
-                        existingBreakMinutes += Math.round((interval.ruledInMs - previousOutMs) / 60000);
-                    }
-                    previousOutMs = previousOutMs == null ? interval.ruledOutMs : Math.max(previousOutMs, interval.ruledOutMs);
-                });
-                const deductionMinutes = item.forcedEnabled && !item.waived
-                    ? Math.min(grossMinutes, Math.max(0, item.lunchMinutes - existingBreakMinutes))
-                    : 0;
-                return total + grossMinutes - deductionMinutes;
-            }, 0) / 60;
+            return punches;
         }
-
-        function getWeekNumber(dateString) {
-            const date = new Date(dateString);
-            const start = new Date(`${loadedPeriodStart}T00:00:00`);
-
-            const diffDays =
-                Math.floor((date - start) / (1000 * 60 * 60 * 24));
-
-            return diffDays < 7 ? 1 : 2;
+        function totalRow(label, summary, className) {
+            const leave = summary?.leave_hours_by_type || {};
+            return \`<tr class="\${className}">
+                <td colspan="2"><strong>\${esc(label)}</strong></td>
+                <td>\${fmt(num(summary?.regular_worked_hours) + num(summary?.forced_lunch_hours))}</td>
+                <td>\${num(summary?.forced_lunch_hours) ? "-" + fmt(summary.forced_lunch_hours) : ""}</td>
+                <td>\${fmt(summary?.overtime_hours)}</td>
+                <td>\${fmt(leave.holiday)}</td>
+                <td>\${fmt(leave.vacation)}</td>
+                <td>\${fmt(leave.sick)}</td>
+                <td>\${fmt(leave.floating_holiday)}</td>
+                <td>\${fmt(otherTotal(leave))}</td>
+                <td><strong>\${fmt(summary?.total_paid_hours)}</strong></td>
+            </tr>\`;
         }
-
-        function calculateRegularAndOt(totalHours) {
-            const regular = Math.min(totalHours, 40);
-            const overtime = Math.max(totalHours - 40, 0);
-
-            return {
-                regular,
-                overtime
-            };
-        }
-
-        function renderWeekTable(title, entries, colorOffset) {
-            const totalHours = roundedDailyHours(entries, "work_date");
-            let rowsHtml = "";
-            let previousDate = null;
-            let dayIndex = colorOffset;
-
+        function renderEmployeeTable(employeeId, entries, leaves, summary, periodStart) {
+            const entryMap = {};
             entries.forEach(entry => {
-                const hours = Number(entry.hours_worked || 0);
-
-                if (entry.work_date !== previousDate) {
-                    dayIndex++;
-                    previousDate = entry.work_date;
-                }
-
-                const dayClass =
-                    dayIndex % 2 === 0
-                        ? "day-a"
-                        : "day-b";
-
-                rowsHtml += `
-                    <tr class="${dayClass}">
-                        <td>${entry.work_date || ""}</td>
-                        <td>${entry.clock_in || ""}</td>
-                        <td>${entry.clock_out || "OPEN"}</td>
-                        <td>${entry.clock_out_raw ? formatExactDuration(hours) : "OPEN"}</td>
-                    </tr>
-                `;
+                const day = dateOnly(entry.work_date_iso);
+                (entryMap[day] ||= []).push(entry);
             });
-
-            const totals = calculateRegularAndOt(totalHours);
-
-            rowsHtml += `
-                <tr class="week-total">
-                    <td colspan="3">${title} Totals</td>
-                    <td>
-                        Total: ${totalHours.toFixed(2)}
-                        <br>
-                        Regular: ${totals.regular.toFixed(2)}
-                        <br>
-                        OT: ${totals.overtime.toFixed(2)}
-                    </td>
-                </tr>
-            `;
-
-            return {
-                html: `
-                    <div class="week-box">
-                        <div class="week-header">${title}</div>
-
-                        <table>
-                            <thead>
-                                <tr>
-                                    <th>Date</th>
-                                    <th>Clock In</th>
-                                    <th>Clock Out</th>
-                                    <th>Hours</th>
-                                </tr>
-                            </thead>
-
-                            <tbody>
-                                ${rowsHtml}
-                            </tbody>
-                        </table>
-                    </div>
-                `,
-                totalHours,
-                regular: totals.regular,
-                overtime: totals.overtime
-            };
+            const daySummary = Object.fromEntries((summary?.days || []).map(day => [day.work_date, day]));
+            const rows = [];
+            let weekWorked = 0;
+            for (let offset = 0; offset < 14; offset++) {
+                const date = new Date(\`\${periodStart}T12:00:00\`);
+                date.setDate(date.getDate() + offset);
+                const day = date.toISOString().slice(0,10);
+                const dayEntries = entryMap[day] || [];
+                const punches = punchList(dayEntries);
+                const worked = num(daySummary[day]?.total_worked_hours);
+                const forced = num(daySummary[day]?.forced_lunch_deduction_hours);
+                const remaining = Math.max(0, 40 - weekWorked);
+                const regular = Math.min(worked, remaining);
+                const ot = Math.max(0, worked - regular);
+                weekWorked += worked;
+                const holiday = leaveHours(leaves, day, "holiday");
+                const vacation = leaveHours(leaves, day, "vacation");
+                const sick = leaveHours(leaves, day, "sick");
+                const floating = leaveHours(leaves, day, "floating_holiday");
+                const other = leaveHours(leaves, day, "other");
+                const paid = worked + holiday + vacation + sick + floating + other;
+                rows.push(\`<tr class="\${offset % 2 ? "day-b" : "day-a"}">
+                    <td>\${date.toLocaleDateString([], {weekday:"short",month:"numeric",day:"numeric"})}</td>
+                    <td>\${punches.map(esc).join(" · ")}</td>
+                    <td>\${fmt(regular + forced)}</td>
+                    <td>\${forced ? "-" + fmt(forced) : ""}</td>
+                    <td>\${fmt(ot)}</td>
+                    <td>\${holiday ? fmt(holiday) : ""}</td>
+                    <td>\${vacation ? fmt(vacation) : ""}</td>
+                    <td>\${sick ? fmt(sick) : ""}</td>
+                    <td>\${floating ? fmt(floating) : ""}</td>
+                    <td>\${other ? fmt(other) : ""}</td>
+                    <td>\${fmt(paid)}</td>
+                </tr>\`);
+                if (offset === 6) {
+                    rows.push(totalRow("Week 1 Totals", summary?.weeks?.[0], "week-total"));
+                    weekWorked = 0;
+                }
+                if (offset === 13) rows.push(totalRow("Week 2 Totals", summary?.weeks?.[1], "week-total"));
+            }
+            rows.push(totalRow("Pay Period Totals", summary?.period, "week-total"));
+            return \`<table>
+                <thead><tr>
+                    <th>Day / Date</th><th>Punches</th><th>Regular</th><th>Forced Lunch</th><th>OT</th>
+                    <th>Holiday</th><th>Vacation</th><th>Sick</th><th>Floating</th><th>Other</th><th>Total</th>
+                </tr></thead>
+                <tbody>\${rows.join("")}</tbody>
+            </table>\`;
         }
 
         async function loadTimecards() {
-            const response =
-                await apiFetch(`${apiBase}/payroll/print-timecards`);
-
-            const data =
-                await response.json();
-
+            const response = await apiFetch(\`\${apiBase}/payroll/print-timecards\`);
+            const data = await response.json();
             loadedPeriodStart = data.pay_period_start;
-
-            const grouped =
-                groupByEmployee(data.rows);
-
+            const grouped = groupByEmployee(data.rows);
+            const allLeaves = data.leave_entries || [];
             let html = "";
 
             Object.values(grouped).forEach(group => {
                 const employee = group.employee;
-
-                const week1Entries = [];
-                const week2Entries = [];
-
-                group.entries.forEach(entry => {
-                    const week = getWeekNumber(entry.work_date);
-
-                    if (week === 1) {
-                        week1Entries.push(entry);
-                    } else {
-                        week2Entries.push(entry);
-                    }
-                });
-
-                const week1 = renderWeekTable(
-                    "Week 1",
-                    week1Entries,
-                    0
-                );
-
-                const week2 = renderWeekTable(
-                    "Week 2",
-                    week2Entries,
-                    1
-                );
-
-                const payPeriodRegular =
-                    week1.regular + week2.regular;
-
-                const payPeriodOt =
-                    week1.overtime + week2.overtime;
-
-                const payPeriodTotal =
-                    week1.totalHours + week2.totalHours;
-
-                html += `
+                const employeeId = Number(employee.employee_id);
+                const summary = (data.timecard_summaries || {})[employeeId] || {};
+                const leaves = allLeaves.filter(item => Number(item.employee_id) === employeeId);
+                html += \`
                     <div class="timecard">
-
                         <div class="header">
                             <h1>Edgefield County Timecard</h1>
-
-                            <div>
-                                Pay Period:
-                                ${data.pay_period_start}
-                                through
-                                ${data.pay_period_end}
-                            </div>
+                            <div>Pay Period: \${esc(data.pay_period_start)} through \${esc(data.pay_period_end)}</div>
                         </div>
-
                         <div class="employee-info">
-
-                            <div class="info-box">
-                                <strong>Employee</strong><br>
-                                ${esc(employee.first_name)}
-                                ${esc(employee.last_name)}
-                            </div>
-
-                            <div class="info-box">
-                                <strong>Employee Number</strong><br>
-                                ${esc(employee.employee_number)}
-                            </div>
-
-                            <div class="info-box">
-                                <strong>Department</strong><br>
-                                ${esc(employee.department || "-")}
-                            </div>
-
-                            <div class="info-box">
-                                <strong>Status</strong><br>
-                                <span class="${getStatusClass(employee.approval_status)}">
-                                    ${esc(employee.approval_status || "pending")}
-                                </span>
-                            </div>
-
+                            <div class="info-box"><strong>Employee</strong><br>\${esc(employee.first_name)} \${esc(employee.last_name)}</div>
+                            <div class="info-box"><strong>Employee Number</strong><br>\${esc(employee.employee_number)}</div>
+                            <div class="info-box"><strong>Department</strong><br>\${esc(employee.department || "-")}</div>
+                            <div class="info-box"><strong>Status</strong><br><span class="\${getStatusClass(employee.approval_status)}">\${esc(employee.approval_status || "pending")}</span></div>
                         </div>
-
-                        ${week1.html}
-
-                        ${week2.html}
-
-                        <div class="period-total">
-                            Pay Period Total Hours:
-                            ${payPeriodTotal.toFixed(2)}
-                            <br>
-                            Pay Period Regular Hours:
-                            ${payPeriodRegular.toFixed(2)}
-                            <br>
-                            Pay Period OT Hours:
-                            ${payPeriodOt.toFixed(2)}
-                        </div>
-
+                        \${renderEmployeeTable(employeeId, group.entries, leaves, summary, data.pay_period_start)}
                         <div class="signatures">
-
-                            <div class="signature-box">
-                                Employee Signature
-
-                                <br><br>
-
-                                Submitted:
-                                ${employee.employee_signed_at || "Not Submitted"}
-                            </div>
-
-                            <div class="signature-box">
-                                Supervisor Approval
-
-                                <br><br>
-
-                                Approved:
-                                ${employee.supervisor_approved_at || "Not Approved"}
-                            </div>
-
+                            <div class="signature-box"><strong>Employee Approval</strong><br><br>Submitted: \${esc(employee.employee_signed_at || "Not Submitted")}</div>
+                            <div class="signature-box"><strong>Supervisor Approval</strong><br><br>Approved: \${esc(employee.supervisor_approved_at || "Not Approved")}</div>
                         </div>
-
-                    </div>
-                `;
+                    </div>\`;
             });
-
-            document.getElementById("timecardsContainer")
-                .innerHTML = html;
+            document.getElementById("timecardsContainer").innerHTML = html;
         }
 
         loadTimecards();
