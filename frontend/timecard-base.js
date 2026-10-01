@@ -136,5 +136,5 @@ function leaveCell(day,type){
 }
 function otherTotal(map){return Object.entries(map||{}).filter(([k])=>!["holiday","vacation","sick","floating_holiday"].includes(k)).reduce((a,[,v])=>a+num(v),0)}
 function totalRow(label,summary,klass){
-  const m=summary?.leave_hours_by_type||{};return `<tr class="${klass}"><td class="left" colspan="5">${esc(label)}</td><td>${fmt(num(summary?.regular_worked_hours)+num(summary?.forced_lunch_hours))}</td><td>${num(summary?.forced_lunch_hours)>0?"-"+fmt(summary.forced_lunch_hours):""}</td><td>${fmt(summary?.overtime_hours)}</td><td>${fmt(m.holiday)}</td><td>${fmt(m.vacation)}</td><td>${fmt(m.sick)}</td><td>${fmt(m.floating_holiday)}</td><td>${fmt(otherTotal(m))}</td><td>${fmt(summary?.total_paid_hours)}</td></tr>`
+  const m=summary?.adjusted_leave_hours_by_type||summary?.leave_hours_by_type||{};return `<tr class="${klass}"><td class="left" colspan="5">${esc(label)}</td><td>${fmt(num(summary?.regular_worked_hours)+num(summary?.forced_lunch_hours))}</td><td>${num(summary?.forced_lunch_hours)>0?"-"+fmt(summary.forced_lunch_hours):""}</td><td>${fmt(summary?.overtime_hours)}</td><td>${fmt(m.holiday)}</td><td>${fmt(m.vacation)}</td><td>${fmt(m.sick)}</td><td>${fmt(m.floating_holiday)}</td><td>${fmt(otherTotal(m))}</td><td>${fmt(summary?.total_paid_hours)}</td></tr>`
 }
