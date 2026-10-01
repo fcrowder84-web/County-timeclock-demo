@@ -181,6 +181,8 @@ function createPayrollRouter({
              e.last_name,
              e.weekly_hours_cap,
              d.name AS department,
+             COALESCE(ppa.status,'pending') AS timecard_status,
+             te.id AS time_entry_id,
              to_char(te.clock_in,'MM/DD/YYYY') AS work_date,
              to_char(te.clock_in,'YYYY-MM-DD') AS work_date_iso,
              te.clock_in AS clock_in_raw,
@@ -195,11 +197,18 @@ function createPayrollRouter({
                 WHERE flw.employee_id=e.id
                   AND flw.work_date=te.clock_in::date
                   AND flw.active=TRUE
-             ) AS lunch_waived,
-             COALESCE(ppa.status,'pending') AS timecard_status
-           FROM time_entries te
-           JOIN employees e ON e.id=te.employee_id
+             ) AS lunch_waived
+           FROM employees e
            LEFT JOIN departments d ON d.id=e.department_id
+           LEFT JOIN pay_period_approvals ppa
+             ON ppa.employee_id=e.id
+            AND ppa.pay_period_start=$1::date
+            AND ppa.pay_period_end=$2::date
+           LEFT JOIN time_entries te
+             ON te.employee_id=e.id
+            AND te.deleted_at IS NULL
+            AND te.clock_in >= $1::date
+            AND te.clock_in < ($2::date + INTERVAL '1 day')
            LEFT JOIN LATERAL (
              SELECT flsh.enabled,flsh.minutes
                FROM forced_lunch_setting_history flsh
@@ -208,19 +217,98 @@ function createPayrollRouter({
               ORDER BY flsh.effective_date DESC
               LIMIT 1
            ) lunch_setting ON TRUE
-           LEFT JOIN pay_period_approvals ppa
-             ON ppa.employee_id=e.id
-            AND ppa.pay_period_start=$1::date
-            AND ppa.pay_period_end=$2::date
-           WHERE te.deleted_at IS NULL
-             AND te.clock_in >= $1::date
-             AND te.clock_in < ($2::date + INTERVAL '1 day')
-           ORDER BY d.name,e.last_name,te.clock_in`,
+           WHERE (
+             e.active=TRUE
+             OR ppa.id IS NOT NULL
+             OR EXISTS (
+               SELECT 1 FROM time_entries period_te
+                WHERE period_te.employee_id=e.id
+                  AND period_te.deleted_at IS NULL
+                  AND period_te.clock_in >= $1::date
+                  AND period_te.clock_in < ($2::date + INTERVAL '1 day')
+             )
+             OR EXISTS (
+               SELECT 1 FROM leave_entries period_leave
+                WHERE period_leave.employee_id=e.id
+                  AND period_leave.leave_date BETWEEN $1::date AND $2::date
+                  AND period_leave.status IN ('pending','approved')
+             )
+           )
+           ORDER BY d.name,e.last_name,e.first_name,te.clock_in`,
           [period.pay_period_start,period.pay_period_end],
         );
-        return res.json(await filterRowsByScope(
+        const rows=await filterRowsByScope(
           result.rows,'employee_id',req.user,'export_payroll',canAccessEmployee,
-        ));
+        );
+        const employeeIds=[...new Set(rows.map(row=>Number(row.employee_id)).filter(Number.isInteger))];
+        let leaveRows=[];
+        let lunchSettings=[];
+        let lunchWaivers=[];
+        if(employeeIds.length){
+          const [leaveResult,lunchSettingsResult,lunchWaiversResult]=await Promise.all([
+            pool.query(
+              `SELECT employee_id,to_char(leave_date,'YYYY-MM-DD') AS leave_date_iso,
+                      leave_type,quarter_hours,status
+                 FROM leave_entries
+                WHERE employee_id=ANY($1::int[])
+                  AND leave_date BETWEEN $2::date AND $3::date
+                  AND status IN ('pending','approved')
+                ORDER BY employee_id,leave_date,id`,
+              [employeeIds,period.pay_period_start,period.pay_period_end],
+            ),
+            pool.query(
+              `SELECT employee_id,to_char(effective_date,'YYYY-MM-DD') AS effective_date_iso,
+                      enabled,minutes
+                 FROM forced_lunch_setting_history
+                WHERE employee_id=ANY($1::int[])
+                  AND effective_date <= $2::date
+                ORDER BY employee_id,effective_date,id`,
+              [employeeIds,period.pay_period_end],
+            ),
+            pool.query(
+              `SELECT employee_id,to_char(work_date,'YYYY-MM-DD') AS work_date_iso,
+                      active,reason,source,waived_by_employee_id
+                 FROM forced_lunch_waivers
+                WHERE employee_id=ANY($1::int[])
+                  AND work_date BETWEEN $2::date AND $3::date
+                  AND active=TRUE
+                ORDER BY employee_id,work_date,id`,
+              [employeeIds,period.pay_period_start,period.pay_period_end],
+            ),
+          ]);
+          leaveRows=leaveResult.rows;
+          lunchSettings=lunchSettingsResult.rows;
+          lunchWaivers=lunchWaiversResult.rows;
+        }
+
+        const summaries={};
+        for(const employeeId of employeeIds){
+          const employeeEntries=rows
+            .filter(row=>Number(row.employee_id)===employeeId&&row.time_entry_id)
+            .map(row=>({
+              clock_in:row.clock_in_raw,
+              clock_out:row.clock_out_raw,
+              work_date:row.work_date_iso,
+              hours_worked:row.hours_worked,
+            }));
+          const employeeRow=rows.find(row=>Number(row.employee_id)===employeeId);
+          summaries[employeeId]=summarizeTimecard({
+            entries:employeeEntries,
+            leaveEntries:leaveRows.filter(row=>Number(row.employee_id)===employeeId),
+            payPeriodStart:period.pay_period_start,
+            forcedLunchSettings:lunchSettings.filter(row=>Number(row.employee_id)===employeeId),
+            lunchWaivers:lunchWaivers.filter(row=>Number(row.employee_id)===employeeId),
+            weeklyHoursCap:employeeRow?.weekly_hours_cap,
+          });
+        }
+
+        return res.json({
+          pay_period_start:period.pay_period_start,
+          pay_period_end:period.pay_period_end,
+          rows,
+          leave_entries:leaveRows,
+          timecard_summaries:summaries,
+        });
       }catch(err){
         console.error(err);
         return res.status(err.statusCode||500).json({error:err.message||'Payroll export error'});
