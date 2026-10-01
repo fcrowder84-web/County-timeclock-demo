@@ -36,12 +36,12 @@
                 <div class="summary-box"><strong>Overtime Worked</strong><br>${hours(p.overtime_hours)}</div>
                 <div class="summary-box"><strong>Total Worked</strong><br>${hours(p.total_worked_hours)}</div>
                 ${summary.forced_lunch_enabled ? `<div class="summary-box"><strong>Forced Lunch</strong><br>−${hours(p.forced_lunch_hours)}</div>` : ``}
-                <div class="summary-box"><strong>Total Leave</strong><br>${hours(p.total_leave_hours)}</div>
+                <div class="summary-box"><strong>Approved Leave</strong><br>${hours(p.total_leave_hours)}</div>\n                ${Number(p.leave_hours_reduced_by_cap || 0) > 0 ? `<div class="summary-box"><strong>Reduced By Cap</strong><br>${hours(p.leave_hours_reduced_by_cap)}</div><div class="summary-box"><strong>Charged Leave</strong><br>${hours(p.adjusted_total_leave_hours)}</div>` : ``}
                 <div class="summary-box"><strong>Total Paid</strong><br>${hours(p.total_paid_hours)}</div>
             </div>
             <div style="margin:12px 0 18px;overflow-x:auto;">
                 <table>
-                    <thead><tr><th>Week</th><th>Regular Worked</th><th>OT Worked</th><th>Total Worked</th><th>Forced Lunch</th><th>Approved Leave</th><th>Total Leave</th><th>Total Paid</th></tr></thead>
+                    <thead><tr><th>Week</th><th>Regular Worked</th><th>OT Worked</th><th>Total Worked</th><th>Forced Lunch</th><th>Approved Leave</th><th>Total Approved Leave</th><th>Reduced By Cap</th><th>Charged Leave</th><th>Total Charged Leave</th><th>Total Paid</th></tr></thead>
                     <tbody>${weekRows}</tbody>
                 </table>
                 ${Number(p.pending_leave_hours || 0) > 0 ? `<p><strong>Pending leave:</strong> ${leaveText(p.pending_leave_hours_by_type)}. Pending leave is not included in paid totals.</p>` : ''}
