@@ -27,6 +27,9 @@
                 <td>${hours(week.forced_lunch_hours)}</td>
                 <td>${leaveText(week.leave_hours_by_type)}</td>
                 <td>${hours(week.total_leave_hours)}</td>
+                <td>${hours(week.leave_hours_reduced_by_cap)}</td>
+                <td>${leaveText(week.adjusted_leave_hours_by_type || week.leave_hours_by_type)}</td>
+                <td>${hours(week.adjusted_total_leave_hours ?? week.total_leave_hours)}</td>
                 <td><strong>${hours(week.total_paid_hours)}</strong></td>
             </tr>`).join('');
 
