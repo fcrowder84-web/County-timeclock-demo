@@ -370,13 +370,19 @@
                 if (offset === 13) rows.push(totalRow("Week 2 Totals", summary?.weeks?.[1], "week-total"));
             }
             rows.push(totalRow("Pay Period Totals", summary?.period, "week-total"));
+            const capNotes = (summary?.weeks || []).map((week, index) => {
+                if (!week?.cap_applied) return "";
+                const approved = num(week.total_leave_hours);
+                const charged = num(week.adjusted_total_leave_hours);
+                const reduced = num(week.leave_hours_reduced_by_cap);
+                return `<div><strong>Week ${index + 1} cap reconciliation:</strong> Approved leave ${fmt(approved)} · Leave reduced by cap ${fmt(reduced)} · Leave charged/payable ${fmt(charged)} · Payroll total ${fmt(week.total_paid_hours)} / ${fmt(week.weekly_hours_cap)} cap. Daily rows above show approved leave as recorded.</div>`;
+            }).filter(Boolean).join("");
             return `<table>
                 <thead><tr>
                     <th>Day / Date</th><th>Punches</th><th>Regular</th><th>Forced Lunch</th><th>OT</th>
                     <th>Holiday</th><th>Vacation</th><th>Sick</th><th>Floating</th><th>Other</th><th>Total</th>
                 </tr></thead>
-                <tbody>${rows.join("")}</tbody>
-            </table>`;
+                <tbody>${rows.join("")}</tbody>\n            </table>${capNotes ? `<div style="margin-top:8px;font-size:12px">${capNotes}</div>` : ""}`;
         }
 
         async function loadTimecards() {
