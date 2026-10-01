@@ -1008,13 +1008,12 @@
         }
 
         async function exportPayrollCsv() {
-            const [response, summaryResponse] = await Promise.all([
-                apiFetch(`${apiBase}/payroll/export-current-period`),
-                apiFetch(`${apiBase}/payroll/print-timecards`)
-            ]);
-
+            const response = await apiFetch(`${apiBase}/payroll/export-current-period`);
+            if (!response.ok) {
+                const error = await response.json().catch(() => ({}));
+                throw new Error(error.error || "Unable to export payroll");
+            }
             const rows = await response.json();
-            const summaryData = await summaryResponse.json();
 
             if (!rows || rows.length === 0) {
                 showMessage("No payroll data to export", true);
@@ -1109,51 +1108,6 @@
                     csvValue(lunchDeductionByFirstRow[index] || ""),
                     csvValue(creditedHoursByFirstRow[index] || ""),
                     csvValue(row.timecard_status)
-                ].join(","));
-            });
-
-            // Keep the punch-level detail above intact, then append the authoritative
-            // weekly/pay-period cap reconciliation used for payroll.
-            csvRows.push("");
-            csvRows.push([
-                "PAYROLL CAP SUMMARY","Employee Number","First Name","Last Name","Week",
-                "Actual Worked","Approved Leave","Leave Reduced By Cap","Leave Charged/Payable",
-                "Weekly Cap","Payroll Total"
-            ].join(","));
-            const summaryEmployees = {};
-            (summaryData.rows || []).forEach(row => {
-                if (!summaryEmployees[row.employee_id]) summaryEmployees[row.employee_id] = row;
-            });
-            Object.entries(summaryData.timecard_summaries || {}).forEach(([employeeId, summary]) => {
-                const employee = summaryEmployees[employeeId] || {};
-                (summary.weeks || []).forEach((week, index) => {
-                    csvRows.push([
-                        "PAYROLL CAP SUMMARY",
-                        csvValue(employee.employee_number),
-                        csvValue(employee.first_name),
-                        csvValue(employee.last_name),
-                        csvValue(`Week ${index + 1}`),
-                        csvValue(Number(week.total_worked_hours || 0).toFixed(2)),
-                        csvValue(Number(week.total_leave_hours || 0).toFixed(2)),
-                        csvValue(Number(week.leave_hours_reduced_by_cap || 0).toFixed(2)),
-                        csvValue(Number(week.adjusted_total_leave_hours || 0).toFixed(2)),
-                        csvValue(week.weekly_hours_cap == null ? "No Cap" : Number(week.weekly_hours_cap).toFixed(2)),
-                        csvValue(Number(week.total_paid_hours || 0).toFixed(2))
-                    ].join(","));
-                });
-                const period = summary.period || {};
-                csvRows.push([
-                    "PAYROLL CAP SUMMARY",
-                    csvValue(employee.employee_number),
-                    csvValue(employee.first_name),
-                    csvValue(employee.last_name),
-                    "Pay Period",
-                    csvValue(Number(period.total_worked_hours || 0).toFixed(2)),
-                    csvValue(Number(period.total_leave_hours || 0).toFixed(2)),
-                    csvValue(Number(period.leave_hours_reduced_by_cap || 0).toFixed(2)),
-                    csvValue(Number(period.adjusted_total_leave_hours || 0).toFixed(2)),
-                    "",
-                    csvValue(Number(period.total_paid_hours || 0).toFixed(2))
                 ].join(","));
             });
 
