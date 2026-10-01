@@ -341,17 +341,14 @@
                 const regular = Math.min(worked, remaining);
                 const ot = Math.max(0, worked - regular);
                 weekWorked += worked;
-                const weekSummary = summary?.weeks?.[offset < 7 ? 0 : 1] || {};
-                const adjustedMap = weekSummary.adjusted_leave_hours_by_type || weekSummary.leave_hours_by_type || {};
-                const rawMap = weekSummary.leave_hours_by_type || {};
-                const rawTotal = Object.values(rawMap).reduce((sum,value) => sum + num(value), 0);
-                const adjustedTotal = Object.values(adjustedMap).reduce((sum,value) => sum + num(value), 0);
-                const ratio = rawTotal > 0 ? adjustedTotal / rawTotal : 1;
-                const holiday = leaveHours(leaves, day, "holiday") * ratio;
-                const vacation = leaveHours(leaves, day, "vacation") * ratio;
-                const sick = leaveHours(leaves, day, "sick") * ratio;
-                const floating = leaveHours(leaves, day, "floating_holiday") * ratio;
-                const other = leaveHours(leaves, day, "other") * ratio;
+                // Daily rows preserve the approved leave entries exactly as recorded.
+                // Any weekly-cap reduction is shown only in the authoritative week/period totals
+                // so we do not invent fractional leave allocations on individual dates.
+                const holiday = leaveHours(leaves, day, "holiday");
+                const vacation = leaveHours(leaves, day, "vacation");
+                const sick = leaveHours(leaves, day, "sick");
+                const floating = leaveHours(leaves, day, "floating_holiday");
+                const other = leaveHours(leaves, day, "other");
                 const paid = worked + holiday + vacation + sick + floating + other;
                 rows.push(`<tr class="${offset % 2 ? "day-b" : "day-a"}">
                     <td>${date.toLocaleDateString([], {weekday:"short",month:"numeric",day:"numeric"})}</td>
