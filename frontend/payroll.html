@@ -1013,115 +1013,148 @@
                 const error = await response.json().catch(() => ({}));
                 throw new Error(error.error || "Unable to export payroll");
             }
-            const rows = await response.json();
+            const payload = await response.json();
+            const rows = Array.isArray(payload?.rows) ? payload.rows : [];
+            const summaries = payload?.timecard_summaries || {};
 
-            if (!rows || rows.length === 0) {
+            if (rows.length === 0) {
                 showMessage("No payroll data to export", true);
                 return;
             }
 
             const headers = [
+                "Record Type",
                 "Employee Number",
                 "First Name",
                 "Last Name",
                 "Department",
+                "Week",
                 "Date",
                 "Clock In",
                 "Clock Out",
                 "Exact Duration",
                 "Forced Lunch Deduction",
                 "Credited Daily Hours",
+                "Weekly Cap",
+                "Raw Worked Hours",
+                "Raw Leave Hours",
+                "Adjusted Payable Leave Hours",
+                "Adjusted Payable Leave By Type",
+                "Regular Payable Worked Hours",
+                "Overtime Hours",
+                "Total Payable Hours",
                 "Timecard Status"
             ];
+            const csvRows = [headers.join(",")];
 
-            const csvRows = [
-                headers.join(",")
-            ];
-
-            const dailyGroups = {};
-            rows.forEach((row, index) => {
-                const key = `${row.employee_number || row.employee_id}|${row.work_date_iso || row.work_date}`;
-                if (!dailyGroups[key]) dailyGroups[key] = {
-                    minutes: 0,
-                    firstIndex: index,
-                    firstIn: null,
-                    lastOut: null,
-                    intervals: [],
-                    forcedEnabled: false,
-                    lunchMinutes: 0,
-                    waived: false,
-                    hasOpen: false
-                };
-                const group = dailyGroups[key];
-                // Payroll totals are derived from independently ruled punch endpoints, never raw elapsed duration.
-                const inMs = row.clock_in_raw ? new Date(row.clock_in_raw).getTime() : NaN;
-                const outMs = row.clock_out_raw ? new Date(row.clock_out_raw).getTime() : NaN;
-                if (Number.isFinite(inMs) && !Number.isFinite(outMs)) group.hasOpen = true;
-                if (Number.isFinite(inMs)) group.firstIn = group.firstIn == null ? inMs : Math.min(group.firstIn, inMs);
-                if (Number.isFinite(outMs)) group.lastOut = group.lastOut == null ? outMs : Math.max(group.lastOut, outMs);
-                if (Number.isFinite(inMs) && Number.isFinite(outMs) && outMs >= inMs) {
-                    const ruledInMs = rulePunchMs(inMs);
-                    const ruledOutMs = rulePunchMs(outMs);
-                    if (ruledInMs != null && ruledOutMs != null && ruledOutMs >= ruledInMs) {
-                        group.minutes += Math.round((ruledOutMs - ruledInMs) / 60000);
-                        group.intervals.push({ inMs, outMs, ruledInMs, ruledOutMs });
-                    }
-                }
-                group.forcedEnabled = row.forced_lunch_enabled === true || String(row.forced_lunch_enabled) === "true";
-                group.lunchMinutes = Math.max(group.lunchMinutes, Number(row.forced_lunch_minutes || 0));
-                group.waived = group.waived || row.lunch_waived === true || String(row.lunch_waived) === "true";
+            const employeeRows = new Map();
+            rows.forEach(row => {
+                const employeeId = Number(row.employee_id);
+                if (!employeeRows.has(employeeId)) employeeRows.set(employeeId, []);
+                employeeRows.get(employeeId).push(row);
             });
-            const creditedHoursByFirstRow = {};
-            const lunchDeductionByFirstRow = {};
-            Object.values(dailyGroups).forEach(group => {
-                const grossMinutes = roundDailyMinutes(group.minutes);
-                const intervals = [...group.intervals].sort((a, b) => a.inMs - b.inMs);
-                let existingBreakMinutes = 0;
-                let previousOutMs = null;
-                intervals.forEach(interval => {
-                    if (previousOutMs != null && interval.ruledInMs > previousOutMs) {
-                        existingBreakMinutes += Math.round((interval.ruledInMs - previousOutMs) / 60000);
-                    }
-                    previousOutMs = previousOutMs == null ? interval.ruledOutMs : Math.max(previousOutMs, interval.ruledOutMs);
+
+            for (const [employeeId, allEmployeeRows] of employeeRows.entries()) {
+                const identity = allEmployeeRows[0] || {};
+                const summary = summaries[employeeId] || summaries[String(employeeId)] || null;
+                const punchRows = allEmployeeRows.filter(row => row.time_entry_id);
+                const dailySummary = new Map(
+                    (summary?.days || []).map(day => [day.work_date, day])
+                );
+                const firstPunchForDay = new Set();
+
+                punchRows.forEach(row => {
+                    const dayKey = row.work_date_iso || "";
+                    const day = dailySummary.get(dayKey);
+                    const showDailyTotals = !firstPunchForDay.has(dayKey);
+                    firstPunchForDay.add(dayKey);
+                    csvRows.push([
+                        csvValue("PUNCH DETAIL"),
+                        csvValue(row.employee_number),
+                        csvValue(row.first_name),
+                        csvValue(row.last_name),
+                        csvValue(row.department),
+                        "",
+                        csvValue(row.work_date),
+                        csvValue(row.clock_in),
+                        csvValue(row.clock_out || "OPEN"),
+                        csvValue(row.clock_out_raw ? formatExactDuration(row.hours_worked) : "OPEN"),
+                        csvValue(showDailyTotals && day ? Number(day.forced_lunch_deduction_hours || 0).toFixed(2) : ""),
+                        csvValue(showDailyTotals && day ? Number(day.total_worked_hours || 0).toFixed(2) : ""),
+                        "",
+                        "",
+                        "",
+                        "",
+                        "",
+                        "",
+                        "",
+                        "",
+                        csvValue(row.timecard_status)
+                    ].join(","));
                 });
-                const deductionMinutes = group.forcedEnabled && !group.waived
-                    ? Math.min(grossMinutes, Math.max(0, group.lunchMinutes - existingBreakMinutes))
-                    : 0;
-                creditedHoursByFirstRow[group.firstIndex] = group.hasOpen
-                    ? "OPEN"
-                    : ((grossMinutes - deductionMinutes) / 60).toFixed(2);
-                lunchDeductionByFirstRow[group.firstIndex] = group.hasOpen
-                    ? "OPEN"
-                    : (deductionMinutes ? (deductionMinutes / 60).toFixed(2) : "");
-            });
 
-            rows.forEach((row, index) => {
+                if (!summary) continue;
+
+                (summary.weeks || []).forEach(week => {
+                    csvRows.push([
+                        csvValue("WEEKLY PAYROLL"),
+                        csvValue(identity.employee_number),
+                        csvValue(identity.first_name),
+                        csvValue(identity.last_name),
+                        csvValue(identity.department),
+                        csvValue(week.week_number),
+                        "",
+                        "",
+                        "",
+                        "",
+                        "",
+                        "",
+                        csvValue(week.weekly_hours_cap == null ? "" : Number(week.weekly_hours_cap).toFixed(2)),
+                        csvValue(Number(week.total_worked_hours || 0).toFixed(2)),
+                        csvValue(Number(week.total_leave_hours || 0).toFixed(2)),
+                        csvValue(Number(week.adjusted_total_leave_hours || 0).toFixed(2)),
+                        csvValue(JSON.stringify(week.adjusted_leave_hours_by_type || {})),
+                        csvValue(Number(week.regular_worked_hours || 0).toFixed(2)),
+                        csvValue(Number(week.overtime_hours || 0).toFixed(2)),
+                        csvValue(Number(week.total_paid_hours || 0).toFixed(2)),
+                        csvValue(identity.timecard_status)
+                    ].join(","));
+                });
+
                 csvRows.push([
-                    csvValue(row.employee_number),
-                    csvValue(row.first_name),
-                    csvValue(row.last_name),
-                    csvValue(row.department),
-                    csvValue(row.work_date),
-                    csvValue(row.clock_in),
-                    csvValue(row.clock_out || "OPEN"),
-                    csvValue(row.clock_out_raw ? formatExactDuration(row.hours_worked) : "OPEN"),
-                    csvValue(lunchDeductionByFirstRow[index] || ""),
-                    csvValue(creditedHoursByFirstRow[index] || ""),
-                    csvValue(row.timecard_status)
+                    csvValue("PAY PERIOD PAYROLL"),
+                    csvValue(identity.employee_number),
+                    csvValue(identity.first_name),
+                    csvValue(identity.last_name),
+                    csvValue(identity.department),
+                    "",
+                    "",
+                    "",
+                    "",
+                    "",
+                    "",
+                    "",
+                    csvValue(summary.weekly_hours_cap == null ? "" : Number(summary.weekly_hours_cap).toFixed(2)),
+                    csvValue(Number(summary.period?.total_worked_hours || 0).toFixed(2)),
+                    csvValue(Number(summary.period?.total_leave_hours || 0).toFixed(2)),
+                    csvValue(Number(summary.period?.adjusted_total_leave_hours || 0).toFixed(2)),
+                    csvValue(JSON.stringify(summary.period?.adjusted_leave_hours_by_type || {})),
+                    csvValue(Number(summary.period?.regular_worked_hours || 0).toFixed(2)),
+                    csvValue(Number(summary.period?.overtime_hours || 0).toFixed(2)),
+                    csvValue(Number(summary.period?.total_paid_hours || 0).toFixed(2)),
+                    csvValue(identity.timecard_status)
                 ].join(","));
-            });
+            }
 
             const blob = new Blob([csvRows.join("\n")], {
                 type: "text/csv"
             });
 
             const url = URL.createObjectURL(blob);
-
             const a = document.createElement("a");
             a.href = url;
             a.download = "current-pay-period-export.csv";
             a.click();
-
             URL.revokeObjectURL(url);
 
             showMessage("Payroll CSV exported");
