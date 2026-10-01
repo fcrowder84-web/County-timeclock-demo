@@ -125,6 +125,7 @@ function createPayrollRouter({
              e.first_name,
              e.last_name,
              e.role,
+             e.weekly_hours_cap,
              ppa.status,
              ppa.employee_signed_at,
              ppa.supervisor_approved_at,
@@ -178,6 +179,7 @@ function createPayrollRouter({
              e.employee_number,
              e.first_name,
              e.last_name,
+             e.weekly_hours_cap,
              d.name AS department,
              to_char(te.clock_in,'MM/DD/YYYY') AS work_date,
              to_char(te.clock_in,'YYYY-MM-DD') AS work_date_iso,
@@ -347,12 +349,14 @@ function createPayrollRouter({
               work_date:row.work_date_iso,
               hours_worked:row.hours_worked,
             }));
+          const employeeRow=rows.find(row=>Number(row.employee_id)===employeeId);
           summaries[employeeId]=summarizeTimecard({
             entries:employeeEntries,
             leaveEntries:leaveRows.filter(row=>Number(row.employee_id)===employeeId),
             payPeriodStart:period.pay_period_start,
             forcedLunchSettings:lunchSettings.filter(row=>Number(row.employee_id)===employeeId),
             lunchWaivers:lunchWaivers.filter(row=>Number(row.employee_id)===employeeId),
+            weeklyHoursCap:employeeRow?.weekly_hours_cap,
           });
         }
 
