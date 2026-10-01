@@ -470,7 +470,7 @@ function createSupervisorRouter({
 
         const employeeResult = await pool.query(
           `SELECT e.id,e.employee_number,e.first_name,e.last_name,d.name AS department,e.role,
-                  e.forced_lunch_enabled,e.forced_lunch_minutes
+                  e.forced_lunch_enabled,e.forced_lunch_minutes,e.weekly_hours_cap
              FROM employees e
              LEFT JOIN departments d ON d.id=e.department_id
             WHERE e.id=$1`,
@@ -593,6 +593,7 @@ function createSupervisorRouter({
             payPeriodStart: period.pay_period_start,
             forcedLunchSettings: lunchSettingsResult.rows,
             lunchWaivers: lunchWaiverResult.rows,
+            weeklyHoursCap: employeeResult.rows[0].weekly_hours_cap,
           }),
         });
       } catch (err) {
