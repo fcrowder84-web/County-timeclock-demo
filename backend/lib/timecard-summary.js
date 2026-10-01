@@ -71,7 +71,12 @@ function emptyWeek(weekNumber, start) {
     leave_hours_by_type: {},
     pending_leave_hours_by_type: {},
     total_leave_hours: 0,
+    adjusted_leave_hours_by_type: {},
+    adjusted_total_leave_hours: 0,
+    leave_hours_reduced_by_cap: 0,
     pending_leave_hours: 0,
+    weekly_hours_cap: null,
+    cap_applied: false,
     total_paid_hours: 0,
   };
 }
@@ -90,12 +95,17 @@ function summarizeTimecard({
   forcedLunchMinutes = 0,
   forcedLunchSettings = null,
   lunchWaivers = [],
+  weeklyHoursCap = null,
   asOf = new Date(),
 }) {
   const start = dateOnly(payPeriodStart);
   if (!start) throw new Error('payPeriodStart is required');
 
   const thresholdMinutes = Math.max(0, Math.round(number(overtimeThresholdHours) * 60)) || OVERTIME_THRESHOLD_MINUTES;
+  const parsedWeeklyCap = weeklyHoursCap == null || weeklyHoursCap === ''
+    ? null
+    : Math.max(0, number(weeklyHoursCap));
+  const weeklyCapMinutes = parsedWeeklyCap == null ? null : Math.round(parsedWeeklyCap * 60);
   const legacyConfiguredLunchMinutes = forcedLunchEnabled ? Math.max(0, Math.round(number(forcedLunchMinutes))) : 0;
   const lunchSettingHistory = Array.isArray(forcedLunchSettings)
     ? forcedLunchSettings
@@ -227,7 +237,38 @@ function summarizeTimecard({
     const overtimeMinutes = Math.max(0, workedMinutes - thresholdMinutes);
     week.overtime_hours = round2(overtimeMinutes / 60);
     week.regular_worked_hours = round2((workedMinutes - overtimeMinutes) / 60);
-    week.total_paid_hours = round2(week.total_worked_hours + week.total_leave_hours);
+
+    week.adjusted_leave_hours_by_type = { ...week.leave_hours_by_type };
+    week.adjusted_total_leave_hours = week.total_leave_hours;
+    week.weekly_hours_cap = weeklyCapMinutes == null ? null : round2(weeklyCapMinutes / 60);
+
+    if (weeklyCapMinutes != null) {
+      const allowedLeaveMinutes = Math.max(0, weeklyCapMinutes - workedMinutes);
+      let remainingLeaveMinutes = Math.min(
+        Math.round(week.total_leave_hours * 60),
+        allowedLeaveMinutes,
+      );
+      const adjustedByType = {};
+      for (const [type, hours] of Object.entries(week.leave_hours_by_type)) {
+        const requestedMinutes = Math.max(0, Math.round(number(hours) * 60));
+        const usedMinutes = Math.min(requestedMinutes, remainingLeaveMinutes);
+        if (usedMinutes > 0) adjustedByType[type] = round2(usedMinutes / 60);
+        remainingLeaveMinutes -= usedMinutes;
+      }
+      week.adjusted_leave_hours_by_type = adjustedByType;
+      week.adjusted_total_leave_hours = round2(
+        Object.values(adjustedByType).reduce((sum, hours) => sum + number(hours), 0),
+      );
+      week.leave_hours_reduced_by_cap = round2(
+        Math.max(0, week.total_leave_hours - week.adjusted_total_leave_hours),
+      );
+      week.cap_applied = workedMinutes + Math.round(week.total_leave_hours * 60) > weeklyCapMinutes;
+      week.total_paid_hours = round2(
+        Math.min(workedMinutes, weeklyCapMinutes) / 60 + week.adjusted_total_leave_hours,
+      );
+    } else {
+      week.total_paid_hours = round2(week.total_worked_hours + week.total_leave_hours);
+    }
   }
 
   const period = {
@@ -239,6 +280,9 @@ function summarizeTimecard({
     leave_hours_by_type: {},
     pending_leave_hours_by_type: {},
     total_leave_hours: 0,
+    adjusted_leave_hours_by_type: {},
+    adjusted_total_leave_hours: 0,
+    leave_hours_reduced_by_cap: 0,
     pending_leave_hours: 0,
     total_paid_hours: 0,
   };
@@ -251,18 +295,22 @@ function summarizeTimecard({
       'forced_lunch_hours',
       'total_worked_hours',
       'total_leave_hours',
+      'adjusted_total_leave_hours',
+      'leave_hours_reduced_by_cap',
       'pending_leave_hours',
       'total_paid_hours',
     ]) {
       period[key] = round2(period[key] + week[key]);
     }
     for (const [type, hours] of Object.entries(week.leave_hours_by_type)) addByType(period.leave_hours_by_type, type, hours);
+    for (const [type, hours] of Object.entries(week.adjusted_leave_hours_by_type)) addByType(period.adjusted_leave_hours_by_type, type, hours);
     for (const [type, hours] of Object.entries(week.pending_leave_hours_by_type)) addByType(period.pending_leave_hours_by_type, type, hours);
   }
 
   return {
     overtime_rule: 'weekly_worked_hours_over_40_only',
     overtime_threshold_hours: round2(thresholdMinutes / 60),
+    weekly_hours_cap: weeklyCapMinutes == null ? null : round2(weeklyCapMinutes / 60),
     forced_lunch_enabled: lunchSettingHistory === null
       ? legacyConfiguredLunchMinutes > 0
       : Boolean([...lunchSettingHistory].reverse().find(setting => setting.effectiveDate <= addDays(start, 13))?.enabled),
