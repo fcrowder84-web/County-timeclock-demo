@@ -278,8 +278,13 @@ function summarizeTimecard({
       );
       const adjustedByType = {};
       const weightedLeave = Object.entries(week.leave_hours_by_type)
-        .map(([type, hours], index) => ({ type, hours, index, weight: cappedPayWeight(type) }))
-        .sort((a, b) => a.weight - b.weight || a.index - b.index);
+        .map(([type, hours]) => ({
+          type,
+          hours,
+          weight: cappedPayWeight(type),
+          sortKey: String(type || 'other').trim().toLowerCase().replace(/[\\s-]+/g, '_'),
+        }))
+        .sort((a, b) => a.weight - b.weight || a.sortKey.localeCompare(b.sortKey));
       for (const { type, hours } of weightedLeave) {
         const requestedMinutes = Math.max(0, Math.round(number(hours) * 60));
         const usedMinutes = Math.min(requestedMinutes, remainingLeaveMinutes);
