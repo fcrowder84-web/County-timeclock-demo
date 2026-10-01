@@ -241,6 +241,7 @@ function createPayrollRouter({
              e.employee_number,
              e.first_name,
              e.last_name,
+             e.weekly_hours_cap,
              d.name AS department,
              ppa.status AS approval_status,
              ppa.employee_signed_at,
