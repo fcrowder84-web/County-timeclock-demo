@@ -301,6 +301,31 @@ assert.strictEqual(weightedLeaveAtCap.weeks[0].adjusted_total_leave_hours, 8);
 assert.strictEqual(weightedLeaveAtCap.weeks[0].leave_hours_reduced_by_cap, 12);
 assert.strictEqual(weightedLeaveAtCap.weeks[0].total_paid_hours, 40);
 
+// Equal-weight/unknown leave allocation must be deterministic regardless of insertion order.
+const unknownLeaveForward = summarizeTimecard({
+  payPeriodStart: '2026-10-05', weeklyHoursCap: 40,
+  entries: [{ entry_date_iso:'2026-10-05', hours_worked:32 }],
+  leaveEntries: [
+    { leave_date_iso:'2026-10-06', leave_type:'zeta special', hours:8, status:'approved' },
+    { leave_date_iso:'2026-10-07', leave_type:'alpha special', hours:8, status:'approved' },
+  ],
+});
+const unknownLeaveReverse = summarizeTimecard({
+  payPeriodStart: '2026-10-05', weeklyHoursCap: 40,
+  entries: [{ entry_date_iso:'2026-10-05', hours_worked:32 }],
+  leaveEntries: [
+    { leave_date_iso:'2026-10-07', leave_type:'alpha special', hours:8, status:'approved' },
+    { leave_date_iso:'2026-10-06', leave_type:'zeta special', hours:8, status:'approved' },
+  ],
+});
+assert.deepStrictEqual(
+  unknownLeaveForward.weeks[0].adjusted_leave_hours_by_type,
+  unknownLeaveReverse.weeks[0].adjusted_leave_hours_by_type,
+);
+assert.strictEqual(unknownLeaveForward.weeks[0].adjusted_leave_hours_by_type['alpha special'], 8);
+assert.strictEqual(unknownLeaveForward.weeks[0].adjusted_leave_hours_by_type['zeta special'], undefined);
+assert.strictEqual(unknownLeaveForward.weeks[0].total_paid_hours, 40);
+
 // The daily/approved leave audit remains untouched while payroll totals use adjusted leave.
 const madeUpSickHours = summarizeTimecard({
   payPeriodStart: '2026-10-05', weeklyHoursCap: 40,
