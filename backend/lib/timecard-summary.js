@@ -2,6 +2,26 @@
 
 const OVERTIME_THRESHOLD_MINUTES = 40 * 60;
 
+// For capped employees, lower weights consume the weekly payable cap first.
+// Worked time is always first; approved leave follows county payroll priority.
+const CAPPED_PAY_PRIORITY = Object.freeze({
+  worked: 0,
+  holiday: 10,
+  sick: 20,
+  floating_holiday: 30,
+  vacation: 40,
+  other: 100,
+});
+
+function cappedPayWeight(type) {
+  const key = String(type || 'other').trim().toLowerCase().replace(/[\s-]+/g, '_');
+  if (['holiday', 'holiday_leave', 'regular_holiday', 'regular_holiday_leave'].includes(key)) return CAPPED_PAY_PRIORITY.holiday;
+  if (['sick', 'sick_leave'].includes(key)) return CAPPED_PAY_PRIORITY.sick;
+  if (['floating_holiday', 'floating_holiday_leave', 'float_holiday', 'float'].includes(key)) return CAPPED_PAY_PRIORITY.floating_holiday;
+  if (['vacation', 'vacation_leave'].includes(key)) return CAPPED_PAY_PRIORITY.vacation;
+  return CAPPED_PAY_PRIORITY.other;
+}
+
 function number(value) {
   const parsed = Number(value || 0);
   return Number.isFinite(parsed) ? parsed : 0;
@@ -235,8 +255,16 @@ function summarizeTimecard({
   for (const week of weeks) {
     const workedMinutes = Math.round(week.total_worked_hours * 60);
     const overtimeMinutes = Math.max(0, workedMinutes - thresholdMinutes);
-    week.overtime_hours = round2(overtimeMinutes / 60);
-    week.regular_worked_hours = round2((workedMinutes - overtimeMinutes) / 60);
+    // A weekly cap replaces the normal OT/payable rule for capped employees.
+    // Actual worked hours remain intact for the timecard/audit trail, but payroll
+    // receives worked time first up to the cap and no overtime allocation.
+    if (weeklyCapMinutes != null) {
+      week.overtime_hours = 0;
+      week.regular_worked_hours = round2(Math.min(workedMinutes, weeklyCapMinutes) / 60);
+    } else {
+      week.overtime_hours = round2(overtimeMinutes / 60);
+      week.regular_worked_hours = round2((workedMinutes - overtimeMinutes) / 60);
+    }
 
     week.adjusted_leave_hours_by_type = { ...week.leave_hours_by_type };
     week.adjusted_total_leave_hours = week.total_leave_hours;
@@ -249,7 +277,10 @@ function summarizeTimecard({
         allowedLeaveMinutes,
       );
       const adjustedByType = {};
-      for (const [type, hours] of Object.entries(week.leave_hours_by_type)) {
+      const weightedLeave = Object.entries(week.leave_hours_by_type)
+        .map(([type, hours], index) => ({ type, hours, index, weight: cappedPayWeight(type) }))
+        .sort((a, b) => a.weight - b.weight || a.index - b.index);
+      for (const { type, hours } of weightedLeave) {
         const requestedMinutes = Math.max(0, Math.round(number(hours) * 60));
         const usedMinutes = Math.min(requestedMinutes, remainingLeaveMinutes);
         if (usedMinutes > 0) adjustedByType[type] = round2(usedMinutes / 60);
