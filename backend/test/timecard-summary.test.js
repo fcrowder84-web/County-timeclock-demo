@@ -198,7 +198,8 @@ assert.strictEqual(workWinsOverLeaveAtCap.weeks[0].total_worked_hours, 41);
 assert.strictEqual(workWinsOverLeaveAtCap.weeks[0].adjusted_total_leave_hours, 0);
 assert.strictEqual(workWinsOverLeaveAtCap.weeks[0].total_leave_hours, 8);
 assert.strictEqual(workWinsOverLeaveAtCap.weeks[0].total_paid_hours, 40);
-assert.strictEqual(workWinsOverLeaveAtCap.weeks[0].overtime_hours, 1);
+assert.strictEqual(workWinsOverLeaveAtCap.weeks[0].overtime_hours, 0);
+assert.strictEqual(workWinsOverLeaveAtCap.weeks[0].regular_worked_hours, 40);
 
 const weeklyCapDoesNotCrossWeeks = summarizeTimecard({
   payPeriodStart: '2026-10-05',
@@ -274,6 +275,48 @@ const multipleLeaveTypesAtCap = summarizeTimecard({
 assert.strictEqual(multipleLeaveTypesAtCap.weeks[0].total_leave_hours, 6);
 assert.strictEqual(multipleLeaveTypesAtCap.weeks[0].adjusted_total_leave_hours, 4);
 assert.strictEqual(multipleLeaveTypesAtCap.weeks[0].total_paid_hours, 40);
+
+// Capped payroll allocation is deterministic and independent of leave insertion order:
+// worked (0), regular holiday (10), sick (20), floating holiday (30), vacation (40).
+const weightedLeaveAtCap = summarizeTimecard({
+  payPeriodStart: '2026-10-05', weeklyHoursCap: 40,
+  entries: [{ entry_date_iso:'2026-10-05', hours_worked:32 }],
+  leaveEntries: [
+    { leave_date_iso:'2026-10-06', leave_type:'vacation', hours:8, status:'approved' },
+    { leave_date_iso:'2026-10-07', leave_type:'floating holiday', hours:4, status:'approved' },
+    { leave_date_iso:'2026-10-08', leave_type:'sick', hours:4, status:'approved' },
+    { leave_date_iso:'2026-10-09', leave_type:'regular holiday leave', hours:4, status:'approved' },
+  ],
+});
+assert.strictEqual(weightedLeaveAtCap.weeks[0].total_leave_hours, 20);
+assert.strictEqual(weightedLeaveAtCap.weeks[0].leave_hours_by_type.vacation, 8);
+assert.strictEqual(weightedLeaveAtCap.weeks[0].leave_hours_by_type['floating holiday'], 4);
+assert.strictEqual(weightedLeaveAtCap.weeks[0].leave_hours_by_type.sick, 4);
+assert.strictEqual(weightedLeaveAtCap.weeks[0].leave_hours_by_type['regular holiday leave'], 4);
+assert.strictEqual(weightedLeaveAtCap.weeks[0].adjusted_leave_hours_by_type['regular holiday leave'], 4);
+assert.strictEqual(weightedLeaveAtCap.weeks[0].adjusted_leave_hours_by_type.sick, 4);
+assert.strictEqual(weightedLeaveAtCap.weeks[0].adjusted_leave_hours_by_type['floating holiday'], undefined);
+assert.strictEqual(weightedLeaveAtCap.weeks[0].adjusted_leave_hours_by_type.vacation, undefined);
+assert.strictEqual(weightedLeaveAtCap.weeks[0].adjusted_total_leave_hours, 8);
+assert.strictEqual(weightedLeaveAtCap.weeks[0].leave_hours_reduced_by_cap, 12);
+assert.strictEqual(weightedLeaveAtCap.weeks[0].total_paid_hours, 40);
+
+// The daily/approved leave audit remains untouched while payroll totals use adjusted leave.
+const madeUpSickHours = summarizeTimecard({
+  payPeriodStart: '2026-10-05', weeklyHoursCap: 40,
+  entries: [{ entry_date_iso:'2026-10-06', hours_worked:36 }],
+  leaveEntries: [{ leave_date_iso:'2026-10-05', leave_type:'sick', hours:8, status:'approved' }],
+});
+assert.strictEqual(madeUpSickHours.weeks[0].leave_hours_by_type.sick, 8);
+assert.strictEqual(madeUpSickHours.weeks[0].total_leave_hours, 8);
+assert.strictEqual(madeUpSickHours.weeks[0].adjusted_leave_hours_by_type.sick, 4);
+assert.strictEqual(madeUpSickHours.weeks[0].adjusted_total_leave_hours, 4);
+assert.strictEqual(madeUpSickHours.period.leave_hours_by_type.sick, 8);
+assert.strictEqual(madeUpSickHours.period.adjusted_leave_hours_by_type.sick, 4);
+assert.strictEqual(madeUpSickHours.period.total_paid_hours, 40);
+
+// Uncapped employees retain the normal overtime rule.
+assert.strictEqual(workedOtOnly.weeks[0].overtime_hours, 2);
 
 const forcedLunchWithCap = summarizeTimecard({
   payPeriodStart: '2026-10-05', weeklyHoursCap: 40,
