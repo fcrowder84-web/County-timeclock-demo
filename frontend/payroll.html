@@ -1015,6 +1015,7 @@
             }
             const payload = await response.json();
             const rows = Array.isArray(payload?.rows) ? payload.rows : [];
+            const leaveEntries = Array.isArray(payload?.leave_entries) ? payload.leave_entries : [];
             const summaries = payload?.timecard_summaries || {};
 
             if (rows.length === 0) {
@@ -1038,6 +1039,8 @@
                 "Weekly Cap",
                 "Raw Worked Hours",
                 "Raw Leave Hours",
+                "Leave Type",
+                "Leave Status",
                 "Adjusted Payable Leave Hours",
                 "Adjusted Payable Leave By Type",
                 "Regular Payable Worked Hours",
@@ -1052,6 +1055,13 @@
                 const employeeId = Number(row.employee_id);
                 if (!employeeRows.has(employeeId)) employeeRows.set(employeeId, []);
                 employeeRows.get(employeeId).push(row);
+            });
+
+            const leaveByEmployee = new Map();
+            leaveEntries.forEach(leave => {
+                const employeeId = Number(leave.employee_id);
+                if (!leaveByEmployee.has(employeeId)) leaveByEmployee.set(employeeId, []);
+                leaveByEmployee.get(employeeId).push(leave);
             });
 
             for (const [employeeId, allEmployeeRows] of employeeRows.entries()) {
@@ -1089,7 +1099,40 @@
                         "",
                         "",
                         "",
+                        "",
+                        "",
                         csvValue(row.timecard_status)
+                    ].join(","));
+                });
+
+                (leaveByEmployee.get(employeeId) || []).forEach(leave => {
+                    const rawLeaveHours = leave.hours != null
+                        ? Number(leave.hours || 0)
+                        : Number(leave.quarter_hours || 0) / 4;
+                    csvRows.push([
+                        csvValue("LEAVE DETAIL"),
+                        csvValue(identity.employee_number),
+                        csvValue(identity.first_name),
+                        csvValue(identity.last_name),
+                        csvValue(identity.department),
+                        "",
+                        csvValue(leave.leave_date_iso || ""),
+                        "",
+                        "",
+                        "",
+                        "",
+                        "",
+                        "",
+                        "",
+                        csvValue(rawLeaveHours.toFixed(2)),
+                        csvValue(leave.leave_type || ""),
+                        csvValue(leave.status || ""),
+                        "",
+                        "",
+                        "",
+                        "",
+                        "",
+                        csvValue(identity.timecard_status)
                     ].join(","));
                 });
 
@@ -1112,6 +1155,8 @@
                         csvValue(week.weekly_hours_cap == null ? "" : Number(week.weekly_hours_cap).toFixed(2)),
                         csvValue(Number(week.total_worked_hours || 0).toFixed(2)),
                         csvValue(Number(week.total_leave_hours || 0).toFixed(2)),
+                        "",
+                        "",
                         csvValue(Number(week.adjusted_total_leave_hours || 0).toFixed(2)),
                         csvValue(JSON.stringify(week.adjusted_leave_hours_by_type || {})),
                         csvValue(Number(week.regular_worked_hours || 0).toFixed(2)),
@@ -1137,6 +1182,8 @@
                     csvValue(summary.weekly_hours_cap == null ? "" : Number(summary.weekly_hours_cap).toFixed(2)),
                     csvValue(Number(summary.period?.total_worked_hours || 0).toFixed(2)),
                     csvValue(Number(summary.period?.total_leave_hours || 0).toFixed(2)),
+                    "",
+                    "",
                     csvValue(Number(summary.period?.adjusted_total_leave_hours || 0).toFixed(2)),
                     csvValue(JSON.stringify(summary.period?.adjusted_leave_hours_by_type || {})),
                     csvValue(Number(summary.period?.regular_worked_hours || 0).toFixed(2)),
