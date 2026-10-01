@@ -230,4 +230,65 @@ const noCapKeepsLegacyBehavior = summarizeTimecard({
 assert.strictEqual(noCapKeepsLegacyBehavior.weeks[0].total_paid_hours, 46);
 assert.strictEqual(noCapKeepsLegacyBehavior.weeks[0].adjusted_total_leave_hours, 8);
 
+
+const explicitNullCap = summarizeTimecard({
+  payPeriodStart: '2026-10-05', weeklyHoursCap: null,
+  entries: [{ entry_date_iso:'2026-10-05', hours_worked:38 }],
+  leaveEntries: [{ leave_date_iso:'2026-10-06', leave_type:'sick', hours:8, status:'approved' }],
+});
+assert.strictEqual(explicitNullCap.weeks[0].total_paid_hours, 46);
+
+const zeroCap = summarizeTimecard({
+  payPeriodStart: '2026-10-05', weeklyHoursCap: 0,
+  entries: [{ entry_date_iso:'2026-10-05', hours_worked:8 }],
+  leaveEntries: [{ leave_date_iso:'2026-10-06', leave_type:'vacation', hours:8, status:'approved' }],
+});
+assert.strictEqual(zeroCap.weeks[0].total_worked_hours, 8);
+assert.strictEqual(zeroCap.weeks[0].adjusted_total_leave_hours, 0);
+assert.strictEqual(zeroCap.weeks[0].total_paid_hours, 0);
+
+const exactAndQuarterCap = summarizeTimecard({
+  payPeriodStart: '2026-10-05', weeklyHoursCap: 38.25,
+  entries: [{ entry_date_iso:'2026-10-05', hours_worked:38.25 }],
+  leaveEntries: [{ leave_date_iso:'2026-10-06', leave_type:'sick', hours:2, status:'approved' }],
+});
+assert.strictEqual(exactAndQuarterCap.weeks[0].total_paid_hours, 38.25);
+assert.strictEqual(exactAndQuarterCap.weeks[0].adjusted_total_leave_hours, 0);
+
+const leaveBelowCapacity = summarizeTimecard({
+  payPeriodStart: '2026-10-05', weeklyHoursCap: 40,
+  entries: [{ entry_date_iso:'2026-10-05', hours_worked:32 }],
+  leaveEntries: [{ leave_date_iso:'2026-10-06', leave_type:'sick', hours:4, status:'approved' }],
+});
+assert.strictEqual(leaveBelowCapacity.weeks[0].adjusted_total_leave_hours, 4);
+assert.strictEqual(leaveBelowCapacity.weeks[0].total_paid_hours, 36);
+
+const multipleLeaveTypesAtCap = summarizeTimecard({
+  payPeriodStart: '2026-10-05', weeklyHoursCap: 40,
+  entries: [{ entry_date_iso:'2026-10-05', hours_worked:36 }],
+  leaveEntries: [
+    { leave_date_iso:'2026-10-06', leave_type:'vacation', hours:2, status:'approved' },
+    { leave_date_iso:'2026-10-07', leave_type:'sick', hours:4, status:'approved' },
+  ],
+});
+assert.strictEqual(multipleLeaveTypesAtCap.weeks[0].total_leave_hours, 6);
+assert.strictEqual(multipleLeaveTypesAtCap.weeks[0].adjusted_total_leave_hours, 4);
+assert.strictEqual(multipleLeaveTypesAtCap.weeks[0].total_paid_hours, 40);
+
+const forcedLunchWithCap = summarizeTimecard({
+  payPeriodStart: '2026-10-05', weeklyHoursCap: 40,
+  forcedLunchEnabled: true, forcedLunchMinutes: 60,
+  entries: [
+    { entry_date_iso:'2026-10-05', hours_worked:9 },
+    { entry_date_iso:'2026-10-06', hours_worked:9 },
+    { entry_date_iso:'2026-10-07', hours_worked:9 },
+    { entry_date_iso:'2026-10-08', hours_worked:9 },
+  ],
+  leaveEntries: [{ leave_date_iso:'2026-10-09', leave_type:'vacation', hours:8, status:'approved' }],
+});
+assert.strictEqual(forcedLunchWithCap.weeks[0].total_worked_hours, 32);
+assert.strictEqual(forcedLunchWithCap.weeks[0].forced_lunch_hours, 4);
+assert.strictEqual(forcedLunchWithCap.weeks[0].adjusted_total_leave_hours, 8);
+assert.strictEqual(forcedLunchWithCap.weeks[0].total_paid_hours, 40);
+
 console.log("timecard summary tests passed");
