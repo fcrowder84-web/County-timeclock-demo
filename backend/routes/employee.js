@@ -232,6 +232,7 @@ function createEmployeeRouter({ requireUser, requireAnyPermission, pool, audit, 
           payPeriodStart: period.pay_period_start,
           forcedLunchSettings: lunchSettingsResult.rows,
           lunchWaivers: lunchWaiverResult.rows,
+          weeklyHoursCap: req.user.weekly_hours_cap,
         }),
         requests: requestsResult.rows,
       });
