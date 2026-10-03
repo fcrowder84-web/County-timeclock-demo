@@ -13,7 +13,7 @@ const html = fs.readFileSync(path.join(frontend, 'timecard.html'), 'utf8');
 const helpers = vm.runInNewContext(
   base.slice(base.indexOf('function allocateDailyWork('), base.indexOf('function punchCells(')) +
   base.slice(base.indexOf('function totalRow(')) +
-  ';({allocateDailyWork,capAdjustedDaily,totalRow})',
+  ';({allocateDailyWork,capAdjustedDaily,capAdjustedDisplay,totalRow})',
   {
     num: value => Number(value || 0),
     dateOnly: value => String(value).slice(0, 10),
@@ -42,8 +42,8 @@ const capWork = helpers.allocateDailyWork(days, true);
 assert.strictEqual(capWork[dates[4]].regular, 10);
 assert.strictEqual(capWork[dates[4]].ot, 0);
 const payable = helpers.capAdjustedDaily(capped);
-assert.strictEqual(payable[dates[4]], 8);
-assert.strictEqual(dates.slice(0, 7).reduce((sum, date) => sum + Math.round((payable[date] || 0) * 100), 0), 4000);
+assert.strictEqual(payable[dates[4]].hours, 8);
+assert.strictEqual(dates.slice(0, 7).reduce((sum, date) => sum + Math.round((payable[date]?.hours || 0) * 100), 0), 4000);
 
 function columnCount(markup, cellTag) {
   return [...markup.matchAll(new RegExp(`<${cellTag}\\b([^>]*)>`, 'g'))]
@@ -81,6 +81,7 @@ function renderedRows(summary, workEntries, leaveEntries = []) {
     esc: value => String(value),
     allocateDailyWork: helpers.allocateDailyWork,
     capAdjustedDaily: helpers.capAdjustedDaily,
+    capAdjustedDisplay: helpers.capAdjustedDisplay,
     dailyWorked: dayEntries => dayEntries.reduce((sum, entry) => sum + Number(entry.hours_worked), 0),
     approvedLeaveHours: (date, type) => leaveEntries.filter(entry => entry.leave_date_iso === date && entry.status === 'approved' &&
       (type === 'other' ? !['holiday', 'vacation', 'sick', 'floating_holiday'].includes(entry.leave_type) : entry.leave_type === type))
@@ -114,7 +115,7 @@ const cappedWithLeave = summarizeTimecard({
   payPeriodStart: dates[0], weeklyHoursCap: 40, entries: workWithLeave, leaveEntries: sickLeave,
 });
 const leaveRows = renderedRows(cappedWithLeave, workWithLeave, sickLeave);
-assert(leaveRows[4].endsWith('<td><strong>8.00</strong></td><td><strong>4.00</strong></td>'));
+assert(leaveRows[4].endsWith('<td><strong>8.00</strong></td><td><strong>4.00 Sick</strong></td>'));
 assert(leaveRows[7].endsWith('<td>44.00</td><td><strong>40.00</strong></td>'));
 
 console.log('timecard display tests passed');

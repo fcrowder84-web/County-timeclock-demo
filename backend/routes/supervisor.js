@@ -3,6 +3,7 @@
 const express = require('express');
 const { canEditPunch } = require('../lib/punch-edit-authority');
 const { summarizeTimecard } = require('../lib/timecard-summary');
+const { resolvePayPeriod } = require('../lib/pay-period');
 const {
   requireReopenForFinalized,
   invalidateApprovals,
@@ -155,7 +156,9 @@ function createSupervisorRouter({
         if (visibleIds.length) {
           const [entriesResult, leaveResult, lunchSettingsResult, lunchWaiverResult] = await Promise.all([
             pool.query(
-              `SELECT employee_id,clock_in,clock_out,pending_clock_in,pending_clock_out
+              `SELECT employee_id,
+                      to_char(clock_in::date,'YYYY-MM-DD') AS entry_date_iso,
+                      clock_in,clock_out,pending_clock_in,pending_clock_out
                  FROM time_entries
                 WHERE employee_id=ANY($1::int[])
                   AND deleted_at IS NULL
@@ -462,6 +465,9 @@ function createSupervisorRouter({
       } catch (err) {
         if (client) await client.query('ROLLBACK').catch(() => {});
         if (err.statusCode) return res.status(err.statusCode).json({ error: err.message });
+        if (err.code === '23P01') {
+          return res.status(409).json({ error: 'This change would overlap another time entry for the employee.' });
+        }
         if (err.code === '23505') {
           return res.status(409).json({ error: 'This change would create a second open punch for the employee' });
         }
@@ -888,7 +894,8 @@ function createSupervisorRouter({
         client = await pool.connect();
         await client.query('BEGIN');
         const existingResult = await client.query(
-          `SELECT * FROM time_entries WHERE id=$1 AND deleted_at IS NULL FOR UPDATE`,
+          `SELECT *, to_char(clock_in::date, 'YYYY-MM-DD') AS source_date_iso
+             FROM time_entries WHERE id=$1 AND deleted_at IS NULL FOR UPDATE`,
           [timeEntryId],
         );
         const existing = existingResult.rows[0] || null;
@@ -900,6 +907,23 @@ function createSupervisorRouter({
         if (!(await canEditPunch(client, req.user, existing.employee_id))) {
           await client.query('ROLLBACK');
           return res.status(403).json({ error: 'Access denied' });
+        }
+
+        const overlapResult = await client.query(
+          `SELECT id
+             FROM time_entries
+            WHERE employee_id=$1
+              AND id<>$2
+              AND deleted_at IS NULL
+              AND clock_in < COALESCE($4::timestamp, 'infinity'::timestamp)
+              AND COALESCE(clock_out, 'infinity'::timestamp) > $3::timestamp
+            LIMIT 1
+            FOR UPDATE`,
+          [existing.employee_id, timeEntryId, newClockIn, finalClockOut],
+        );
+        if (overlapResult.rows.length) {
+          await client.query('ROLLBACK');
+          return res.status(409).json({ error: 'This edit would overlap another time entry for the employee.' });
         }
 
         // App Admin inherits broad capabilities, including edit_payroll_time.
@@ -946,9 +970,23 @@ function createSupervisorRouter({
               error: 'This timecard is locked for supervisor editing. Return it to the correct stage before making changes.',
             });
           }
-          const periodStart = new Date(`${String(approval.pay_period_start).slice(0,10)}T00:00:00`);
-          const periodEnd = new Date(`${String(approval.pay_period_end).slice(0,10)}T23:59:59.999`);
-          if (parsedIn < periodStart || parsedIn > periodEnd) {
+          const configResult = await client.query(
+            `SELECT MAX(CASE WHEN key='pay_period_start_date' THEN value END)::date AS anchor_date,
+                    MAX(CASE WHEN key='pay_period_length_days' THEN value END)::int AS period_days
+               FROM settings`,
+          );
+          const config = configResult.rows[0];
+          const sourcePeriod = resolvePayPeriod({
+            anchorDate: config?.anchor_date,
+            periodDays: config?.period_days,
+            targetDate: existing.source_date_iso,
+          });
+          const periodBoundary = await client.query(
+            `SELECT ($1::timestamp >= $2::date
+                     AND $1::timestamp < ($3::date + INTERVAL '1 day')) AS within_source_period`,
+            [newClockIn, sourcePeriod.pay_period_start, sourcePeriod.pay_period_end],
+          );
+          if (!periodBoundary.rows[0]?.within_source_period) {
             await client.query('ROLLBACK');
             return res.status(409).json({ error: 'Supervisor edits cannot move an entry to a different pay period; payroll must make that correction.' });
           }
@@ -1001,6 +1039,9 @@ function createSupervisorRouter({
       } catch (err) {
         if (client) await client.query('ROLLBACK').catch(() => {});
         if (err.statusCode) return res.status(err.statusCode).json({ error: err.message });
+        if (err.code === '23P01') {
+          return res.status(409).json({ error: 'This edit would overlap another time entry for the employee.' });
+        }
         if (err.code === '23505') {
           return res.status(409).json({ error: 'This edit would create a second open punch for the employee' });
         }

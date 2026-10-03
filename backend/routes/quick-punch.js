@@ -372,6 +372,7 @@ function createQuickPunchRouter({ requireUser, requireAnyPermission, pool, audit
       });
     } catch (err) {
       if (client) await client.query('ROLLBACK').catch(() => {});
+      if (err.code === '23P01') return res.status(409).json({ error: 'The remaining punch sequence would overlap another time entry.' });
       console.error(err);
       return res.status(500).json({ error: 'Delete punch error' });
     } finally {
@@ -426,6 +427,7 @@ function createQuickPunchRouter({ requireUser, requireAnyPermission, pool, audit
       await audit(req.user.id, 'clock_in', 'time_entry', result.rows[0].id, metadata);
       return res.json({ message: `${req.user.first_name} clocked in successfully`, entry: result.rows[0], metadata_recorded: Boolean(metadata) });
     } catch (err) {
+      if (err.code === '23P01') return res.status(409).json({ error: 'This punch would overlap another time entry.' });
       if (err.code === '23505') return res.status(400).json({ error: 'You are already clocked in' });
       console.error(err);
       return res.status(500).json({ error: 'Clock-in error' });
@@ -480,6 +482,7 @@ function createQuickPunchRouter({ requireUser, requireAnyPermission, pool, audit
       await audit(req.user.id, 'clock_out', 'time_entry', result.rows[0].id, metadata);
       return res.json({ message: `${req.user.first_name} clocked out successfully`, entry: result.rows[0], metadata_recorded: Boolean(metadata) });
     } catch (err) {
+      if (err.code === '23P01') return res.status(409).json({ error: 'This punch would overlap another time entry.' });
       console.error(err);
       return res.status(500).json({ error: 'Clock-out error' });
     }

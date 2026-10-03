@@ -108,6 +108,7 @@ function compact(sql){return String(sql).replace(/\s+/g,' ').trim();}
         if(['BEGIN','COMMIT','ROLLBACK'].includes(q)) return {rows:[]};
         if(q.includes('FROM pay_period_approvals')&&q.includes('LIMIT 1')) return {rows:[finalized]};
         if(q.includes('FROM pay_period_approvals ppa')) return {rows:[finalized]};
+        if(q.includes('FROM time_entries')&&q.includes('clock_in < COALESCE')) return {rows:[]};
         if(q.startsWith('INSERT INTO time_entries')) return {rows:[{id:90,employee_id:8,clock_in:args[1],clock_out:args[2]}]};
         if(q.startsWith('UPDATE pay_period_approvals')) return {rows:[{id:41}]};
         throw new Error('unexpected legacy add query: '+q);

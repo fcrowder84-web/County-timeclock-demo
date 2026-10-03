@@ -644,7 +644,7 @@ function createEmployeeRouter({ requireUser, requireAnyPermission, pool, audit, 
         const affected=await requireReopenForFinalized({db:client,user:req.user,employeeId,timestamps:[workDate+' 12:00:00'],canAccessEmployee});
         const result=await replaceDayPunchSequence({client,employeeId,workDate,punches:normalized,actorEmployeeId:req.user.id,reason});const invalidated=await invalidateApprovals(client,affected);await client.query('COMMIT');
         await audit(req.user.id,'replace_day_punches','employee',employeeId,{work_date:workDate,punches:normalized,reason,invalidated_approval_ids:invalidated.map(r=>r.id)});return res.json({message:'Day punches updated',entries:result.entries});
-      }catch(err){await client.query('ROLLBACK').catch(()=>{});if(err.statusCode)return res.status(err.statusCode).json({error:err.message});if(err.code==='23505')return res.status(409).json({error:'The final punch sequence conflicts with another open punch for this employee.'});console.error(err);return res.status(500).json({error:'Unable to update day punches'});}finally{client.release();}
+      }catch(err){await client.query('ROLLBACK').catch(()=>{});if(err.statusCode)return res.status(err.statusCode).json({error:err.message});if(err.code==='23P01')return res.status(409).json({error:'The final punch sequence overlaps another time entry.'});if(err.code==='23505')return res.status(409).json({error:'The final punch sequence conflicts with another open punch for this employee.'});console.error(err);return res.status(500).json({error:'Unable to update day punches'});}finally{client.release();}
     });
 
   router.post(
@@ -703,6 +703,21 @@ function createEmployeeRouter({ requireUser, requireAnyPermission, pool, audit, 
             await client.query('ROLLBACK');
             return res.status(400).json({ error: 'Clock out must be after clock in' });
           }
+          const overlapResult = await client.query(
+            `SELECT id
+               FROM time_entries
+              WHERE employee_id=$1
+                AND deleted_at IS NULL
+                AND clock_in < COALESCE($3::timestamp, 'infinity'::timestamp)
+                AND COALESCE(clock_out, 'infinity'::timestamp) > $2::timestamp
+              LIMIT 1
+              FOR UPDATE`,
+            [employeeId, legacyClockIn, legacyClockOut],
+          );
+          if (overlapResult.rows.length) {
+            await client.query('ROLLBACK');
+            return res.status(409).json({ error: 'This entry would overlap another time entry for the employee.' });
+          }
           const result = await client.query(
             `INSERT INTO time_entries(employee_id,clock_in,clock_out,notes,status)
              VALUES($1,$2,$3,$4,CASE WHEN $3::timestamp IS NULL THEN 'open' ELSE 'closed' END)
@@ -742,6 +757,7 @@ function createEmployeeRouter({ requireUser, requireAnyPermission, pool, audit, 
       } catch (err) {
         await client.query('ROLLBACK').catch(() => {});
         if (err.statusCode) return res.status(err.statusCode).json({ error: err.message });
+        if (err.code === '23P01') return res.status(409).json({ error: 'This entry would overlap another time entry for the employee.' });
         if (err.code === '23505') return res.status(409).json({ error: 'This punch would create a conflicting open punch' });
         if (err.code === '23514') return res.status(400).json({ error: 'Clock out must be after clock in' });
         console.error(err);

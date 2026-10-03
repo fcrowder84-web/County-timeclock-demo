@@ -48,6 +48,18 @@ function dateOnly(value) {
   return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString().slice(0, 10);
 }
 
+// Open punches are stale at the change of the payroll-local calendar day.
+// UTC's date can already be tomorrow during an Eastern evening shift.
+function payrollLocalDate(value) {
+  const ms = timestampMs(value);
+  if (ms == null) return null;
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit',
+  }).formatToParts(new Date(ms));
+  const part = type => parts.find(item => item.type === type).value;
+  return `${part('year')}-${part('month')}-${part('day')}`;
+}
+
 function addDays(dateString, days) {
   const date = new Date(`${dateString}T12:00:00Z`);
   date.setUTCDate(date.getUTCDate() + days);
@@ -183,12 +195,13 @@ function summarizeTimecard({
     state.hasWork = true;
 
     const inMs = timestampMs(entry.clock_in);
-    const actualOutMs = timestampMs(entry.clock_out || entry.pending_clock_out);
+    // A requested clock-out has not been approved and cannot become payable.
+    const actualOutMs = timestampMs(entry.clock_out);
     const asOfMs = timestampMs(asOf);
     const staleOpenPunch = inMs != null
       && actualOutMs == null
       && asOfMs != null
-      && (dateOnly(entry.entry_date_iso || entry.work_date || entry.clock_in) < dateOnly(asOf)
+      && (day < payrollLocalDate(asOf)
         || asOfMs - inMs >= 23 * 60 * 60 * 1000);
     const calculationOutMs = inMs != null && actualOutMs == null
       ? (staleOpenPunch ? null : asOfMs)
@@ -203,7 +216,10 @@ function summarizeTimecard({
         state.grossMinutes += Math.round((ruledOutMs - ruledInMs) / 60000);
         state.intervals.push({ inMs, outMs: calculationOutMs, ruledInMs, ruledOutMs });
       }
-    } else {
+    } else if (!staleOpenPunch) {
+      // Preserve hours-only/imported entries, but never trust a fallback
+      // hours_worked value for an unresolved stale open punch. Some callers
+      // derive that value using NOW(), which would otherwise keep accruing pay.
       state.grossMinutes += durationMinutes(entry.hours_worked);
     }
     daily.set(day, state);
@@ -277,7 +293,7 @@ function summarizeTimecard({
     const overtimeMinutes = Math.max(0, workedMinutes - thresholdMinutes);
     // A weekly cap replaces the normal OT/payable rule for capped employees.
     // Actual worked hours remain intact for the timecard/audit trail, but payroll
-    // receives worked time first up to the cap and no overtime allocation.
+    // reserves protected Holiday first, then worked time, with no overtime allocation.
     if (weeklyCapMinutes != null) {
       week.overtime_hours = 0;
       week.regular_worked_hours = round2(Math.min(workedMinutes, weeklyCapMinutes) / 60);
