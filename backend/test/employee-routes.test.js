@@ -242,6 +242,7 @@ function compact(sql) { return String(sql).replace(/\s+/g, ' ').trim(); }
         if (text.includes('FROM forced_lunch_setting_history')) return { rows: [] };
         if (text.includes('FROM forced_lunch_waivers')) return { rows: [] };
         if (text.includes('FROM forced_lunch_waiver_requests')) return { rows: [] };
+        if (text.includes('FROM weekly_hours_cap_history')) return { rows: [] };
         throw new Error(`unexpected timecard query: ${text}`);
       },
     },
