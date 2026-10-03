@@ -253,6 +253,21 @@ function createLeaveRouter({ requireUser, pool, audit, canAccessEmployee, getReq
 
       if (type === 'holiday') {
         validateFixedHolidayDates(dates);
+        const duplicateHoliday = await client.query(
+          `SELECT leave_date
+             FROM leave_entries
+            WHERE employee_id=$1
+              AND leave_type='holiday'
+              AND leave_date=ANY($2::date[])
+              AND status IN ('pending','approved')
+            LIMIT 1`,
+          [employeeId, dates],
+        );
+        if (duplicateHoliday.rows.length) {
+          const error = new Error('A Holiday entry already exists for this employee on one of the selected dates');
+          error.statusCode = 409;
+          throw error;
+        }
         if (!note && dates.length === 1) note = findFixedHoliday(dates[0])?.name || null;
       }
 
