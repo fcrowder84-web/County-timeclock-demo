@@ -1,5 +1,9 @@
 BEGIN;
 
+-- Snapshot APIs may deliver an older SSO token after a newer directory update.
+ALTER TABLE employees
+  ADD COLUMN IF NOT EXISTS portal_weekly_hours_cap_changed_at timestamptz;
+
 CREATE TABLE IF NOT EXISTS weekly_hours_cap_history (
   id bigserial PRIMARY KEY,
   employee_id integer NOT NULL REFERENCES employees(id) ON DELETE RESTRICT,

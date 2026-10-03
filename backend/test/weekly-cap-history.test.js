@@ -4,7 +4,7 @@ const assert=require('assert');
 const fs=require('fs');
 const path=require('path');
 const vm=require('vm');
-const {recordWeeklyCapChange}=require('../lib/weekly-cap-history');
+const {recordWeeklyCapChange,portalCapSnapshotIsFresh}=require('../lib/weekly-cap-history');
 const {summarizeTimecard}=require('../lib/timecard-summary');
 const migration=fs.readFileSync(path.resolve(__dirname,'..','..','migrations','020_weekly_hours_cap_history.sql'),'utf8');
 assert(!migration.includes("DATE '2026-09-14'"),'migration must not invent a fixed historical baseline');
@@ -38,7 +38,8 @@ function fakeDatabase(initialEmployees=[],{currentDate='2026-10-07',approvals=[]
           if(q==='COMMIT'){committed=transaction;transaction=null;return {rows:[]};}
           if(q==='ROLLBACK'){transaction=null;return {rows:[]};}
           const state=transaction||committed;
-          if(q.includes('FROM settings')) return {rows:[{anchor_date_iso:'2026-09-14',period_days:14,current_date_iso:currentDate}]};
+          if(q.includes('FROM settings')) return {rows:[{anchor_date_iso:'2026-09-14',period_days:14,
+            current_date_iso:args[0] ? args[0].slice(0,10) : currentDate}]};
           if(q.includes('FROM departments'))return {rows:[]};
           if(q.startsWith('INSERT INTO departments'))return {rows:[{id:1}]};
           if(q.includes('FROM employees WHERE portal_user_id=$1')){
@@ -52,11 +53,13 @@ function fakeDatabase(initialEmployees=[],{currentDate='2026-10-07',approvals=[]
             assert(row);
             row.portal_user_id=args[0];
             if(args[11])row.weekly_hours_cap=args[12];
+            if(args[14])row.portal_weekly_hours_cap_changed_at=args[15];
             row.active=true;
             return {rows:[{...row}]};
           }
           if(q.startsWith('INSERT INTO employees')){
-            const row={id:state.nextId++,portal_user_id:args[0],employee_number:args[1],weekly_hours_cap:args[11],active:true};
+            const row={id:state.nextId++,portal_user_id:args[0],employee_number:args[1],
+              weekly_hours_cap:args[11],portal_weekly_hours_cap_changed_at:args[12],active:true};
             state.employees.push(row);return {rows:[{...row}]};
           }
           if(q.startsWith('INSERT INTO weekly_hours_cap_history')){
@@ -88,7 +91,8 @@ function fakeDatabase(initialEmployees=[],{currentDate='2026-10-07',approvals=[]
 
 function functionsFor(db){
   return vm.runInNewContext(`${authSource}\n${directorySource}\n({syncPortalUser,upsertDirectoryEmployee})`,{
-    pool:db.pool,normalizePermissions:value=>value,resolveApplicationRole:()=> 'employee',recordWeeklyCapChange,
+    pool:db.pool,normalizePermissions:value=>value,resolveApplicationRole:()=> 'employee',
+    recordWeeklyCapChange,portalCapSnapshotIsFresh,
   });
 }
 
@@ -246,5 +250,54 @@ function functionsFor(db){
   });
   await directoryFutureClient.query('COMMIT');
   assert.strictEqual(directoryFuture.state.history.at(-1).effective_date,'2026-10-12');
+
+  const rollover=fakeDatabase([{id:7,portal_user_id:'person',employee_number:'7',weekly_hours_cap:40,active:true}],
+    {currentDate:'2026-10-20'});
+  rollover.state.history.push({employee_id:7,effective_date:'2026-09-28',weekly_hours_cap:40,source:'production-baseline'});
+  const scheduled={...payload,weekly_hours_cap:32,weekly_hours_cap_target_period:'next',
+    weekly_hours_cap_changed_at:'2026-10-07T16:00:00.000Z',weekly_hours_cap_previous:40};
+  const rolloverSync=functionsFor(rollover).syncPortalUser;
+  await rolloverSync(scheduled);
+  assert.strictEqual(rollover.state.history.at(-1).effective_date,'2026-10-12',
+    'a delayed Next snapshot must use the period containing the edit, not the sync');
+  await rolloverSync(scheduled);
+  await rolloverSync({...scheduled,first_name:'Updated'});
+  assert.strictEqual(rollover.state.history.length,2,
+    'repeated snapshots and unrelated profile edits must not schedule another period');
+  await rolloverSync({...scheduled,weekly_hours_cap:36,
+    weekly_hours_cap_changed_at:'2026-10-08T16:00:00.000Z'});
+  assert.strictEqual(rollover.state.employees[0].weekly_hours_cap,36);
+  await rolloverSync(scheduled);
+  assert.strictEqual(rollover.state.employees[0].weekly_hours_cap,36,
+    'an older SSO snapshot must not undo a newer Portal cap event');
+  assert.strictEqual(rollover.state.history.at(-1).weekly_hours_cap,36);
+  const sameValueNewer=fakeDatabase([{id:7,portal_user_id:'person',employee_number:'7',
+    weekly_hours_cap:40,active:true}],{currentDate:'2026-10-20'});
+  sameValueNewer.state.history.push({employee_id:7,effective_date:'2026-09-28',
+    weekly_hours_cap:40,source:'production-baseline'});
+  const sameValueSync=functionsFor(sameValueNewer).syncPortalUser;
+  await sameValueSync({...scheduled,weekly_hours_cap:40,
+    weekly_hours_cap_changed_at:'2026-10-08T16:00:00.000Z'});
+  await sameValueSync(scheduled);
+  assert.strictEqual(sameValueNewer.state.employees[0].weekly_hours_cap,40,
+    'a newer same-value event still fences off an older changed-value snapshot');
+  assert.strictEqual(sameValueNewer.state.history.length,1);
+  assert.deepStrictEqual(summarizeTimecard({payPeriodStart:'2026-09-28',entries:periodEntries,
+    weeklyHoursCapHistory:rollover.state.history.map(row=>({effective_date_iso:row.effective_date,weekly_hours_cap:row.weekly_hours_cap}))}).weekly_hours_caps,[40,40]);
+
+  const firstSeen=fakeDatabase([],{currentDate:'2026-10-20'});
+  await functionsFor(firstSeen).syncPortalUser({...scheduled,sub:'first-seen'});
+  assert.deepStrictEqual(firstSeen.state.history.map(row=>[row.effective_date,row.weekly_hours_cap]),
+    [['2026-09-28',40],['2026-10-12',32]],
+    'first sync after rollover must retain the prior cap for the earlier period');
+
+  const firstSeenDirectory=fakeDatabase([],{currentDate:'2026-10-20'});
+  const firstSeenClient=await firstSeenDirectory.pool.connect();
+  await firstSeenClient.query('BEGIN');
+  await functionsFor(firstSeenDirectory).upsertDirectoryEmployee(firstSeenClient,{
+    ...scheduled,portal_user_id:'first-seen-directory'});
+  await firstSeenClient.query('COMMIT');
+  assert.deepStrictEqual(firstSeenDirectory.state.history.map(row=>[row.effective_date,row.weekly_hours_cap]),
+    [['2026-09-28',40],['2026-10-12',32]]);
   console.log('weekly cap history sync tests: PASS');
 })().catch(err=>{console.error(err);process.exitCode=1;});

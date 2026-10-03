@@ -12,12 +12,25 @@ function capsEqual(left, right) {
   return normalizeCap(left) === normalizeCap(right);
 }
 
+function portalCapSnapshotIsFresh(incomingAt, appliedAt) {
+  if (incomingAt != null && (typeof incomingAt !== 'string' ||
+      !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/.test(incomingAt) ||
+      !Number.isFinite(Date.parse(incomingAt)))) {
+    const error = new Error('Invalid weekly cap change timestamp');
+    error.statusCode = 400;
+    throw error;
+  }
+  if (!appliedAt) return true;
+  return incomingAt != null && Date.parse(incomingAt) > new Date(appliedAt).getTime();
+}
+
 async function recordWeeklyCapChange(client, {
   employeeId,
   previousCap,
   weeklyHoursCap,
   source = 'portal-sync',
   targetPeriod = 'auto',
+  changedAt = null,
   force = false,
 }) {
   if (!force && capsEqual(previousCap, weeklyHoursCap)) return false;
@@ -26,11 +39,12 @@ async function recordWeeklyCapChange(client, {
     error.statusCode = 400;
     throw error;
   }
+  portalCapSnapshotIsFresh(changedAt, null);
   const config = await client.query(
     `SELECT to_char(MAX(CASE WHEN key='pay_period_start_date' THEN value END)::date,'YYYY-MM-DD') AS anchor_date_iso,
             MAX(CASE WHEN key='pay_period_length_days' THEN value END)::int AS period_days,
-            to_char((NOW() AT TIME ZONE 'America/New_York')::date,'YYYY-MM-DD') AS current_date_iso
-       FROM settings`,
+            to_char((COALESCE($1::timestamptz,NOW()) AT TIME ZONE 'America/New_York')::date,'YYYY-MM-DD') AS current_date_iso
+       FROM settings`, [changedAt],
   );
   const setting = config.rows[0] || {};
   const period = resolvePayPeriod({
@@ -123,5 +137,6 @@ module.exports = {
   capsEqual,
   fetchWeeklyCapHistory,
   normalizeCap,
+  portalCapSnapshotIsFresh,
   recordWeeklyCapChange,
 };
