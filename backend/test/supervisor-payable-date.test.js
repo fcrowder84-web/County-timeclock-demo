@@ -26,6 +26,7 @@ const pool={async query(sql){
   if(q.includes('FROM leave_entries'))return {rows:[]};
   if(q.includes('FROM forced_lunch_setting_history'))return {rows:lunchSettings};
   if(q.includes('FROM forced_lunch_waivers'))return {rows:lunchWaivers};
+  if(q.includes('FROM weekly_hours_cap_history'))return {rows:[{employee_id:7,effective_date_iso:'2026-09-14',weekly_hours_cap:40}]};
   throw new Error(`Unexpected query: ${q}`);
 }};
 const router=createSupervisorRouter({requireUser:noop,requireAnyPermission:()=>noop,pool,
