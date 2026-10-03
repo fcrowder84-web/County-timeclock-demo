@@ -203,7 +203,10 @@ function summarizeTimecard({
         state.grossMinutes += Math.round((ruledOutMs - ruledInMs) / 60000);
         state.intervals.push({ inMs, outMs: calculationOutMs, ruledInMs, ruledOutMs });
       }
-    } else {
+    } else if (!staleOpenPunch) {
+      // Preserve hours-only/imported entries, but never trust a fallback
+      // hours_worked value for an unresolved stale open punch. Some callers
+      // derive that value using NOW(), which would otherwise keep accruing pay.
       state.grossMinutes += durationMinutes(entry.hours_worked);
     }
     daily.set(day, state);
@@ -277,7 +280,7 @@ function summarizeTimecard({
     const overtimeMinutes = Math.max(0, workedMinutes - thresholdMinutes);
     // A weekly cap replaces the normal OT/payable rule for capped employees.
     // Actual worked hours remain intact for the timecard/audit trail, but payroll
-    // receives worked time first up to the cap and no overtime allocation.
+    // reserves protected Holiday first, then worked time, with no overtime allocation.
     if (weeklyCapMinutes != null) {
       week.overtime_hours = 0;
       week.regular_worked_hours = round2(Math.min(workedMinutes, weeklyCapMinutes) / 60);
