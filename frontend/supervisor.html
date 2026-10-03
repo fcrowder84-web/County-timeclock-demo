@@ -768,7 +768,7 @@
                                 : "-"}
                         </td>
 
-                        <td>
+                        <td style="${Number(row.payable_hours || 0) > 80 ? 'background:#fee2e2;color:#991b1b;font-weight:700;border:2px solid #ef4444;' : ''}">
                             ${Number(row.payable_hours || 0).toFixed(2)}
                         </td>
 
