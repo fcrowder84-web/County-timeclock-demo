@@ -58,6 +58,7 @@ function createSupervisorRouter({
              e.last_name,
              d.name AS department,
              e.role,
+             e.weekly_hours_cap,
              ppa.status,
              ppa.employee_signed_at,
              ppa.supervisor_approved_at,
@@ -145,6 +146,78 @@ function createSupervisorRouter({
         const viewPermissions=['view_assigned_employees','view_department_time','view_live_status','view_payroll_records'];
         for(const row of result.rows){
           if(await canAccessEmployee(req.user,row.id,viewPermissions)) visible.push(row);
+        }
+
+        // Use the same authoritative timecard summary that powers Cap Adj on
+        // the detailed timecard. The dashboard must not maintain a second
+        // punch-only calculation for payroll/payable hours.
+        const visibleIds = visible.map(row => Number(row.id));
+        if (visibleIds.length) {
+          const [entriesResult, leaveResult, lunchSettingsResult, lunchWaiverResult] = await Promise.all([
+            pool.query(
+              `SELECT employee_id,clock_in,clock_out,pending_clock_in,pending_clock_out
+                 FROM time_entries
+                WHERE employee_id=ANY($1::int[])
+                  AND deleted_at IS NULL
+                  AND clock_in >= $2::date
+                  AND clock_in < ($3::date + INTERVAL '1 day')
+                ORDER BY employee_id,clock_in`,
+              [visibleIds, period.pay_period_start, period.pay_period_end],
+            ),
+            pool.query(
+              `SELECT employee_id,to_char(leave_date,'YYYY-MM-DD') AS leave_date_iso,
+                      leave_type,ROUND(quarter_hours/4.0,2) AS hours,status
+                 FROM leave_entries
+                WHERE employee_id=ANY($1::int[])
+                  AND leave_date BETWEEN $2::date AND $3::date
+                ORDER BY employee_id,leave_date,id`,
+              [visibleIds, period.pay_period_start, period.pay_period_end],
+            ),
+            pool.query(
+              `SELECT employee_id,to_char(effective_date,'YYYY-MM-DD') AS effective_date_iso,enabled,minutes
+                 FROM forced_lunch_setting_history
+                WHERE employee_id=ANY($1::int[])
+                  AND effective_date <= $2::date
+                ORDER BY employee_id,effective_date,id`,
+              [visibleIds, period.pay_period_end],
+            ),
+            pool.query(
+              `SELECT employee_id,to_char(work_date,'YYYY-MM-DD') AS work_date_iso,active
+                 FROM forced_lunch_waivers
+                WHERE employee_id=ANY($1::int[])
+                  AND work_date BETWEEN $2::date AND $3::date
+                  AND active=TRUE
+                ORDER BY employee_id,work_date,id`,
+              [visibleIds, period.pay_period_start, period.pay_period_end],
+            ),
+          ]);
+
+          const groupByEmployee = rows => {
+            const grouped = new Map();
+            for (const item of rows) {
+              const id = Number(item.employee_id);
+              if (!grouped.has(id)) grouped.set(id, []);
+              grouped.get(id).push(item);
+            }
+            return grouped;
+          };
+          const entriesByEmployee = groupByEmployee(entriesResult.rows);
+          const leaveByEmployee = groupByEmployee(leaveResult.rows);
+          const lunchSettingsByEmployee = groupByEmployee(lunchSettingsResult.rows);
+          const lunchWaiversByEmployee = groupByEmployee(lunchWaiverResult.rows);
+
+          for (const row of visible) {
+            const id = Number(row.id);
+            const summary = summarizeTimecard({
+              entries: entriesByEmployee.get(id) || [],
+              leaveEntries: leaveByEmployee.get(id) || [],
+              payPeriodStart: period.pay_period_start,
+              forcedLunchSettings: lunchSettingsByEmployee.get(id) || [],
+              lunchWaivers: lunchWaiversByEmployee.get(id) || [],
+              weeklyHoursCap: row.weekly_hours_cap,
+            });
+            row.payable_hours = summary.period.total_paid_hours;
+          }
         }
 
         return res.json({
