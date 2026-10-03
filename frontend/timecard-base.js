@@ -102,9 +102,20 @@ function dailyWorked(entries){return roundDailyHours(entries.reduce((a,e)=>a+num
 function allocateDailyWork(days,capped=false,overtimeThreshold=40){
   const result={};for(let w=0;w<2;w++){let cumulative=0;for(let i=w*7;i<w*7+7;i++){const day=days[i],worked=day.worked;if(capped){result[day.date]={regular:worked,ot:0};continue}const remaining=Math.max(0,overtimeThreshold-cumulative);const regular=Math.min(worked,remaining);const ot=Math.max(0,worked-regular);result[day.date]={regular,ot};cumulative+=worked}}return result
 }
+function leaveTypeLabel(type){
+  return String(type||"").replaceAll("_"," ").replace(/\b\w/g,ch=>ch.toUpperCase())
+}
 function capAdjustedDaily(summary){
   if(summary?.weekly_hours_cap==null)return{};
-  return Object.fromEntries((summary.cap_adjusted_days||[]).map(day=>[dateOnly(day.work_date),num(day.total_paid_hours)]))
+  return Object.fromEntries((summary.cap_adjusted_days||[]).map(day=>[dateOnly(day.work_date),{
+    hours:num(day.total_paid_hours),
+    leaveTypes:Object.entries(day.paid_leave_hours_by_type||{}).filter(([,hours])=>num(hours)>0).map(([type])=>leaveTypeLabel(type))
+  }]))
+}
+function capAdjustedDisplay(adjustment){
+  if(!adjustment)return"";
+  const amount=fmt(adjustment.hours);
+  return adjustment.leaveTypes?.length?esc(`${amount} ${adjustment.leaveTypes.join(" + ")}`):amount
 }
 function punchCells(day,entries){
   const punches=[];
