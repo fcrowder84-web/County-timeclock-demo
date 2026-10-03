@@ -100,14 +100,14 @@ function pendingLeaveHours(day,type){
 }
 function dailyWorked(entries){return roundDailyHours(entries.reduce((a,e)=>a+num(e.hours_worked),0))}
 function allocateDailyWork(days,capped=false,overtimeThreshold=40){
-  const result={};for(let w=0;w<2;w++){let cumulative=0;for(let i=w*7;i<w*7+7;i++){const day=days[i],worked=day.worked;if(capped){result[day.date]={regular:worked,ot:0};continue}const remaining=Math.max(0,overtimeThreshold-cumulative);const regular=Math.min(worked,remaining);const ot=Math.max(0,worked-regular);result[day.date]={regular,ot};cumulative+=worked}}return result
+  const result={};for(let w=0;w<2;w++){let cumulative=0;const weekCapped=Array.isArray(capped)?capped[w]:capped;for(let i=w*7;i<w*7+7;i++){const day=days[i],worked=day.worked;if(weekCapped){result[day.date]={regular:worked,ot:0};continue}const remaining=Math.max(0,overtimeThreshold-cumulative);const regular=Math.min(worked,remaining);const ot=Math.max(0,worked-regular);result[day.date]={regular,ot};cumulative+=worked}}return result
 }
 function leaveTypeLabel(type){
   return String(type||"").replaceAll("_"," ").replace(/\b\w/g,ch=>ch.toUpperCase())
 }
 function capAdjustedDaily(summary){
-  if(summary?.weekly_hours_cap==null)return{};
-  return Object.fromEntries((summary.cap_adjusted_days||[]).map(day=>[dateOnly(day.work_date),{
+  const caps=summary?.weekly_hours_caps||[summary?.weekly_hours_cap,summary?.weekly_hours_cap];
+  return Object.fromEntries((summary?.cap_adjusted_days||[]).filter((_,index)=>caps[Math.floor(index/7)]!=null).map(day=>[dateOnly(day.work_date),{
     hours:num(day.total_paid_hours),
     leaveTypes:Object.entries(day.paid_leave_hours_by_type||{}).filter(([,hours])=>num(hours)>0).map(([type])=>leaveTypeLabel(type))
   }]))
@@ -152,8 +152,8 @@ function leaveCell(day,type){
 function otherTotal(map){return Object.entries(map||{}).filter(([k])=>!["holiday","vacation","sick","floating_holiday"].includes(k)).reduce((a,[,v])=>a+num(v),0)}
 function totalRow(label,summary,klass,capped=false){
   const m=summary?.leave_hours_by_type||{};
-  const regular=capped?num(summary?.total_worked_hours)+num(summary?.forced_lunch_hours):num(summary?.regular_worked_hours)+num(summary?.forced_lunch_hours);
-  const ot=capped?0:num(summary?.overtime_hours);
+  const regular=num(summary?.total_worked_hours)+num(summary?.forced_lunch_hours)-num(summary?.overtime_hours);
+  const ot=num(summary?.overtime_hours);
   const rawTotal=num(summary?.total_worked_hours)+num(summary?.total_leave_hours);
   const capAdjusted=capped?fmt(summary?.total_paid_hours):"";
   return `<tr class="${klass}"><td class="left" colspan="5">${esc(label)}</td><td>${fmt(regular)}</td><td>${num(summary?.forced_lunch_hours)>0?"-"+fmt(summary.forced_lunch_hours):""}</td><td>${fmt(ot)}</td><td>${fmt(m.holiday)}</td><td>${fmt(m.vacation)}</td><td>${fmt(m.sick)}</td><td>${fmt(m.floating_holiday)}</td><td>${fmt(otherTotal(m))}</td><td>${fmt(rawTotal)}</td><td><strong>${capAdjusted}</strong></td></tr>`

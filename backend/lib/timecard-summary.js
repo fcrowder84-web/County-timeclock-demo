@@ -159,14 +159,20 @@ function summarizeTimecard({
         .sort((a, b) => a.effectiveDate.localeCompare(b.effectiveDate))
     : null;
 
-  function weeklyCapMinutesForWeek(weekStart) {
+  function weeklyCapMinutesForWeek(week) {
     if (weeklyCapHistory === null) return legacyWeeklyCapMinutes;
     let activeSetting;
     for (const setting of weeklyCapHistory) {
-      if (setting.effectiveDate > weekStart) break;
+      if (setting.effectiveDate > week.start_date) break;
       activeSetting = setting;
     }
-    return activeSetting ? activeSetting.capMinutes : null;
+    if (!activeSetting) {
+      // Current active employees also appear in earlier, empty payroll exports.
+      // A missing cap cannot affect a week with no work or leave.
+      if (!week.gross_worked_hours && !week.total_leave_hours && !week.pending_leave_hours) return null;
+      throw new Error(`Weekly cap history is missing for payroll week ${week.start_date}`);
+    }
+    return activeSetting.capMinutes;
   }
 
   const legacyConfiguredLunchMinutes = forcedLunchEnabled ? Math.max(0, Math.round(number(forcedLunchMinutes))) : 0;
@@ -192,7 +198,6 @@ function summarizeTimecard({
   }
 
   const weeks = [emptyWeek(1, start), emptyWeek(2, addDays(start, 7))];
-  const weeklyCapMinutesByWeek = weeks.map(week => weeklyCapMinutesForWeek(week.start_date));
   const daily = new Map();
   const waiverMap = new Map();
   const approvedLeaveByDay = new Map();
@@ -312,6 +317,7 @@ function summarizeTimecard({
     }
   }
 
+  const weeklyCapMinutesByWeek = weeks.map(weeklyCapMinutesForWeek);
   for (const [weekIndex, week] of weeks.entries()) {
     const weeklyCapMinutes = weeklyCapMinutesByWeek[weekIndex];
     const workedMinutes = Math.round(week.total_worked_hours * 60);

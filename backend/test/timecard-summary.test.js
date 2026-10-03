@@ -583,5 +583,78 @@ assert.deepStrictEqual(effectiveUncappedWeek.weekly_hours_caps, [40, null]);
 assert.strictEqual(effectiveUncappedWeek.weeks[0].total_paid_hours, 40);
 assert.strictEqual(effectiveUncappedWeek.weeks[1].total_paid_hours, 50);
 assert.strictEqual(effectiveUncappedWeek.weeks[1].overtime_hours, 2);
+assert.strictEqual(effectiveUncappedWeek.weeks[1].total_leave_hours, 8);
+for (let weekIndex = 0; weekIndex < 2; weekIndex++) {
+  const dailyCents = effectiveUncappedWeek.cap_adjusted_days.slice(weekIndex * 7, weekIndex * 7 + 7)
+    .reduce((sum, day) => sum + Math.round(day.total_paid_hours * 100), 0);
+  assert.strictEqual(dailyCents, Math.round(effectiveUncappedWeek.weeks[weekIndex].total_paid_hours * 100));
+}
+
+const uncappedToCapped = summarizeTimecard({
+  payPeriodStart: '2026-09-28', weeklyHoursCap: 40,
+  weeklyHoursCapHistory: [
+    { effective_date_iso: '2026-09-14', weekly_hours_cap: null },
+    { effective_date_iso: '2026-10-05', weekly_hours_cap: 40 },
+  ],
+  entries: [
+    { entry_date_iso: '2026-09-28', hours_worked: 42 },
+    { entry_date_iso: '2026-10-05', hours_worked: 44 },
+  ],
+});
+assert.deepStrictEqual(uncappedToCapped.weekly_hours_caps, [null, 40]);
+assert.strictEqual(uncappedToCapped.weeks[0].overtime_hours, 2);
+assert.strictEqual(uncappedToCapped.weeks[0].total_paid_hours, 42);
+assert.strictEqual(uncappedToCapped.weeks[1].overtime_hours, 0);
+assert.strictEqual(uncappedToCapped.weeks[1].total_paid_hours, 40);
+
+// A change during a payroll week takes effect at the following Monday.
+const midweekChanges = summarizeTimecard({
+  payPeriodStart: '2026-09-28', weeklyHoursCap: 36,
+  weeklyHoursCapHistory: [
+    { effective_date_iso: '2026-09-14', weekly_hours_cap: 40 },
+    { effective_date_iso: '2026-10-01', weekly_hours_cap: 32 },
+    { effective_date_iso: '2026-10-03', weekly_hours_cap: 36 },
+  ],
+  entries: [
+    { entry_date_iso: '2026-09-28', hours_worked: 44 },
+    { entry_date_iso: '2026-10-05', hours_worked: 44 },
+  ],
+});
+assert.deepStrictEqual(midweekChanges.weekly_hours_caps, [40, 36]);
+assert.strictEqual(midweekChanges.period.total_paid_hours, 76);
+
+assert.throws(() => summarizeTimecard({
+  payPeriodStart: '2026-09-14', weeklyHoursCap: 40,
+  weeklyHoursCapHistory: [{ effective_date_iso: '2026-10-05', weekly_hours_cap: 32 }],
+  entries: [{ entry_date_iso: '2026-09-14', hours_worked: 8 }],
+}), /history is missing for payroll week 2026-09-14/);
+
+const employeeCreatedAfterHistoricalPeriod = summarizeTimecard({
+  payPeriodStart: '2026-09-14', weeklyHoursCap: 32,
+  weeklyHoursCapHistory: [{ effective_date_iso: '2026-10-05', weekly_hours_cap: 32 }],
+});
+assert.strictEqual(employeeCreatedAfterHistoricalPeriod.period.total_paid_hours, 0);
+assert.deepStrictEqual(employeeCreatedAfterHistoricalPeriod.weekly_hours_caps, [null, null]);
+
+const employeeCreatedInSecondWeek = summarizeTimecard({
+  payPeriodStart: '2026-09-28', weeklyHoursCap: 32,
+  weeklyHoursCapHistory: [{ effective_date_iso: '2026-10-05', weekly_hours_cap: 32 }],
+  entries: [{ entry_date_iso: '2026-10-05', hours_worked: 36 }],
+});
+assert.deepStrictEqual(employeeCreatedInSecondWeek.weekly_hours_caps, [null, 32]);
+assert.strictEqual(employeeCreatedInSecondWeek.period.total_paid_hours, 32);
+
+const historicalHoliday = summarizeTimecard({
+  payPeriodStart: '2026-09-14', weeklyHoursCap: 32,
+  weeklyHoursCapHistory: [
+    { effective_date_iso: '2026-09-14', weekly_hours_cap: 40 },
+    { effective_date_iso: '2026-10-05', weekly_hours_cap: 32 },
+  ],
+  entries: [{ entry_date_iso: '2026-09-14', hours_worked: 36 }],
+  leaveEntries: [{ leave_date_iso: '2026-09-15', leave_type: 'holiday', hours: 8, status: 'approved' }],
+});
+assert.strictEqual(historicalHoliday.weeks[0].regular_worked_hours, 32);
+assert.strictEqual(historicalHoliday.weeks[0].adjusted_leave_hours_by_type.holiday, 8);
+assert.strictEqual(historicalHoliday.weeks[0].total_paid_hours, 40);
 
 console.log("timecard summary tests passed");

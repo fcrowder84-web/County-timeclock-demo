@@ -16,17 +16,23 @@ async function recordWeeklyCapChange(client, {
   weeklyHoursCap,
   source = 'portal-sync',
   effectiveDate = null,
+  force = false,
 }) {
-  if (capsEqual(previousCap, weeklyHoursCap)) return false;
+  if (!force && capsEqual(previousCap, weeklyHoursCap)) return false;
+  // New employees need a row covering the payroll week in which they first
+  // appear, even when Portal creates their account after that Monday.
+  const defaultDate = force
+    ? 'CURRENT_DATE - (EXTRACT(ISODOW FROM CURRENT_DATE)::int - 1)'
+    : 'CURRENT_DATE';
   await client.query(
     `INSERT INTO weekly_hours_cap_history(
        employee_id,effective_date,weekly_hours_cap,source
      )
-     VALUES($1,COALESCE($2::date,CURRENT_DATE),$3::numeric,$4)
+     VALUES($1,COALESCE($2::date,${defaultDate}),$3::numeric,$4)
      ON CONFLICT (employee_id,effective_date)
      DO UPDATE SET weekly_hours_cap=EXCLUDED.weekly_hours_cap,
-                   source=EXCLUDED.source,
-                   created_at=NOW()`,
+                   source=EXCLUDED.source
+     WHERE weekly_hours_cap_history.weekly_hours_cap IS DISTINCT FROM EXCLUDED.weekly_hours_cap`,
     [employeeId, effectiveDate, normalizeCap(weeklyHoursCap), source],
   );
   return true;
