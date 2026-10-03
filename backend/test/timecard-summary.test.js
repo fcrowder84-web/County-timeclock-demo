@@ -359,4 +359,75 @@ assert.strictEqual(forcedLunchWithCap.weeks[0].forced_lunch_hours, 4);
 assert.strictEqual(forcedLunchWithCap.weeks[0].adjusted_total_leave_hours, 8);
 assert.strictEqual(forcedLunchWithCap.weeks[0].total_paid_hours, 40);
 
+function capDay(summary, date) {
+  return summary.cap_adjusted_days.find(day => day.work_date === date);
+}
+function assertCapDaysReconcile(summary) {
+  assert.strictEqual(summary.cap_adjusted_days.length, 14);
+  for (let weekIndex = 0; weekIndex < 2; weekIndex++) {
+    const cents = summary.cap_adjusted_days.slice(weekIndex * 7, weekIndex * 7 + 7)
+      .reduce((sum, day) => sum + Math.round(day.total_paid_hours * 100), 0);
+    assert.strictEqual(cents, Math.round(summary.weeks[weekIndex].total_paid_hours * 100));
+    assert(cents <= Math.round(summary.weeks[weekIndex].weekly_hours_cap * 100));
+  }
+  assert.strictEqual(
+    summary.cap_adjusted_days.reduce((sum, day) => sum + Math.round(day.total_paid_hours * 100), 0),
+    Math.round(summary.period.total_paid_hours * 100),
+  );
+}
+
+assert.deepStrictEqual(workedOtOnly.cap_adjusted_days, []);
+const lastWorkedDayCap = summarizeTimecard({
+  payPeriodStart: '2026-10-05', weeklyHoursCap: 40,
+  entries: [8, 8, 8, 8, 10].map((hours_worked, offset) => ({
+    entry_date_iso: `2026-10-${String(5 + offset).padStart(2, '0')}`, hours_worked,
+  })),
+});
+assert.strictEqual(lastWorkedDayCap.weeks[0].total_worked_hours, 42);
+assert.strictEqual(lastWorkedDayCap.weeks[0].overtime_hours, 0);
+assert.strictEqual(capDay(lastWorkedDayCap, '2026-10-09').paid_worked_hours, 8);
+assert.strictEqual(capDay(lastWorkedDayCap, '2026-10-09').total_paid_hours, 8);
+assertCapDaysReconcile(lastWorkedDayCap);
+
+const leavePriorityByDay = summarizeTimecard({
+  payPeriodStart: '2026-10-05', weeklyHoursCap: 40,
+  entries: [{ entry_date_iso: '2026-10-05', hours_worked: 32 }],
+  leaveEntries: [
+    { leave_date_iso: '2026-10-06', leave_type: 'regular holiday leave', hours: 8, status: 'approved' },
+    { leave_date_iso: '2026-10-07', leave_type: 'bereavement', hours: 8, status: 'approved' },
+  ],
+});
+assert.strictEqual(capDay(leavePriorityByDay, '2026-10-06').paid_leave_hours, 8);
+assert.strictEqual(capDay(leavePriorityByDay, '2026-10-07').paid_leave_hours, 0);
+assertCapDaysReconcile(leavePriorityByDay);
+
+const laterLeaveReduced = summarizeTimecard({
+  payPeriodStart: '2026-10-05', weeklyHoursCap: 40,
+  entries: [{ entry_date_iso: '2026-10-05', hours_worked: 36 }],
+  leaveEntries: [
+    { leave_date_iso: '2026-10-09', leave_type: 'sick', hours: 2, status: 'approved' },
+    { leave_date_iso: '2026-10-10', leave_type: 'sick', hours: 4, status: 'approved' },
+  ],
+});
+assert.strictEqual(capDay(laterLeaveReduced, '2026-10-09').paid_leave_hours, 2);
+assert.strictEqual(capDay(laterLeaveReduced, '2026-10-10').paid_leave_hours, 2);
+assertCapDaysReconcile(laterLeaveReduced);
+
+const waivedLunchCap = summarizeTimecard({
+  payPeriodStart: '2026-10-05', weeklyHoursCap: 40,
+  forcedLunchEnabled: true, forcedLunchMinutes: 60,
+  entries: [0, 1, 2, 3, 4].map(offset => ({
+    entry_date_iso: `2026-10-${String(5 + offset).padStart(2, '0')}`, hours_worked: 9,
+  })),
+  lunchWaivers: [{ work_date_iso: '2026-10-09', active: true, reason: 'Worked through lunch' }],
+});
+assert.strictEqual(waivedLunchCap.weeks[0].forced_lunch_hours, 4);
+assert.strictEqual(waivedLunchCap.weeks[0].total_worked_hours, 41);
+assert.strictEqual(capDay(waivedLunchCap, '2026-10-09').paid_worked_hours, 8);
+assertCapDaysReconcile(waivedLunchCap);
+
+assertCapDaysReconcile(weeklyCapDoesNotCrossWeeks);
+assertCapDaysReconcile(zeroCap);
+assertCapDaysReconcile(exactAndQuarterCap);
+
 console.log("timecard summary tests passed");

@@ -151,6 +151,7 @@ function summarizeTimecard({
   const weeks = [emptyWeek(1, start), emptyWeek(2, addDays(start, 7))];
   const daily = new Map();
   const waiverMap = new Map();
+  const approvedLeaveByDay = new Map();
 
   for (const waiver of lunchWaivers) {
     if (waiver.active === false) continue;
@@ -246,6 +247,9 @@ function summarizeTimecard({
     if (leave.status === 'approved') {
       addByType(week.leave_hours_by_type, leave.leave_type, hours);
       week.total_leave_hours = round2(week.total_leave_hours + hours);
+      const byType = approvedLeaveByDay.get(day) || {};
+      addByType(byType, leave.leave_type, hours);
+      approvedLeaveByDay.set(day, byType);
     } else if (leave.status === 'pending') {
       addByType(week.pending_leave_hours_by_type, leave.leave_type, hours);
       week.pending_leave_hours = round2(week.pending_leave_hours + hours);
@@ -307,6 +311,56 @@ function summarizeTimecard({
     }
   }
 
+  // Allocate the weekly payroll result here, where the cap and leave priority
+  // are calculated. Work consumes the cap first; within each leave type, later
+  // days absorb reductions. Keep cents integer so displayed days reconcile.
+  const capAdjustedDays = weeklyCapMinutes == null ? [] : Array.from({ length: 14 }, (_, offset) => ({
+    work_date: addDays(start, offset),
+    paid_worked_hours: 0,
+    paid_leave_hours: 0,
+    total_paid_hours: 0,
+  }));
+  if (weeklyCapMinutes != null) {
+    const workedByDay = new Map(days.map(day => [day.work_date, Math.round(day.total_worked_hours * 100)]));
+    for (let weekIndex = 0; weekIndex < 2; weekIndex++) {
+      const week = weeks[weekIndex];
+      const weekDays = capAdjustedDays.slice(weekIndex * 7, weekIndex * 7 + 7);
+      let remainingWorked = Math.round(week.regular_worked_hours * 100);
+      for (const day of weekDays) {
+        const paid = Math.min(workedByDay.get(day.work_date) || 0, remainingWorked);
+        day.paid_worked_hours = paid;
+        remainingWorked -= paid;
+      }
+      for (const [type, allowedHours] of Object.entries(week.adjusted_leave_hours_by_type)) {
+        let remainingLeave = Math.round(allowedHours * 100);
+        for (const day of weekDays) {
+          const available = Math.round(number(approvedLeaveByDay.get(day.work_date)?.[type]) * 100);
+          const paid = Math.min(available, remainingLeave);
+          day.paid_leave_hours += paid;
+          remainingLeave -= paid;
+          if (!remainingLeave) break;
+        }
+      }
+      // The weekly summary is authoritative if independently rounded leave
+      // entries produce a rounding remainder.
+      const target = Math.round(week.total_paid_hours * 100);
+      const allocated = weekDays.reduce((sum, day) => sum + day.paid_worked_hours + day.paid_leave_hours, 0);
+      const remainder = target - allocated;
+      if (remainder) {
+        const day = [...weekDays].reverse().find(item => item.paid_leave_hours > 0 || item.paid_worked_hours > 0);
+        if (day) {
+          if (day.paid_leave_hours > 0) day.paid_leave_hours += remainder;
+          else day.paid_worked_hours += remainder;
+        }
+      }
+    }
+    for (const day of capAdjustedDays) {
+      day.total_paid_hours = (day.paid_worked_hours + day.paid_leave_hours) / 100;
+      day.paid_worked_hours /= 100;
+      day.paid_leave_hours /= 100;
+    }
+  }
+
   const period = {
     regular_worked_hours: 0,
     overtime_hours: 0,
@@ -354,6 +408,7 @@ function summarizeTimecard({
       ? legacyConfiguredLunchMinutes
       : ([...lunchSettingHistory].reverse().find(setting => setting.effectiveDate <= addDays(start, 13))?.minutes || 0),
     days,
+    cap_adjusted_days: capAdjustedDays,
     weeks,
     period,
   };
