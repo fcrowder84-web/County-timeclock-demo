@@ -155,7 +155,9 @@ function createSupervisorRouter({
         if (visibleIds.length) {
           const [entriesResult, leaveResult, lunchSettingsResult, lunchWaiverResult] = await Promise.all([
             pool.query(
-              `SELECT employee_id,clock_in,clock_out,pending_clock_in,pending_clock_out
+              `SELECT employee_id,
+                      to_char(clock_in::date,'YYYY-MM-DD') AS entry_date_iso,
+                      clock_in,clock_out,pending_clock_in,pending_clock_out
                  FROM time_entries
                 WHERE employee_id=ANY($1::int[])
                   AND deleted_at IS NULL
