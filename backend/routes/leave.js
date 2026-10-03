@@ -406,7 +406,9 @@ function createLeaveRouter({ requireUser, pool, audit, canAccessEmployee, getReq
       await client.query('ROLLBACK').catch(() => {});
       if (err.code === '23505') {
         return res.status(409).json({
-          error: 'This employee already has a pending or approved Floating Holiday for that year',
+          error: err.constraint === 'idx_leave_one_regular_holiday_per_day'
+            ? 'A Holiday entry already exists for this employee on one of the selected dates'
+            : 'This employee already has a pending or approved Floating Holiday for that year',
         });
       }
       return res.status(err.statusCode || 500).json({ error: err.message || 'Leave entry failed' });
@@ -463,6 +465,16 @@ function createLeaveRouter({ requireUser, pool, audit, canAccessEmployee, getReq
 
       if(type==='holiday'){
         validateFixedHolidayDates([date]);
+        const duplicate=await client.query(
+          `SELECT id FROM leave_entries
+            WHERE employee_id=$1 AND leave_type='holiday' AND leave_date=$2::date
+              AND id<>$3 AND status IN ('pending','approved') LIMIT 1`,
+          [entry.employee_id,date,entry.id],
+        );
+        if(duplicate.rows.length){
+          await client.query('ROLLBACK');
+          return res.status(409).json({error:'A Holiday entry already exists for this employee on this date'});
+        }
         if(!note) note=findFixedHoliday(date)?.name||null;
       }
       if(type==='floating_holiday'){
@@ -587,6 +599,9 @@ function createLeaveRouter({ requireUser, pool, audit, canAccessEmployee, getReq
       return res.json({message:'Leave entry updated',leave_entry:result.rows[0]});
     } catch(err) {
       await client.query('ROLLBACK').catch(()=>{});
+      if(err.code==='23505'&&err.constraint==='idx_leave_one_regular_holiday_per_day'){
+        return res.status(409).json({error:'A Holiday entry already exists for this employee on this date'});
+      }
       return res.status(err.statusCode||500).json({error:err.message||'Leave edit failed'});
     } finally {
       client.release();

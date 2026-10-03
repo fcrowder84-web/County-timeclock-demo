@@ -174,6 +174,7 @@ function createApproveSinglePunchHandler({ pool, audit, canAccessEmployee }) {
     } catch (err) {
       await client.query('ROLLBACK').catch(() => {});
       if (err.statusCode) return res.status(err.statusCode).json({ error: err.message });
+      if (err.code === '23P01') return res.status(409).json({ error: 'The approved punch would overlap another time entry.' });
       if (err.code === '23505') return res.status(409).json({ error: 'The approved punch would create a conflicting open punch' });
       if (err.code === '23514') return res.status(400).json({ error: 'The approved punch would create an invalid punch order' });
       console.error(err);

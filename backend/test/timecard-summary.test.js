@@ -468,4 +468,61 @@ assert.strictEqual(staleOpenPunchDoesNotAccrue.weeks[0].total_worked_hours, 0);
 assert.strictEqual(staleOpenPunchDoesNotAccrue.weeks[0].overtime_hours, 0);
 assert.strictEqual(staleOpenPunchDoesNotAccrue.weeks[0].total_paid_hours, 0);
 
+function punchSummary({clockIn, clockOut=null, asOf, hoursWorked=100, cap=null, others=[]}) {
+  return summarizeTimecard({
+    payPeriodStart:'2026-10-05', asOf:new Date(asOf), weeklyHoursCap:cap,
+    entries:[{entry_date_iso:'2026-10-05',clock_in:clockIn,clock_out:clockOut,hours_worked:hoursWorked},...others],
+  });
+}
+// Eastern Monday evening is already Tuesday in UTC. It remains a live punch.
+const liveEvening=punchSummary({
+  clockIn:'2026-10-05T20:00:00-04:00',asOf:'2026-10-05T21:00:00-04:00',
+});
+assert.strictEqual(liveEvening.weeks[0].total_worked_hours,1);
+assert.strictEqual(liveEvening.weeks[0].total_paid_hours,1);
+for(const cap of [null,40]) {
+  const priorDay=punchSummary({
+    clockIn:'2026-10-05T23:00:00-04:00',asOf:'2026-10-06T01:00:00-04:00',cap,
+  });
+  assert.strictEqual(priorDay.weeks[0].total_worked_hours,0);
+  assert.strictEqual(priorDay.weeks[0].total_paid_hours,0);
+  const old=punchSummary({
+    clockIn:'2026-10-05T00:00:00-04:00',asOf:'2026-10-05T23:00:00-04:00',cap,
+  });
+  assert.strictEqual(old.weeks[0].total_worked_hours,0);
+  assert.strictEqual(old.weeks[0].total_paid_hours,0);
+  const alongside=punchSummary({
+    clockIn:'2026-10-05T08:00:00-04:00',asOf:'2026-10-07T12:00:00-04:00',cap,
+    others:[{entry_date_iso:'2026-10-06',clock_in:'2026-10-06T08:00:00-04:00',clock_out:'2026-10-06T16:00:00-04:00'}],
+  });
+  assert.strictEqual(alongside.weeks[0].total_worked_hours,8);
+  assert.strictEqual(alongside.weeks[0].total_paid_hours,8);
+}
+const corrected=punchSummary({
+  clockIn:'2026-10-05T08:00:00-04:00',clockOut:'2026-10-05T16:00:00-04:00',
+  asOf:'2026-10-07T12:00:00-04:00',
+});
+assert.strictEqual(corrected.weeks[0].total_worked_hours,8);
+const pendingCorrection=summarizeTimecard({
+  payPeriodStart:'2026-10-05',asOf:new Date('2026-10-07T12:00:00-04:00'),
+  entries:[{entry_date_iso:'2026-10-05',clock_in:'2026-10-05T08:00:00-04:00',
+    clock_out:null,pending_clock_out:'2026-10-05T16:00:00-04:00',hours_worked:52}],
+});
+assert.strictEqual(pendingCorrection.weeks[0].total_paid_hours,0);
+
+const easternWeekBoundary=summarizeTimecard({
+  payPeriodStart:'2026-10-05',weeklyHoursCap:40,
+  forcedLunchEnabled:true,forcedLunchMinutes:60,
+  lunchWaivers:[{work_date_iso:'2026-10-11',active:true}],
+  entries:[
+    {entry_date_iso:'2026-10-11',clock_in:'2026-10-11T20:00:00-04:00',clock_out:'2026-10-12T05:00:00-04:00'},
+    {entry_date_iso:'2026-10-12',clock_in:'2026-10-12T08:00:00-04:00',clock_out:'2026-10-12T17:00:00-04:00'},
+  ],
+});
+assert.strictEqual(easternWeekBoundary.days.find(day=>day.work_date==='2026-10-11').total_worked_hours,9);
+assert.strictEqual(easternWeekBoundary.days.find(day=>day.work_date==='2026-10-12').forced_lunch_deduction_hours,1);
+assert.strictEqual(easternWeekBoundary.weeks[0].total_paid_hours,9);
+assert.strictEqual(easternWeekBoundary.weeks[1].total_paid_hours,8);
+assertCapDaysReconcile(easternWeekBoundary);
+
 console.log("timecard summary tests passed");

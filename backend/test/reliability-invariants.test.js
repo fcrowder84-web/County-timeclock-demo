@@ -17,6 +17,7 @@ const mobilePairing = read('../frontend/mobile-pairing.js');
 const timecardActions = read('../frontend/timecard-actions.js');
 const supervisorFrontend = read('../frontend/supervisor.html');
 const timecardHtml = read('../frontend/timecard.html');
+const appShell = read('../frontend/app-shell.js');
 const frontendDockerfile = read('../frontend/Dockerfile');
 const schema = read('../schema.sql');
 const deniedPunchMigration = read('../migrations/015_denied_punch_acknowledgement.sql');
@@ -41,7 +42,7 @@ assert.match(supervisor, /status='pending'/);
 assert.match(supervisor, /invalidated_approval_ids/);
 assert.doesNotMatch(supervisor, /status\s*=\s*'closed'[\s\S]{0,120}WHERE id/, 'correction approval must not blindly mark null-clock-out entries closed');
 
-assert.match(payroll, /WHERE te\.deleted_at IS NULL/);
+assert.match(payroll, /AND te\.deleted_at IS NULL/);
 assert.match(payroll, /period_te\.deleted_at IS NULL/);
 assert.match(payroll, /te\.deleted_at IS NULL[\s\S]*te\.clock_in/);
 
@@ -104,7 +105,8 @@ assert.match(leave, /reopen_timecard/);
 assert.match(leave, /invalidateApprovalsForDates/);
 
 // Logs navigation and nginx image inclusion are deployment requirements.
-assert.match(timecardHtml, /href="\/logs\.html"/);
+assert.match(timecardHtml, /src="\/app-shell\.js/);
+assert.match(appShell, /item\('\/logs\.html'/);
 assert.match(frontendDockerfile, /COPY logs\.html \/usr\/share\/nginx\/html\/logs\.html/);
 
 console.log('reliability invariant tests: PASS');

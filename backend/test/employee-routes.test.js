@@ -50,6 +50,7 @@ function compact(sql) { return String(sql).replace(/\s+/g, ' ').trim(); }
       'post /employee/edit-time-entry',
       'post /employee/request-time-change',
       'post /employee/withdraw-time-change',
+      'post /supervisor/replace-day-punches',
       'post /supervisor/add-time-entry',
       'post /supervisor/approve-single-punch',
     ],
