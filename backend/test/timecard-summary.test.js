@@ -525,4 +525,63 @@ assert.strictEqual(easternWeekBoundary.weeks[0].total_paid_hours,9);
 assert.strictEqual(easternWeekBoundary.weeks[1].total_paid_hours,8);
 assertCapDaysReconcile(easternWeekBoundary);
 
+
+// Effective-dated caps preserve historical payroll even when the employee's
+// current-value cache has changed.
+const effectiveDatedCap = summarizeTimecard({
+  payPeriodStart: '2026-09-28',
+  weeklyHoursCap: 32,
+  weeklyHoursCapHistory: [
+    { effective_date_iso: '2026-09-14', weekly_hours_cap: 40 },
+    { effective_date_iso: '2026-10-05', weekly_hours_cap: 32 },
+  ],
+  entries: [
+    { entry_date_iso: '2026-09-28', hours_worked: 36 },
+    { entry_date_iso: '2026-09-29', hours_worked: 8 },
+    { entry_date_iso: '2026-10-05', hours_worked: 30 },
+    { entry_date_iso: '2026-10-06', hours_worked: 8 },
+  ],
+});
+assert.deepStrictEqual(effectiveDatedCap.weekly_hours_caps, [40, 32]);
+assert.strictEqual(effectiveDatedCap.weeks[0].weekly_hours_cap, 40);
+assert.strictEqual(effectiveDatedCap.weeks[0].total_paid_hours, 40);
+assert.strictEqual(effectiveDatedCap.weeks[1].weekly_hours_cap, 32);
+assert.strictEqual(effectiveDatedCap.weeks[1].total_paid_hours, 32);
+assert.strictEqual(effectiveDatedCap.period.total_paid_hours, 72);
+
+const septemberHistoryIgnoresLaterCurrentValue = summarizeTimecard({
+  payPeriodStart: '2026-09-14',
+  weeklyHoursCap: 32,
+  weeklyHoursCapHistory: [
+    { effective_date_iso: '2026-09-14', weekly_hours_cap: 40 },
+    { effective_date_iso: '2026-10-05', weekly_hours_cap: 32 },
+  ],
+  entries: [
+    { entry_date_iso: '2026-09-14', hours_worked: 44 },
+    { entry_date_iso: '2026-09-21', hours_worked: 44 },
+  ],
+});
+assert.deepStrictEqual(septemberHistoryIgnoresLaterCurrentValue.weekly_hours_caps, [40, 40]);
+assert.strictEqual(septemberHistoryIgnoresLaterCurrentValue.period.total_paid_hours, 80);
+
+const effectiveUncappedWeek = summarizeTimecard({
+  payPeriodStart: '2026-09-28',
+  weeklyHoursCap: null,
+  weeklyHoursCapHistory: [
+    { effective_date_iso: '2026-09-14', weekly_hours_cap: 40 },
+    { effective_date_iso: '2026-10-05', weekly_hours_cap: null },
+  ],
+  entries: [
+    { entry_date_iso: '2026-09-28', hours_worked: 44 },
+    { entry_date_iso: '2026-10-05', hours_worked: 42 },
+  ],
+  leaveEntries: [
+    { leave_date_iso: '2026-10-06', leave_type: 'sick', hours: 8, status: 'approved' },
+  ],
+});
+assert.deepStrictEqual(effectiveUncappedWeek.weekly_hours_caps, [40, null]);
+assert.strictEqual(effectiveUncappedWeek.weeks[0].total_paid_hours, 40);
+assert.strictEqual(effectiveUncappedWeek.weeks[1].total_paid_hours, 50);
+assert.strictEqual(effectiveUncappedWeek.weeks[1].overtime_hours, 2);
+
 console.log("timecard summary tests passed");
