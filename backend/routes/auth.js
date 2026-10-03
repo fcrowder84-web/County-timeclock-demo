@@ -191,13 +191,13 @@ function createAuthRouter({
       return res.json({message:'Employee Portal login successful',token,device_credential:deviceCredential,user,permissions,app_admin_scope:synced.appAdminScope,auth_source:'portal'});
     }catch(err){
       console.error('Portal login error',err);
-      const status=err?.statusCode===503
-        ? 503
+      const status=[400,409,503].includes(err?.statusCode)
+        ? err.statusCode
         : (err.name==='TokenExpiredError'||/token|signature|issuer|audience|algorithm/i.test(err.message)?401:500);
       return res.status(status).json({
         error:status===401
           ? 'Employee Portal login link is invalid or expired'
-          : status===503
+          : [400,409,503].includes(status)
             ? err.message
             : 'Employee Portal login failed'
       });

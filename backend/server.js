@@ -101,6 +101,7 @@ async function refreshPortalAuthorization(user) {
     timeclock_role: current.timeclock_access ? current.timeclock_role : 'employee',
     app_admin_scope: current.timeclock_access ? current.app_admin_scope : 'own',
     ...(Object.prototype.hasOwnProperty.call(current,'weekly_hours_cap') ? {weekly_hours_cap:current.weekly_hours_cap} : {}),
+    ...(Object.prototype.hasOwnProperty.call(current,'weekly_hours_cap_target_period') ? {weekly_hours_cap_target_period:current.weekly_hours_cap_target_period} : {}),
   });
 
   if (!current.is_active || !current.timeclock_access) {
@@ -273,6 +274,9 @@ async function syncPortalUser(payload){
   const departmentName=payload.department_name||"Unassigned";
   const appAdminScope=permissions.includes('app_admin')&&payload.app_admin_scope==='all'?'all':'own';
   const role=resolveApplicationRole(payload.timeclock_role,permissions);
+  // Employee Portal must include the selected target in its SSO, authorization,
+  // and directory payloads for a next-period change. Omission means auto:
+  // current open payroll period, or the next open period if this one is locked.
   const capPresent=Object.prototype.hasOwnProperty.call(payload,'weekly_hours_cap');
   const client=await pool.connect();
   try{
@@ -294,7 +298,7 @@ async function syncPortalUser(payload){
     if(existing.rows.length){
       const result=await client.query(`UPDATE employees SET portal_user_id=$1,employee_number=COALESCE($2,employee_number),first_name=$3,last_name=$4,email=$5,department=$6,department_id=$7,portal_department_id=$8,role=$9,active=TRUE,is_active=TRUE,must_change_pin=FALSE,portal_permissions=$10::jsonb,app_admin_scope=$11,weekly_hours_cap=CASE WHEN $12::boolean THEN $13::numeric ELSE weekly_hours_cap END,auth_source='portal',last_portal_sync_at=NOW() WHERE id=$14 RETURNING *`,[payload.sub,payload.employee_number?String(payload.employee_number):null,payload.first_name,payload.last_name,payload.email||null,departmentName,departmentId,payload.department_id||null,role,JSON.stringify(permissions),appAdminScope,capPresent,capPresent?payload.weekly_hours_cap:null,existing.rows[0].id]);
       user=result.rows[0];
-      if(capPresent) await recordWeeklyCapChange(client,{employeeId:user.id,previousCap:existing.rows[0].weekly_hours_cap,weeklyHoursCap:payload.weekly_hours_cap,source:'portal-auth-sync'});
+      if(capPresent) await recordWeeklyCapChange(client,{employeeId:user.id,previousCap:existing.rows[0].weekly_hours_cap,weeklyHoursCap:payload.weekly_hours_cap,source:'portal-auth-sync',targetPeriod:payload.weekly_hours_cap_target_period||'auto'});
     }else{
       const result=await client.query(`INSERT INTO employees(portal_user_id,employee_number,first_name,last_name,email,role,is_active,pin,department,active,department_id,must_change_pin,portal_department_id,portal_permissions,app_admin_scope,weekly_hours_cap,auth_source,last_portal_sync_at) VALUES($1,$2,$3,$4,$5,$6,TRUE,NULL,$7,TRUE,$8,FALSE,$9,$10::jsonb,$11,$12,'portal',NOW()) RETURNING *`,[payload.sub,payload.employee_number?String(payload.employee_number):null,payload.first_name,payload.last_name,payload.email||null,role,departmentName,departmentId,payload.department_id||null,JSON.stringify(permissions),appAdminScope,payload.weekly_hours_cap??null]);
       user=result.rows[0];
@@ -330,7 +334,7 @@ async function upsertDirectoryEmployee(client,item){
   if(existing.rows.length){
     const wasActive=existing.rows[0].active===true;
     const updated=await client.query(`UPDATE employees SET portal_user_id=$1,employee_number=COALESCE($2,employee_number),first_name=$3,last_name=$4,email=$5,department=$6,department_id=$7,portal_department_id=$8,role=$9,active=TRUE,is_active=TRUE,must_change_pin=FALSE,portal_permissions=$10::jsonb,app_admin_scope=$11,weekly_hours_cap=CASE WHEN $12::boolean THEN $13::numeric ELSE weekly_hours_cap END,auth_source='portal',last_portal_sync_at=NOW(),access_removed_at=NULL,directory_sync_state='active' WHERE id=$14 RETURNING id`,[item.portal_user_id,item.employee_number?String(item.employee_number):null,item.first_name,item.last_name,item.email||null,departmentName,departmentId,item.portal_department_id||null,role,JSON.stringify(permissions),appAdminScope,capPresent,capPresent?item.weekly_hours_cap:null,existing.rows[0].id]);
-    if(capPresent) await recordWeeklyCapChange(client,{employeeId:updated.rows[0].id,previousCap:existing.rows[0].weekly_hours_cap,weeklyHoursCap:item.weekly_hours_cap,source:'portal-directory-sync'});
+    if(capPresent) await recordWeeklyCapChange(client,{employeeId:updated.rows[0].id,previousCap:existing.rows[0].weekly_hours_cap,weeklyHoursCap:item.weekly_hours_cap,source:'portal-directory-sync',targetPeriod:item.weekly_hours_cap_target_period||'auto'});
     return {id:updated.rows[0].id,activated:!wasActive};
   }
   const inserted=await client.query(`INSERT INTO employees(portal_user_id,employee_number,first_name,last_name,email,role,is_active,pin,department,active,department_id,must_change_pin,portal_department_id,portal_permissions,app_admin_scope,weekly_hours_cap,auth_source,last_portal_sync_at,access_removed_at,directory_sync_state) VALUES($1,$2,$3,$4,$5,$6,TRUE,NULL,$7,TRUE,$8,FALSE,$9,$10::jsonb,$11,$12,'portal',NOW(),NULL,'active') RETURNING id`,[item.portal_user_id,item.employee_number?String(item.employee_number):null,item.first_name,item.last_name,item.email||null,role,departmentName,departmentId,item.portal_department_id||null,JSON.stringify(permissions),appAdminScope,item.weekly_hours_cap??null]);

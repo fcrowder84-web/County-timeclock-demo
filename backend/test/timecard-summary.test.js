@@ -526,8 +526,8 @@ assert.strictEqual(easternWeekBoundary.weeks[1].total_paid_hours,8);
 assertCapDaysReconcile(easternWeekBoundary);
 
 
-// Effective-dated caps preserve historical payroll even when the employee's
-// current-value cache has changed.
+// Legacy mixed-week history stays readable even though new cap writes are
+// aligned to the two-week payroll period.
 const effectiveDatedCap = summarizeTimecard({
   payPeriodStart: '2026-09-28',
   weeklyHoursCap: 32,
@@ -607,7 +607,7 @@ assert.strictEqual(uncappedToCapped.weeks[0].total_paid_hours, 42);
 assert.strictEqual(uncappedToCapped.weeks[1].overtime_hours, 0);
 assert.strictEqual(uncappedToCapped.weeks[1].total_paid_hours, 40);
 
-// A change during a payroll week takes effect at the following Monday.
+// Legacy mid-period records still resolve deterministically by week start.
 const midweekChanges = summarizeTimecard({
   payPeriodStart: '2026-09-28', weeklyHoursCap: 36,
   weeklyHoursCapHistory: [
