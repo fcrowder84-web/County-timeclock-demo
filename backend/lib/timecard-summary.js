@@ -2,20 +2,28 @@
 
 const OVERTIME_THRESHOLD_MINUTES = 40 * 60;
 
-// For capped employees, lower weights consume the weekly payable cap first.
-// Worked time is always first; approved leave follows county payroll priority.
+// For capped employees, regular Holiday is protected county-given time.
+// After Holiday, worked time consumes the cap, then taken leave follows priority.
 const CAPPED_PAY_PRIORITY = Object.freeze({
-  worked: 0,
-  holiday: 10,
+  holiday: 0,
+  worked: 10,
   sick: 20,
   floating_holiday: 30,
   vacation: 40,
   other: 100,
 });
 
+function normalizedLeaveType(type) {
+  return String(type || 'other').trim().toLowerCase().replace(/[\s-]+/g, '_');
+}
+
+function isProtectedHoliday(type) {
+  return ['holiday', 'holiday_leave', 'regular_holiday', 'regular_holiday_leave'].includes(normalizedLeaveType(type));
+}
+
 function cappedPayWeight(type) {
-  const key = String(type || 'other').trim().toLowerCase().replace(/[\s-]+/g, '_');
-  if (['holiday', 'holiday_leave', 'regular_holiday', 'regular_holiday_leave'].includes(key)) return CAPPED_PAY_PRIORITY.holiday;
+  const key = normalizedLeaveType(type);
+  if (isProtectedHoliday(type)) return CAPPED_PAY_PRIORITY.holiday;
   if (['sick', 'sick_leave'].includes(key)) return CAPPED_PAY_PRIORITY.sick;
   if (['floating_holiday', 'floating_holiday_leave', 'float_holiday', 'float'].includes(key)) return CAPPED_PAY_PRIORITY.floating_holiday;
   if (['vacation', 'vacation_leave'].includes(key)) return CAPPED_PAY_PRIORITY.vacation;
@@ -283,18 +291,34 @@ function summarizeTimecard({
     week.weekly_hours_cap = weeklyCapMinutes == null ? null : round2(weeklyCapMinutes / 60);
 
     if (weeklyCapMinutes != null) {
-      const allowedLeaveMinutes = Math.max(0, weeklyCapMinutes - workedMinutes);
-      let remainingLeaveMinutes = Math.min(
-        Math.round(week.total_leave_hours * 60),
-        allowedLeaveMinutes,
-      );
+      const leaveItems = Object.entries(week.leave_hours_by_type);
+      const holidayMinutes = leaveItems
+        .filter(([type]) => isProtectedHoliday(type))
+        .reduce((sum, [, hours]) => sum + Math.max(0, Math.round(number(hours) * 60)), 0);
+      const protectedHolidayMinutes = Math.min(holidayMinutes, weeklyCapMinutes);
+      const allowedWorkedMinutes = Math.max(0, weeklyCapMinutes - protectedHolidayMinutes);
+      week.regular_worked_hours = round2(Math.min(workedMinutes, allowedWorkedMinutes) / 60);
+
       const adjustedByType = {};
-      const weightedLeave = Object.entries(week.leave_hours_by_type)
+      let remainingHolidayMinutes = protectedHolidayMinutes;
+      for (const [type, hours] of leaveItems.filter(([type]) => isProtectedHoliday(type))) {
+        const requestedMinutes = Math.max(0, Math.round(number(hours) * 60));
+        const usedMinutes = Math.min(requestedMinutes, remainingHolidayMinutes);
+        if (usedMinutes > 0) adjustedByType[type] = round2(usedMinutes / 60);
+        remainingHolidayMinutes -= usedMinutes;
+      }
+
+      let remainingLeaveMinutes = Math.max(
+        0,
+        weeklyCapMinutes - protectedHolidayMinutes - Math.min(workedMinutes, allowedWorkedMinutes),
+      );
+      const weightedLeave = leaveItems
+        .filter(([type]) => !isProtectedHoliday(type))
         .map(([type, hours]) => ({
           type,
           hours,
           weight: cappedPayWeight(type),
-          sortKey: String(type || 'other').trim().toLowerCase().replace(/[\\s-]+/g, '_'),
+          sortKey: normalizedLeaveType(type),
         }))
         .sort((a, b) => a.weight - b.weight || a.sortKey.localeCompare(b.sortKey));
       for (const { type, hours } of weightedLeave) {
@@ -312,7 +336,7 @@ function summarizeTimecard({
       );
       week.cap_applied = workedMinutes + Math.round(week.total_leave_hours * 60) > weeklyCapMinutes;
       week.total_paid_hours = round2(
-        Math.min(workedMinutes, weeklyCapMinutes) / 60 + week.adjusted_total_leave_hours,
+        week.regular_worked_hours + week.adjusted_total_leave_hours,
       );
     } else {
       week.total_paid_hours = round2(week.total_worked_hours + week.total_leave_hours);
@@ -320,8 +344,8 @@ function summarizeTimecard({
   }
 
   // Allocate the weekly payroll result here, where the cap and leave priority
-  // are calculated. Work consumes the cap first; within each leave type, later
-  // days absorb reductions. Keep cents integer so displayed days reconcile.
+  // are calculated. Protected Holiday consumes the cap before worked time; within
+  // each leave type, later days absorb reductions. Keep cents integer so displayed days reconcile.
   const capAdjustedDays = weeklyCapMinutes == null ? [] : Array.from({ length: 14 }, (_, offset) => ({
     work_date: addDays(start, offset),
     paid_worked_hours: 0,
