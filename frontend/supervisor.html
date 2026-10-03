@@ -716,7 +716,7 @@
                                 <th>Department</th>
                                 <th>Status</th>
                                 <th>Pending Leave</th>
-                                <th>Worked Hours</th>
+                                <th>Payable Hours</th>
                                 <th>Actions</th>
                             </tr>
                         </thead>
@@ -769,7 +769,7 @@
                         </td>
 
                         <td>
-                            ${row.total_hours || 0}
+                            ${Number(row.payable_hours || 0).toFixed(2)}
                         </td>
 
                         <td>
