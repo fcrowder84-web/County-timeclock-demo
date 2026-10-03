@@ -3,6 +3,7 @@
 const express = require('express');
 const { canEditPunch } = require('../lib/punch-edit-authority');
 const { summarizeTimecard } = require('../lib/timecard-summary');
+const { fetchWeeklyCapHistory } = require('../lib/weekly-cap-history');
 const { resolvePayPeriod } = require('../lib/pay-period');
 const {
   requireReopenForFinalized,
@@ -154,6 +155,7 @@ function createSupervisorRouter({
         // punch-only calculation for payroll/payable hours.
         const visibleIds = visible.map(row => Number(row.id));
         if (visibleIds.length) {
+          const weeklyCapHistory = await fetchWeeklyCapHistory(pool, visibleIds, period.pay_period_end);
           const [entriesResult, leaveResult, lunchSettingsResult, lunchWaiverResult] = await Promise.all([
             pool.query(
               `SELECT employee_id,
@@ -218,6 +220,7 @@ function createSupervisorRouter({
               forcedLunchSettings: lunchSettingsByEmployee.get(id) || [],
               lunchWaivers: lunchWaiversByEmployee.get(id) || [],
               weeklyHoursCap: row.weekly_hours_cap,
+              weeklyHoursCapHistory: weeklyCapHistory.get(id) || [],
             });
             row.payable_hours = summary.period.total_paid_hours;
           }
@@ -644,6 +647,8 @@ function createSupervisorRouter({
           [employeeId, period.pay_period_start, period.pay_period_end],
         );
 
+        const weeklyCapHistory = await fetchWeeklyCapHistory(pool, [employeeId], period.pay_period_end);
+
         const approval = approvalResult.rows[0] || null;
         const payrollCanEdit =
           userHasPermission(req.user, 'edit_payroll_time');
@@ -673,6 +678,7 @@ function createSupervisorRouter({
             forcedLunchSettings: lunchSettingsResult.rows,
             lunchWaivers: lunchWaiverResult.rows,
             weeklyHoursCap: employeeResult.rows[0].weekly_hours_cap,
+            weeklyHoursCapHistory: weeklyCapHistory.get(employeeId) || [],
           }),
         });
       } catch (err) {

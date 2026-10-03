@@ -2,6 +2,7 @@
 
 const express = require('express');
 const { summarizeTimecard } = require('../lib/timecard-summary');
+const { fetchWeeklyCapHistory } = require('../lib/weekly-cap-history');
 
 function positiveInt(value,label='employee'){
   const parsed=Number(value);
@@ -281,6 +282,7 @@ function createPayrollRouter({
           lunchWaivers=lunchWaiversResult.rows;
         }
 
+        const weeklyCapHistory = await fetchWeeklyCapHistory(pool, employeeIds, period.pay_period_end);
         const summaries={};
         for(const employeeId of employeeIds){
           const employeeEntries=rows
@@ -299,6 +301,7 @@ function createPayrollRouter({
             forcedLunchSettings:lunchSettings.filter(row=>Number(row.employee_id)===employeeId),
             lunchWaivers:lunchWaivers.filter(row=>Number(row.employee_id)===employeeId),
             weeklyHoursCap:employeeRow?.weekly_hours_cap,
+            weeklyHoursCapHistory:weeklyCapHistory.get(employeeId) || [],
           });
         }
 
@@ -428,6 +431,7 @@ function createPayrollRouter({
           lunchWaivers=lunchWaiversResult.rows;
         }
 
+        const weeklyCapHistory = await fetchWeeklyCapHistory(pool, employeeIds, period.pay_period_end);
         const summaries={};
         for(const employeeId of employeeIds){
           const employeeEntries=rows
@@ -446,6 +450,7 @@ function createPayrollRouter({
             forcedLunchSettings:lunchSettings.filter(row=>Number(row.employee_id)===employeeId),
             lunchWaivers:lunchWaivers.filter(row=>Number(row.employee_id)===employeeId),
             weeklyHoursCap:employeeRow?.weekly_hours_cap,
+            weeklyHoursCapHistory:weeklyCapHistory.get(employeeId) || [],
           });
         }
 

@@ -338,8 +338,9 @@
                 const worked = num(daySummary[day]?.total_worked_hours);
                 const forced = num(daySummary[day]?.forced_lunch_deduction_hours);
                 const remaining = Math.max(0, 40 - weekWorked);
-                const regular = Math.min(worked, remaining);
-                const ot = Math.max(0, worked - regular);
+                const capped = summary?.weeks?.[Math.floor(offset / 7)]?.weekly_hours_cap != null;
+                const regular = capped ? worked : Math.min(worked, remaining);
+                const ot = capped ? 0 : Math.max(0, worked - regular);
                 weekWorked += worked;
                 // Daily rows preserve the approved leave entries exactly as recorded.
                 // Any weekly-cap reduction is shown only in the authoritative week/period totals
@@ -398,6 +399,8 @@
                 const employeeId = Number(employee.employee_id);
                 const summary = (data.timecard_summaries || {})[employeeId] || {};
                 const leaves = allLeaves.filter(item => Number(item.employee_id) === employeeId);
+                const weeklyCaps = summary.weekly_hours_caps || [employee.weekly_hours_cap, employee.weekly_hours_cap];
+                const capLabel = weeklyCaps.map((cap, index) => `Week ${index + 1}: ${cap == null ? "No Cap" : fmt(cap) + " hours"}`).join(" · ");
                 html += `
                     <div class="timecard">
                         <div class="header">
@@ -409,7 +412,7 @@
                             <div class="info-box"><strong>Employee Number</strong><br>${esc(employee.employee_number)}</div>
                             <div class="info-box"><strong>Department</strong><br>${esc(employee.department || "-")}</div>
                             <div class="info-box"><strong>Status</strong><br><span class="${getStatusClass(employee.approval_status)}">${esc(employee.approval_status || "pending")}</span></div>
-                            <div class="info-box"><strong>Weekly Payroll Cap</strong><br>${employee.weekly_hours_cap == null ? "No Cap" : fmt(employee.weekly_hours_cap) + " hours"}</div>
+                            <div class="info-box"><strong>Weekly Payroll Caps</strong><br>${capLabel}</div>
                         </div>
                         ${renderEmployeeTable(employeeId, group.entries, leaves, summary, data.pay_period_start)}
                         <div class="signatures">

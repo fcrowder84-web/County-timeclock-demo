@@ -242,16 +242,18 @@ function compact(sql) { return String(sql).replace(/\s+/g, ' ').trim(); }
         if (text.includes('FROM forced_lunch_setting_history')) return { rows: [] };
         if (text.includes('FROM forced_lunch_waivers')) return { rows: [] };
         if (text.includes('FROM forced_lunch_waiver_requests')) return { rows: [] };
+        if (text.includes('FROM weekly_hours_cap_history')) return { rows: [{employee_id:7,effective_date_iso:period.pay_period_start,weekly_hours_cap:32}] };
         throw new Error(`unexpected timecard query: ${text}`);
       },
     },
   });
   res = makeRes();
   await handlerFor(timecardRouter, 'get', '/employee/my-timecard')(
-    { user: { id: 7 }, body: {}, query: {} },
+    { user: { id: 7, weekly_hours_cap: 40 }, body: {}, query: {} },
     res,
   );
   assert.strictEqual(res.statusCode, 200);
+  assert.deepStrictEqual(res.body.timecard_summary.weekly_hours_caps, [32, 32]);
   const timeEntryRead = timecardQueries.find((sql) => sql.includes('FROM time_entries')) || '';
   assert.match(timeEntryRead, /deleted_at IS NULL/);
 

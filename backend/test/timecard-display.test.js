@@ -118,4 +118,51 @@ const leaveRows = renderedRows(cappedWithLeave, workWithLeave, sickLeave);
 assert(leaveRows[4].endsWith('<td><strong>8.00</strong></td><td><strong>4.00 Sick</strong></td>'));
 assert(leaveRows[7].endsWith('<td>44.00</td><td><strong>40.00</strong></td>'));
 
+const mixedEntries = [
+  { entry_date_iso: dates[0], hours_worked: 44 },
+  { entry_date_iso: dates[7], hours_worked: 42 },
+];
+const mixedLeave = [{ leave_date_iso: dates[8], leave_type: 'sick', hours: 8, status: 'approved' }];
+const mixed = summarizeTimecard({
+  payPeriodStart: dates[0], weeklyHoursCap: null,
+  weeklyHoursCapHistory: [
+    { effective_date_iso: dates[0], weekly_hours_cap: 40 },
+    { effective_date_iso: dates[7], weekly_hours_cap: null },
+  ],
+  entries: mixedEntries, leaveEntries: mixedLeave,
+});
+assert.deepStrictEqual(mixed.weekly_hours_caps, [40, null]);
+assert.strictEqual(helpers.capAdjustedDaily(mixed)[dates[0]].hours, 40);
+assert.strictEqual(helpers.capAdjustedDaily(mixed)[dates[7]], undefined);
+const mixedRows = renderedRows(mixed, mixedEntries, mixedLeave);
+for (const row of mixedRows) assert.strictEqual(columnCount(row, 'td'), 15);
+assert(mixedRows[0].endsWith('<td><strong>44.00</strong></td><td><strong>40.00</strong></td>'));
+assert(mixedRows[8].endsWith('<td><strong>42.00</strong></td><td><strong></strong></td>'));
+assert(mixedRows[7].endsWith('<td>44.00</td><td><strong>40.00</strong></td>'));
+assert(mixedRows[15].endsWith('<td>50.00</td><td><strong></strong></td>'));
+assert(mixedRows[16].endsWith('<td>94.00</td><td><strong>90.00</strong></td>'));
+
+const printSource = fs.readFileSync(path.join(frontend, 'payroll-timecards.html'), 'utf8');
+const printHelpers = vm.runInNewContext(
+  printSource.slice(printSource.indexOf('function num(value)'), printSource.indexOf('async function loadTimecards()')) +
+  ';({renderEmployeeTable})',
+  { esc: value => String(value) },
+);
+const printMarkup = printHelpers.renderEmployeeTable(
+  1,
+  mixedEntries.map(entry => ({ work_date_iso: entry.entry_date_iso })),
+  mixedLeave.map(entry => ({ leave_date_iso: entry.leave_date_iso, leave_type: entry.leave_type, quarter_hours: entry.hours * 4, status: entry.status })),
+  mixed,
+  dates[0],
+);
+const printRows = [...printMarkup.matchAll(/<tr\b[^>]*>(.*?)<\/tr>/gs)].map(([, row]) => row);
+const printCells = row => [...row.matchAll(/<td\b[^>]*>(.*?)<\/td>/gs)]
+  .map(([, cell]) => cell.replace(/<[^>]+>/g, ''));
+assert.strictEqual(printRows.length, 18); // header, 14 days, 2 weeks, period
+assert.strictEqual(printCells(printRows[1])[4], '0.00'); // capped week never prints OT
+assert.strictEqual(printCells(printRows[9])[4], '2.00'); // uncapped week retains OT
+assert.strictEqual(printCells(printRows[8]).at(-1), '40.00');
+assert.strictEqual(printCells(printRows[16]).at(-1), '50.00');
+assert.strictEqual(printCells(printRows[17]).at(-1), '90.00');
+
 console.log('timecard display tests passed');
