@@ -904,6 +904,23 @@ function createSupervisorRouter({
           return res.status(403).json({ error: 'Access denied' });
         }
 
+        const overlapResult = await client.query(
+          `SELECT id
+             FROM time_entries
+            WHERE employee_id=$1
+              AND id<>$2
+              AND deleted_at IS NULL
+              AND clock_in < COALESCE($4::timestamp, 'infinity'::timestamp)
+              AND COALESCE(clock_out, 'infinity'::timestamp) > $3::timestamp
+            LIMIT 1
+            FOR UPDATE`,
+          [existing.employee_id, timeEntryId, newClockIn, finalClockOut],
+        );
+        if (overlapResult.rows.length) {
+          await client.query('ROLLBACK');
+          return res.status(409).json({ error: 'This edit would overlap another time entry for the employee.' });
+        }
+
         // App Admin inherits broad capabilities, including edit_payroll_time.
         // A supervisor-side admin edit must not be forced into payroll approval.
         const payrollOverride =
