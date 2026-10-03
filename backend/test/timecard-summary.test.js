@@ -301,6 +301,29 @@ assert.strictEqual(weightedLeaveAtCap.weeks[0].adjusted_total_leave_hours, 8);
 assert.strictEqual(weightedLeaveAtCap.weeks[0].leave_hours_reduced_by_cap, 12);
 assert.strictEqual(weightedLeaveAtCap.weeks[0].total_paid_hours, 40);
 
+// Regular Holiday is county-given time and is protected ahead of worked/taken leave.
+const protectedHolidayWithWork = summarizeTimecard({
+  payPeriodStart: '2026-10-05', weeklyHoursCap: 40,
+  entries: [{ entry_date_iso:'2026-10-05', hours_worked:36 }],
+  leaveEntries: [{ leave_date_iso:'2026-10-06', leave_type:'regular holiday leave', hours:8, status:'approved' }],
+});
+assert.strictEqual(protectedHolidayWithWork.weeks[0].regular_worked_hours, 32);
+assert.strictEqual(protectedHolidayWithWork.weeks[0].adjusted_leave_hours_by_type['regular holiday leave'], 8);
+assert.strictEqual(protectedHolidayWithWork.weeks[0].total_paid_hours, 40);
+
+const protectedHolidayBeforeSick = summarizeTimecard({
+  payPeriodStart: '2026-10-05', weeklyHoursCap: 40,
+  entries: [{ entry_date_iso:'2026-10-05', hours_worked:32 }],
+  leaveEntries: [
+    { leave_date_iso:'2026-10-06', leave_type:'regular holiday leave', hours:8, status:'approved' },
+    { leave_date_iso:'2026-10-07', leave_type:'sick', hours:8, status:'approved' },
+  ],
+});
+assert.strictEqual(protectedHolidayBeforeSick.weeks[0].regular_worked_hours, 32);
+assert.strictEqual(protectedHolidayBeforeSick.weeks[0].adjusted_leave_hours_by_type['regular holiday leave'], 8);
+assert.strictEqual(protectedHolidayBeforeSick.weeks[0].adjusted_leave_hours_by_type.sick, undefined);
+assert.strictEqual(protectedHolidayBeforeSick.weeks[0].total_paid_hours, 40);
+
 // Equal-weight/unknown leave allocation must be deterministic regardless of insertion order.
 const unknownLeaveForward = summarizeTimecard({
   payPeriodStart: '2026-10-05', weeklyHoursCap: 40,
