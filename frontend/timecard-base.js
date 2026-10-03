@@ -99,8 +99,36 @@ function pendingLeaveHours(day,type){
   return (currentData.leave_entries||[]).filter(l=>dateOnly(l.leave_date_iso||l.leave_date)===day&&l.status==="pending"&&(type==="other"?!["holiday","vacation","sick","floating_holiday"].includes(l.leave_type):l.leave_type===type)).reduce((a,l)=>a+num(l.hours),0)
 }
 function dailyWorked(entries){return roundDailyHours(entries.reduce((a,e)=>a+num(e.hours_worked),0))}
-function allocateDailyWork(days){
-  const result={};for(let w=0;w<2;w++){let cumulative=0;for(let i=w*7;i<w*7+7;i++){const day=days[i],worked=day.worked;const remaining=Math.max(0,40-cumulative);const regular=Math.min(worked,remaining);const ot=Math.max(0,worked-regular);result[day.date]={regular,ot};cumulative+=worked}}return result
+function allocateDailyWork(days,capped=false){
+  const result={};for(let w=0;w<2;w++){let cumulative=0;for(let i=w*7;i<w*7+7;i++){const day=days[i],worked=day.worked;if(capped){result[day.date]={regular:worked,ot:0};continue}const remaining=Math.max(0,40-cumulative);const regular=Math.min(worked,remaining);const ot=Math.max(0,worked-regular);result[day.date]={regular,ot};cumulative+=worked}}return result
+}
+function capAdjustedDaily(days,summary){
+  if(summary?.weekly_hours_cap==null)return{};
+  const result={};
+  for(let w=0;w<2;w++){
+    const week=summary.weeks?.[w]||{},weekDays=days.slice(w*7,w*7+7);
+    let remainingWorked=Math.max(0,num(week.weekly_hours_cap));
+    const paidWorked={};
+    for(const day of weekDays){
+      const paid=Math.min(num(day.worked),remainingWorked);
+      paidWorked[day.date]=paid;
+      remainingWorked=Math.max(0,remainingWorked-paid);
+    }
+    const paidLeave={};
+    const adjusted=week.adjusted_leave_hours_by_type||{};
+    for(const [type,allowedHours] of Object.entries(adjusted)){
+      let remaining=Math.max(0,num(allowedHours));
+      for(const day of weekDays){
+        if(remaining<=0)break;
+        const available=approvedLeaveHours(day.date,type==="other"?"other":type);
+        const used=Math.min(available,remaining);
+        paidLeave[day.date]=num(paidLeave[day.date])+used;
+        remaining=Math.max(0,remaining-used);
+      }
+    }
+    for(const day of weekDays)result[day.date]=num(paidWorked[day.date])+num(paidLeave[day.date]);
+  }
+  return result
 }
 function punchCells(day,entries){
   const punches=[];
@@ -135,6 +163,11 @@ function leaveCell(day,type){
   return `<td class="${pending?"pending-cell":""}">${content}</td>`
 }
 function otherTotal(map){return Object.entries(map||{}).filter(([k])=>!["holiday","vacation","sick","floating_holiday"].includes(k)).reduce((a,[,v])=>a+num(v),0)}
-function totalRow(label,summary,klass){
-  const m=summary?.adjusted_leave_hours_by_type||summary?.leave_hours_by_type||{};return `<tr class="${klass}"><td class="left" colspan="5">${esc(label)}</td><td>${fmt(num(summary?.regular_worked_hours)+num(summary?.forced_lunch_hours))}</td><td>${num(summary?.forced_lunch_hours)>0?"-"+fmt(summary.forced_lunch_hours):""}</td><td>${fmt(summary?.overtime_hours)}</td><td>${fmt(m.holiday)}</td><td>${fmt(m.vacation)}</td><td>${fmt(m.sick)}</td><td>${fmt(m.floating_holiday)}</td><td>${fmt(otherTotal(m))}</td><td>${fmt(summary?.total_paid_hours)}</td></tr>`
+function totalRow(label,summary,klass,capped=false){
+  const m=summary?.leave_hours_by_type||{};
+  const regular=capped?num(summary?.total_worked_hours)+num(summary?.forced_lunch_hours):num(summary?.regular_worked_hours)+num(summary?.forced_lunch_hours);
+  const ot=capped?0:num(summary?.overtime_hours);
+  const rawTotal=num(summary?.total_worked_hours)+num(summary?.total_leave_hours);
+  const capAdjusted=capped?fmt(summary?.total_paid_hours):"";
+  return `<tr class="${klass}"><td class="left" colspan="5">${esc(label)}</td><td>${fmt(regular)}</td><td>${num(summary?.forced_lunch_hours)>0?"-"+fmt(summary.forced_lunch_hours):""}</td><td>${fmt(ot)}</td><td>${fmt(m.holiday)}</td><td>${fmt(m.vacation)}</td><td>${fmt(m.sick)}</td><td>${fmt(m.floating_holiday)}</td><td>${fmt(otherTotal(m))}</td><td>${fmt(rawTotal)}</td><td><strong>${capAdjusted}</strong></td></tr>`
 }
