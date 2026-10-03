@@ -136,6 +136,7 @@ function summarizeTimecard({
   forcedLunchSettings = null,
   lunchWaivers = [],
   weeklyHoursCap = null,
+  weeklyHoursCapHistory = null,
   asOf = new Date(),
 }) {
   const start = dateOnly(payPeriodStart);
@@ -145,7 +146,29 @@ function summarizeTimecard({
   const parsedWeeklyCap = weeklyHoursCap == null || weeklyHoursCap === ''
     ? null
     : Math.max(0, number(weeklyHoursCap));
-  const weeklyCapMinutes = parsedWeeklyCap == null ? null : Math.round(parsedWeeklyCap * 60);
+  const legacyWeeklyCapMinutes = parsedWeeklyCap == null ? null : Math.round(parsedWeeklyCap * 60);
+  const weeklyCapHistory = Array.isArray(weeklyHoursCapHistory)
+    ? weeklyHoursCapHistory
+        .map(setting => ({
+          effectiveDate: dateOnly(setting.effective_date_iso || setting.effective_date),
+          capMinutes: setting.weekly_hours_cap == null || setting.weekly_hours_cap === ''
+            ? null
+            : Math.round(Math.max(0, number(setting.weekly_hours_cap)) * 60),
+        }))
+        .filter(setting => setting.effectiveDate)
+        .sort((a, b) => a.effectiveDate.localeCompare(b.effectiveDate))
+    : null;
+
+  function weeklyCapMinutesForWeek(weekStart) {
+    if (weeklyCapHistory === null) return legacyWeeklyCapMinutes;
+    let activeSetting;
+    for (const setting of weeklyCapHistory) {
+      if (setting.effectiveDate > weekStart) break;
+      activeSetting = setting;
+    }
+    return activeSetting ? activeSetting.capMinutes : null;
+  }
+
   const legacyConfiguredLunchMinutes = forcedLunchEnabled ? Math.max(0, Math.round(number(forcedLunchMinutes))) : 0;
   const lunchSettingHistory = Array.isArray(forcedLunchSettings)
     ? forcedLunchSettings
@@ -169,6 +192,7 @@ function summarizeTimecard({
   }
 
   const weeks = [emptyWeek(1, start), emptyWeek(2, addDays(start, 7))];
+  const weeklyCapMinutesByWeek = weeks.map(week => weeklyCapMinutesForWeek(week.start_date));
   const daily = new Map();
   const waiverMap = new Map();
   const approvedLeaveByDay = new Map();
@@ -288,7 +312,8 @@ function summarizeTimecard({
     }
   }
 
-  for (const week of weeks) {
+  for (const [weekIndex, week] of weeks.entries()) {
+    const weeklyCapMinutes = weeklyCapMinutesByWeek[weekIndex];
     const workedMinutes = Math.round(week.total_worked_hours * 60);
     const overtimeMinutes = Math.max(0, workedMinutes - thresholdMinutes);
     // A weekly cap replaces the normal OT/payable rule for capped employees.
@@ -362,18 +387,32 @@ function summarizeTimecard({
   // Allocate the weekly payroll result here, where the cap and leave priority
   // are calculated. Protected Holiday consumes the cap before worked time; within
   // each leave type, later days absorb reductions. Keep cents integer so displayed days reconcile.
-  const capAdjustedDays = weeklyCapMinutes == null ? [] : Array.from({ length: 14 }, (_, offset) => ({
+  const hasAnyWeeklyCap = weeklyCapMinutesByWeek.some(cap => cap != null);
+  const capAdjustedDays = hasAnyWeeklyCap ? Array.from({ length: 14 }, (_, offset) => ({
     work_date: addDays(start, offset),
     paid_worked_hours: 0,
     paid_leave_hours: 0,
     paid_leave_hours_by_type: {},
     total_paid_hours: 0,
-  }));
-  if (weeklyCapMinutes != null) {
+  })) : [];
+  if (hasAnyWeeklyCap) {
     const workedByDay = new Map(days.map(day => [day.work_date, Math.round(day.total_worked_hours * 100)]));
     for (let weekIndex = 0; weekIndex < 2; weekIndex++) {
       const week = weeks[weekIndex];
+      const weeklyCapMinutes = weeklyCapMinutesByWeek[weekIndex];
       const weekDays = capAdjustedDays.slice(weekIndex * 7, weekIndex * 7 + 7);
+      if (weeklyCapMinutes == null) {
+        for (const day of weekDays) {
+          day.paid_worked_hours = workedByDay.get(day.work_date) || 0;
+          const leaveByType = approvedLeaveByDay.get(day.work_date) || {};
+          for (const [type, hours] of Object.entries(leaveByType)) {
+            const paid = Math.round(number(hours) * 100);
+            day.paid_leave_hours += paid;
+            if (paid > 0) day.paid_leave_hours_by_type[type] = paid;
+          }
+        }
+        continue;
+      }
       let remainingWorked = Math.round(week.regular_worked_hours * 100);
       for (const day of weekDays) {
         const paid = Math.min(workedByDay.get(day.work_date) || 0, remainingWorked);
@@ -459,7 +498,10 @@ function summarizeTimecard({
   return {
     overtime_rule: 'weekly_worked_hours_over_40_only',
     overtime_threshold_hours: round2(thresholdMinutes / 60),
-    weekly_hours_cap: weeklyCapMinutes == null ? null : round2(weeklyCapMinutes / 60),
+    weekly_hours_cap: weeklyCapMinutesByWeek.every(cap => cap === weeklyCapMinutesByWeek[0])
+      ? (weeklyCapMinutesByWeek[0] == null ? null : round2(weeklyCapMinutesByWeek[0] / 60))
+      : null,
+    weekly_hours_caps: weeklyCapMinutesByWeek.map(cap => cap == null ? null : round2(cap / 60)),
     forced_lunch_enabled: lunchSettingHistory === null
       ? legacyConfiguredLunchMinutes > 0
       : Boolean([...lunchSettingHistory].reverse().find(setting => setting.effectiveDate <= addDays(start, 13))?.enabled),
