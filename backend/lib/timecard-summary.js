@@ -176,7 +176,15 @@ function summarizeTimecard({
 
     const inMs = timestampMs(entry.clock_in);
     const actualOutMs = timestampMs(entry.clock_out || entry.pending_clock_out);
-    const calculationOutMs = inMs != null && actualOutMs == null ? timestampMs(asOf) : actualOutMs;
+    const asOfMs = timestampMs(asOf);
+    const staleOpenPunch = inMs != null
+      && actualOutMs == null
+      && asOfMs != null
+      && (dateOnly(entry.entry_date_iso || entry.work_date || entry.clock_in) < dateOnly(asOf)
+        || asOfMs - inMs >= 23 * 60 * 60 * 1000);
+    const calculationOutMs = inMs != null && actualOutMs == null
+      ? (staleOpenPunch ? null : asOfMs)
+      : actualOutMs;
     if (inMs != null) state.firstInMs = state.firstInMs == null ? inMs : Math.min(state.firstInMs, inMs);
     if (actualOutMs != null) state.lastOutMs = state.lastOutMs == null ? actualOutMs : Math.max(state.lastOutMs, actualOutMs);
 
