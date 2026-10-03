@@ -170,7 +170,9 @@ function summarizeTimecard({
       // Current active employees also appear in earlier, empty payroll exports.
       // A missing cap cannot affect a week with no work or leave.
       if (!week.gross_worked_hours && !week.total_leave_hours && !week.pending_leave_hours) return null;
-      throw new Error(`Weekly cap history is missing for payroll week ${week.start_date}`);
+      const error = new Error(`Weekly cap history is missing for payroll week ${week.start_date}`);
+      error.statusCode = 409;
+      throw error;
     }
     return activeSetting.capMinutes;
   }

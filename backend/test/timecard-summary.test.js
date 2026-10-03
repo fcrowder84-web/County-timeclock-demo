@@ -627,7 +627,7 @@ assert.throws(() => summarizeTimecard({
   payPeriodStart: '2026-09-14', weeklyHoursCap: 40,
   weeklyHoursCapHistory: [{ effective_date_iso: '2026-10-05', weekly_hours_cap: 32 }],
   entries: [{ entry_date_iso: '2026-09-14', hours_worked: 8 }],
-}), /history is missing for payroll week 2026-09-14/);
+}), error => error.statusCode === 409 && /history is missing for payroll week 2026-09-14/.test(error.message));
 
 const employeeCreatedAfterHistoricalPeriod = summarizeTimecard({
   payPeriodStart: '2026-09-14', weeklyHoursCap: 32,
