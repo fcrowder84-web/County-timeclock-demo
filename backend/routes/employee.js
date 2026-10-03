@@ -703,6 +703,21 @@ function createEmployeeRouter({ requireUser, requireAnyPermission, pool, audit, 
             await client.query('ROLLBACK');
             return res.status(400).json({ error: 'Clock out must be after clock in' });
           }
+          const overlapResult = await client.query(
+            `SELECT id
+               FROM time_entries
+              WHERE employee_id=$1
+                AND deleted_at IS NULL
+                AND clock_in < COALESCE($3::timestamp, 'infinity'::timestamp)
+                AND COALESCE(clock_out, 'infinity'::timestamp) > $2::timestamp
+              LIMIT 1
+              FOR UPDATE`,
+            [employeeId, legacyClockIn, legacyClockOut],
+          );
+          if (overlapResult.rows.length) {
+            await client.query('ROLLBACK');
+            return res.status(409).json({ error: 'This entry would overlap another time entry for the employee.' });
+          }
           const result = await client.query(
             `INSERT INTO time_entries(employee_id,clock_in,clock_out,notes,status)
              VALUES($1,$2,$3,$4,CASE WHEN $3::timestamp IS NULL THEN 'open' ELSE 'closed' END)
