@@ -65,7 +65,7 @@ async function withdrawPendingItem(type,id){
 function renderTimecard(){
   const data=currentData,employee=data.employee||currentUser,entries=data.entries||[],start=dateOnly(data.pay_period_start||selectedPeriodStart),summary=data.timecard_summary||{weeks:[],period:{},days:[]};
   const summaryDays=new Map((summary.days||[]).map(item=>[dateOnly(item.work_date),item]));
-  const days=Array.from({length:14},(_,i)=>{const date=addDays(start,i),dayEntries=entries.filter(e=>dateOnly(e.entry_date_iso||e.clock_in)===date),daySummary=summaryDays.get(date);return{date,entries:dayEntries,worked:daySummary?num(daySummary.total_worked_hours):dailyWorked(dayEntries),forcedLunch:daySummary?num(daySummary.forced_lunch_deduction_hours):0}}),capped=summary.weekly_hours_cap!=null,allocated=allocateDailyWork(days,capped),capAdjusted=capAdjustedDaily(days,summary);
+  const days=Array.from({length:14},(_,i)=>{const date=addDays(start,i),dayEntries=entries.filter(e=>dateOnly(e.entry_date_iso||e.clock_in)===date),daySummary=summaryDays.get(date);return{date,entries:dayEntries,worked:daySummary?num(daySummary.total_worked_hours):dailyWorked(dayEntries),forcedLunch:daySummary?num(daySummary.forced_lunch_deduction_hours):0}}),capped=summary.weekly_hours_cap!=null,allocated=allocateDailyWork(days,capped,num(summary.overtime_threshold_hours)||40),capAdjusted=capAdjustedDaily(summary);
   const today=new Date().toLocaleDateString("en-CA",{timeZone:"America/New_York"});
   let html="";
   days.forEach((d,i)=>{
