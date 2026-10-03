@@ -326,6 +326,7 @@ function summarizeTimecard({
     work_date: addDays(start, offset),
     paid_worked_hours: 0,
     paid_leave_hours: 0,
+    paid_leave_hours_by_type: {},
     total_paid_hours: 0,
   }));
   if (weeklyCapMinutes != null) {
@@ -345,6 +346,7 @@ function summarizeTimecard({
           const available = Math.round(number(approvedLeaveByDay.get(day.work_date)?.[type]) * 100);
           const paid = Math.min(available, remainingLeave);
           day.paid_leave_hours += paid;
+          if (paid > 0) day.paid_leave_hours_by_type[type] = (day.paid_leave_hours_by_type[type] || 0) + paid;
           remainingLeave -= paid;
           if (!remainingLeave) break;
         }
@@ -357,8 +359,14 @@ function summarizeTimecard({
       if (remainder) {
         const day = [...weekDays].reverse().find(item => item.paid_leave_hours > 0 || item.paid_worked_hours > 0);
         if (day) {
-          if (day.paid_leave_hours > 0) day.paid_leave_hours += remainder;
-          else day.paid_worked_hours += remainder;
+          if (day.paid_leave_hours > 0) {
+            day.paid_leave_hours += remainder;
+            const leaveTypes = Object.keys(day.paid_leave_hours_by_type);
+            if (leaveTypes.length) {
+              const type = leaveTypes[leaveTypes.length - 1];
+              day.paid_leave_hours_by_type[type] += remainder;
+            }
+          } else day.paid_worked_hours += remainder;
         }
       }
     }
@@ -366,6 +374,9 @@ function summarizeTimecard({
       day.total_paid_hours = (day.paid_worked_hours + day.paid_leave_hours) / 100;
       day.paid_worked_hours /= 100;
       day.paid_leave_hours /= 100;
+      day.paid_leave_hours_by_type = Object.fromEntries(
+        Object.entries(day.paid_leave_hours_by_type).map(([type, hundredths]) => [type, hundredths / 100]),
+      );
     }
   }
 
