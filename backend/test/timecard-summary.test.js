@@ -453,4 +453,19 @@ assertCapDaysReconcile(weeklyCapDoesNotCrossWeeks);
 assertCapDaysReconcile(zeroCap);
 assertCapDaysReconcile(exactAndQuarterCap);
 
+
+const staleOpenPunchDoesNotAccrue = summarizeTimecard({
+  payPeriodStart: '2026-10-05',
+  asOf: new Date('2026-10-07T12:00:00-04:00'),
+  entries: [{
+    entry_date_iso: '2026-10-05',
+    clock_in: '2026-10-05T08:00:00-04:00',
+    clock_out: null,
+    hours_worked: 52,
+  }],
+});
+assert.strictEqual(staleOpenPunchDoesNotAccrue.weeks[0].total_worked_hours, 0);
+assert.strictEqual(staleOpenPunchDoesNotAccrue.weeks[0].overtime_hours, 0);
+assert.strictEqual(staleOpenPunchDoesNotAccrue.weeks[0].total_paid_hours, 0);
+
 console.log("timecard summary tests passed");
