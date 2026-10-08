@@ -704,22 +704,19 @@ function createLeaveRouter({ requireUser, pool, audit, canAccessEmployee, getReq
       const ownEntry=Number(entry.employee_id)===Number(req.user.id);
       let archivedStatus;
       let auditAction;
-      if(ownEntry){
+      if(ownEntry && entry.status==='pending'){
         requireCapability(req.user,'withdraw_own_pending_request','Withdraw Pending Request permission required');
-        if(entry.status!=='pending'){
-          await client.query('ROLLBACK');
-          return res.status(409).json({ error: 'Only a pending leave request can be withdrawn by the employee' });
-        }
         archivedStatus='withdrawn';
         auditAction='withdraw_leave';
       }else{
+        // Approved leave requires scoped management authority, including for its owner.
         await requireScopedCapability(req.user,entry.employee_id,'void_employee_leave');
         archivedStatus='voided';
         auditAction='void_leave';
       }
 
       const reason=String(req.body?.reason||'').trim()||null;
-      if(!ownEntry&&!reason){
+      if(archivedStatus==='voided'&&!reason){
         await client.query('ROLLBACK');
         return res.status(400).json({error:'Reason is required when voiding leave'});
       }
@@ -757,7 +754,7 @@ function createLeaveRouter({ requireUser, pool, audit, canAccessEmployee, getReq
         invalidated_approval_ids:invalidatedApprovalIds,
       });
       return res.json({
-        message: ownEntry ? 'Leave request withdrawn' : 'Leave entry voided',
+        message: archivedStatus==='withdrawn' ? 'Leave request withdrawn' : 'Leave entry voided',
         leave_entry:result.rows[0],
       });
     } catch (err) {
