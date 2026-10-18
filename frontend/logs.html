@@ -60,9 +60,36 @@ const actionLabel=value=>String(value||'activity').replaceAll('_',' ').replace(/
 function showError(message){const n=document.getElementById('notice');n.textContent=message;n.className='notice error'}
 async function json(url){const r=await fetch(url,{headers:headers()});let d={};try{d=await r.json()}catch(_){d={}}if(!r.ok)throw new Error(d.error||`Request failed (${r.status})`);return d}
 function employeeNameById(value){const id=Number(value);if(!Number.isInteger(id))return null;const found=employees.find(e=>Number(e.id)===id);return found?found.first_name+' '+found.last_name:null}
+function auditDetailValue(value){
+  if(typeof value === 'string' &&
+     /^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?Z$/.test(value)){
+    const d = new Date(value);
+    if(!Number.isNaN(d.getTime())){
+      return new Intl.DateTimeFormat('en-US',{
+        timeZone:'America/New_York',
+        month:'2-digit',
+        day:'2-digit',
+        year:'numeric',
+        hour:'numeric',
+        minute:'2-digit',
+        second:'2-digit',
+        hour12:true,
+        timeZoneName:'short'
+      }).format(d);
+    }
+  }
+  if(Array.isArray(value)) return value.map(auditDetailValue);
+  if(value && typeof value === 'object'){
+    return Object.fromEntries(
+      Object.entries(value).map(([k,v]) => [k,auditDetailValue(v)])
+    );
+  }
+  return value;
+}
+
 function detailText(details,currentEmployee){
   if(!details)return '-';const entries=Object.entries(details).filter(([,v])=>v!==null&&v!==undefined&&v!=='');if(!entries.length)return '-';
-  return entries.map(([k,v])=>{const label=k.replaceAll('_',' ');if(k==='employee_id')return 'employee: '+(employeeNameById(v)||currentEmployee||v);if(k.endsWith('_employee_id'))return label.replace(/ employee id$/,'')+': '+(employeeNameById(v)||v);return label+': '+(typeof v==='object'?JSON.stringify(v):v)}).join('\n');
+  return entries.map(([k,v])=>{const label=k.replaceAll('_',' ');if(k==='employee_id')return 'employee: '+(employeeNameById(v)||currentEmployee||v);if(k.endsWith('_employee_id'))return label.replace(/ employee id$/,'')+': '+(employeeNameById(v)||v);const display=auditDetailValue(v);return label+': '+(typeof display==='object'?JSON.stringify(display):display)}).join('\n');
 }
 function renderPicker(selectedId){
   const picker=document.getElementById('employeePicker');
