@@ -11,12 +11,11 @@
   function punchDate(value){
     const d=parsePunchDate(value);
     if(!d)return dateOnly(value);
-    const y=d.getFullYear(),m=String(d.getMonth()+1).padStart(2,"0"),day=String(d.getDate()).padStart(2,"0");
-    return `${y}-${m}-${day}`;
+    return easternDate(d);
   }
   function punchTimeLabel(value){
     const d=parsePunchDate(value);
-    return d?d.toLocaleTimeString([],{hour:"numeric",minute:"2-digit"}):String(value||"");
+    return d?d.toLocaleTimeString([],{hour:"numeric",minute:"2-digit",timeZone:"America/New_York"}):String(value||"");
   }
   function allRequests(){return currentData?.change_requests||currentData?.requests||[]}
   function isSinglePunchRequest(r){return r&&r.status==="pending"&&!r.time_entry_id&&Boolean(r.requested_clock_in)!==Boolean(r.requested_clock_out)}
@@ -57,11 +56,8 @@
       if(e.clock_out){
         events.push({ts:e.clock_out,label:entryOutDisplay(e),entry:e,kind:"out",cls:editCls,pending:false});
       }else{
-        const hasPendingOut=allRequests().some(r=>r.status==="pending"&&Number(r.time_entry_id)===Number(e.id)&&r.requested_clock_out&&!sameInstant(r.requested_clock_out,e.clock_in));
-        if(!hasPendingOut){
-          const age=Date.now()-new Date(e.clock_in).getTime(),isOld=day<new Date().toISOString().slice(0,10)||age>=23*3600000;
-          events.push({ts:new Date(e.clock_in).getTime()+1,label:isOld?"MISSING OUT":"OPEN",entry:e,kind:"out",cls:isOld?"missing":"open",pending:false,placeholder:true});
-        }
+        const isOld=day<easternDate(new Date());
+        events.push({ts:new Date(e.clock_in).getTime()+1,label:isOld?"MISSING":"OPEN",entry:e,kind:"out",cls:isOld?"missing":"open",pending:false,placeholder:true});
       }
     });
     pending.forEach(p=>events.push({ts:p.ts,label:`${punchTimeLabel(p.ts)} PENDING`,pending:true,request:p.request}));

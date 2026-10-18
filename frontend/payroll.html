@@ -863,10 +863,10 @@
 
                     html += `
                         <tr class="${dayClass} ${startClass}">
-                            <td>${entry.entry_date}</td>
+                            <td>${entry.entry_date}${entry.hours_worked == null ? '<br><strong style="color:#c0392b;">Correction Required</strong>' : ""}</td>
                             <td>${entry.clock_in_time}</td>
-                            <td>${entry.clock_out_time || "Open"}</td>
-                            <td>${formatExactDuration(entry.hours_worked)}</td>
+                            <td>${entry.hours_worked == null ? "MISSING" : (entry.clock_out_time || "Open")}</td>
+                            <td>${entry.hours_worked == null ? "INCOMPLETE" : formatExactDuration(entry.hours_worked)}</td>
                             <td>${editButton}</td>
                         </tr>
                     `;
@@ -1087,8 +1087,8 @@
                         "",
                         csvValue(row.work_date),
                         csvValue(row.clock_in),
-                        csvValue(row.clock_out || "OPEN"),
-                        csvValue(row.clock_out_raw ? formatExactDuration(row.hours_worked) : "OPEN"),
+                        csvValue(row.hours_worked == null ? "MISSING" : (row.clock_out || "OPEN")),
+                        csvValue(row.hours_worked == null ? "INCOMPLETE" : (row.clock_out_raw ? formatExactDuration(row.hours_worked) : "OPEN")),
                         csvValue(showDailyTotals && day ? Number(day.forced_lunch_deduction_hours || 0).toFixed(2) : ""),
                         csvValue(showDailyTotals && day ? Number(day.total_worked_hours || 0).toFixed(2) : ""),
                         "",

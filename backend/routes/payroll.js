@@ -190,7 +190,10 @@ function createPayrollRouter({
              te.clock_out AS clock_out_raw,
              to_char(te.clock_in,'HH12:MI AM') AS clock_in,
              CASE WHEN te.clock_out IS NULL THEN '' ELSE to_char(te.clock_out,'HH12:MI AM') END AS clock_out,
-             ROUND((EXTRACT(EPOCH FROM (COALESCE(te.clock_out,NOW())-te.clock_in))/3600)::numeric,2) AS hours_worked,
+             CASE WHEN te.clock_out IS NOT NULL THEN ROUND((EXTRACT(EPOCH FROM (te.clock_out-te.clock_in))/3600)::numeric,2)
+                  WHEN te.clock_in::date=(NOW() AT TIME ZONE 'America/New_York')::date
+                    THEN ROUND((EXTRACT(EPOCH FROM (NOW()-te.clock_in))/3600)::numeric,2)
+                  ELSE NULL END AS hours_worked,
              COALESCE(lunch_setting.enabled,FALSE) AS forced_lunch_enabled,
              COALESCE(lunch_setting.minutes,0) AS forced_lunch_minutes,
              EXISTS(
@@ -345,7 +348,10 @@ function createPayrollRouter({
              te.clock_out AS clock_out_raw,
              to_char(te.clock_in,'HH12:MI AM') AS clock_in,
              CASE WHEN te.clock_out IS NULL THEN '' ELSE to_char(te.clock_out,'HH12:MI AM') END AS clock_out,
-             ROUND((EXTRACT(EPOCH FROM (COALESCE(te.clock_out,NOW())-te.clock_in))/3600)::numeric,2) AS hours_worked,
+             CASE WHEN te.clock_out IS NOT NULL THEN ROUND((EXTRACT(EPOCH FROM (te.clock_out-te.clock_in))/3600)::numeric,2)
+                  WHEN te.clock_in::date=(NOW() AT TIME ZONE 'America/New_York')::date
+                    THEN ROUND((EXTRACT(EPOCH FROM (NOW()-te.clock_in))/3600)::numeric,2)
+                  ELSE NULL END AS hours_worked,
              COALESCE(lunch_setting.enabled,FALSE) AS forced_lunch_enabled,
              COALESCE(lunch_setting.minutes,0) AS forced_lunch_minutes,
              EXISTS(

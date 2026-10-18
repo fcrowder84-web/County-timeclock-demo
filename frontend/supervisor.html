@@ -1188,7 +1188,7 @@
                     <tr class="${dayClass} ${startClass}">
 
                         <td>
-                            ${entry.entry_date}
+                            ${entry.entry_date}${entry.hours_worked == null ? '<br><strong style="color:#c0392b;">Correction Required</strong>' : ""}
                         </td>
 
                         <td>
@@ -1196,11 +1196,11 @@
                         </td>
 
                         <td>
-                            ${entry.clock_out_time || "Open"}
+                            ${entry.hours_worked == null ? "MISSING" : (entry.clock_out_time || "Open")}
                         </td>
 
                         <td>
-                            ${formatExactDuration(entry.hours_worked)}
+                            ${entry.hours_worked == null ? "INCOMPLETE" : formatExactDuration(entry.hours_worked)}
                         </td>
 
                         <td>

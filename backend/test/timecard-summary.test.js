@@ -489,8 +489,9 @@ for(const cap of [null,40]) {
   const old=punchSummary({
     clockIn:'2026-10-05T00:00:00-04:00',asOf:'2026-10-05T23:00:00-04:00',cap,
   });
-  assert.strictEqual(old.weeks[0].total_worked_hours,0);
-  assert.strictEqual(old.weeks[0].total_paid_hours,0);
+  assert.strictEqual(old.weeks[0].total_worked_hours,23,
+    'a still-open punch on the same Eastern calendar day remains live');
+  assert.strictEqual(old.weeks[0].total_paid_hours,23);
   const alongside=punchSummary({
     clockIn:'2026-10-05T08:00:00-04:00',asOf:'2026-10-07T12:00:00-04:00',cap,
     others:[{entry_date_iso:'2026-10-06',clock_in:'2026-10-06T08:00:00-04:00',clock_out:'2026-10-06T16:00:00-04:00'}],
@@ -509,6 +510,13 @@ const pendingCorrection=summarizeTimecard({
     clock_out:null,pending_clock_out:'2026-10-05T16:00:00-04:00',hours_worked:52}],
 });
 assert.strictEqual(pendingCorrection.weeks[0].total_paid_hours,0);
+
+const fallBackOpen=summarizeTimecard({
+  payPeriodStart:'2026-10-26',asOf:new Date('2026-11-02T04:30:00Z'),
+  entries:[{entry_date_iso:'2026-11-01',clock_in:'2026-11-01T00:05:00-04:00',clock_out:null}],
+});
+assert(fallBackOpen.weeks[0].total_worked_hours>23,
+  'a fall DST workday remains open until the Eastern date changes, even after 23 elapsed hours');
 
 const easternWeekBoundary=summarizeTimecard({
   payPeriodStart:'2026-10-05',weeklyHoursCap:40,

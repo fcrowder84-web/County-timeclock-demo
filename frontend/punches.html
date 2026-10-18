@@ -42,6 +42,8 @@
   let permissions=new Set();
   function has(permission){return permissions.has('app_admin')||permissions.has(permission)}
   function showMessage(text,error=false){const box=document.getElementById('message');box.className=`message ${error?'error':'ok'}`;box.textContent=text;}
+  function easternDate(value){const parts=new Intl.DateTimeFormat('en-US',{timeZone:'America/New_York',year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(new Date(value));const part=type=>parts.find(item=>item.type===type).value;return `${part('year')}-${part('month')}-${part('day')}`;}
+  function historicalIncomplete(entry){return !entry.clock_out&&easternDate(entry.clock_in)<easternDate(new Date());}
   async function load(){
     if(!token()){window.location.replace('/mobile.html');return;}
     try{
@@ -60,7 +62,8 @@
       const rows=document.getElementById('rows');rows.innerHTML='';
       data.entries.forEach(entry=>{
         const tr=document.createElement('tr');
-        tr.innerHTML=`<td data-label="Clock In">${entry.clock_in_display||'-'}</td><td data-label="Clock Out">${entry.clock_out_display||'OPEN'}</td><td data-label="Hours">${Number(entry.hours_worked||0).toFixed(2)}</td><td data-label="Status">${entry.status||'-'}</td><td data-label="Action">${has('void_own_unapproved_punch')?`<button class="delete" data-id="${entry.id}">Void Punch</button>`:'View only'}</td>`;
+        const incomplete=historicalIncomplete(entry);
+        tr.innerHTML=`<td data-label="Clock In">${entry.clock_in_display||'-'}</td><td data-label="Clock Out">${incomplete?'MISSING':(entry.clock_out_display||'OPEN')}</td><td data-label="Hours">${incomplete?'INCOMPLETE':(entry.hours_worked == null?'OPEN':Number(entry.hours_worked).toFixed(2))}</td><td data-label="Status">${incomplete?'Correction Required':(entry.status||'-')}</td><td data-label="Action">${has('void_own_unapproved_punch')?`<button class="delete" data-id="${entry.id}">Void Punch</button>`:'View only'}</td>`;
         rows.appendChild(tr);
       });
       rows.querySelectorAll('button.delete').forEach(button=>button.addEventListener('click',()=>voidPunch(Number(button.dataset.id))));

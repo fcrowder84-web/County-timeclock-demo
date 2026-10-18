@@ -66,10 +66,10 @@ function renderTimecard(){
   const data=currentData,employee=data.employee||currentUser,entries=data.entries||[],start=dateOnly(data.pay_period_start||selectedPeriodStart),summary=data.timecard_summary||{weeks:[],period:{},days:[]};
   const summaryDays=new Map((summary.days||[]).map(item=>[dateOnly(item.work_date),item]));
   const days=Array.from({length:14},(_,i)=>{const date=addDays(start,i),dayEntries=entries.filter(e=>dateOnly(e.entry_date_iso||e.clock_in)===date),daySummary=summaryDays.get(date);return{date,entries:dayEntries,worked:daySummary?num(daySummary.total_worked_hours):dailyWorked(dayEntries),forcedLunch:daySummary?num(daySummary.forced_lunch_deduction_hours):0}}),weeklyCaps=summary.weekly_hours_caps||[summary.weekly_hours_cap,summary.weekly_hours_cap],cappedWeeks=weeklyCaps.map(cap=>cap!=null),allocated=allocateDailyWork(days,cappedWeeks,num(summary.overtime_threshold_hours)||40),capAdjusted=capAdjustedDaily(summary);
-  const today=new Date().toLocaleDateString("en-CA",{timeZone:"America/New_York"});
+  const today=easternDate(new Date());
   let html="";
   days.forEach((d,i)=>{
-    const leavePresent=(data.leave_entries||[]).some(l=>dateOnly(l.leave_date_iso||l.leave_date)===d.date&&["pending","approved"].includes(l.status)),work=allocated[d.date]||{regular:0,ot:0},approvedLeave=["holiday","vacation","sick","floating_holiday","other"].reduce((a,t)=>a+approvedLeaveHours(d.date,t),0),dailyTotal=d.worked+approvedLeave;
+    const leavePresent=(data.leave_entries||[]).some(l=>dateOnly(l.leave_date_iso||l.leave_date)===d.date&&["pending","approved"].includes(l.status)),work=allocated[d.date]||{regular:0,ot:0},approvedLeave=["holiday","vacation","sick","floating_holiday","other"].reduce((a,t)=>a+approvedLeaveHours(d.date,t),0),dailyTotal=d.worked+approvedLeave,incomplete=d.date<today&&d.entries.some(e=>e.clock_in&&!e.clock_out);
     const employeeCanModify=currentMode==="employee"&&data.can_edit_entries!==false;
     const elevatedCanModify=currentMode==="supervisor"&&data.can_edit_entries===true;
     const ownTimecard=selectedIsSelf();
@@ -78,7 +78,7 @@ function renderTimecard(){
     const punchEnabled=employeePunchRequestEnabled||supervisorPunchEnabled;
     const punchTitle=employeePunchRequestEnabled?"Request missing time for this date":supervisorPunchEnabled?"Add punch entry":"Punch request not available for this date";
     const leaveEnabled=(employeeCanModify&&ownTimecard&&has("request_leave"))||(!ownTimecard&&currentMode==="supervisor"&&has("add_employee_leave"));
-    html+=`<tr class="${leavePresent?"leave-day":""}"><td class="left"><div class="datecell"><button class="icon-button day-punch" data-date="${d.date}" ${punchEnabled?"":"disabled"} title="${punchTitle}">${punchSvg}</button><button class="icon-button leave day-leave" data-date="${d.date}" ${leaveEnabled?"":"disabled"} title="Add leave">${leaveSvg}</button><span class="date-label"><strong>${esc(dayName(d.date))}</strong> ${esc(localDateLabel(d.date))}${lunchStatusHtml(d.date)}</span></div></td>${punchCells(d.date,d.entries)}<td>${fmt(work.regular+d.forcedLunch)}</td><td>${d.forcedLunch>0?"-"+fmt(d.forcedLunch):""}</td><td>${fmt(work.ot)}</td>${leaveCell(d.date,"holiday")}${leaveCell(d.date,"vacation")}${leaveCell(d.date,"sick")}${leaveCell(d.date,"floating_holiday")}${leaveCell(d.date,"other")}<td><strong>${fmt(dailyTotal)}</strong></td><td><strong>${cappedWeeks[Math.floor(i/7)]?capAdjustedDisplay(capAdjusted[d.date]):""}</strong></td></tr>`;
+    html+=`<tr class="${leavePresent?"leave-day":""}"><td class="left"><div class="datecell"><button class="icon-button day-punch" data-date="${d.date}" ${punchEnabled?"":"disabled"} title="${punchTitle}">${punchSvg}</button><button class="icon-button leave day-leave" data-date="${d.date}" ${leaveEnabled?"":"disabled"} title="Add leave">${leaveSvg}</button><span class="date-label"><strong>${esc(dayName(d.date))}</strong> ${esc(localDateLabel(d.date))}${incomplete?' <strong class="missing">Correction Required</strong>':""}${lunchStatusHtml(d.date)}</span></div></td>${punchCells(d.date,d.entries)}<td>${incompleteHoursDisplay(work.regular+d.forcedLunch,incomplete)}</td><td>${d.forcedLunch>0?"-"+fmt(d.forcedLunch):""}</td><td>${fmt(work.ot)}</td>${leaveCell(d.date,"holiday")}${leaveCell(d.date,"vacation")}${leaveCell(d.date,"sick")}${leaveCell(d.date,"floating_holiday")}${leaveCell(d.date,"other")}<td><strong>${incompleteHoursDisplay(dailyTotal,incomplete)}</strong></td><td><strong>${cappedWeeks[Math.floor(i/7)]?capAdjustedDisplay(capAdjusted[d.date]):""}</strong></td></tr>`;
     if(i===6)html+=totalRow("Week 1 Total",summary.weeks?.[0],"week-total",cappedWeeks[0]);
     if(i===13)html+=totalRow("Week 2 Total",summary.weeks?.[1],"week-total",cappedWeeks[1]);
   });
@@ -248,7 +248,7 @@ let dayPunchEditDate=null;
 function dayPunchTimes(day){const a=[];(currentData.entries||[]).filter(e=>dateOnly(e.entry_date_iso||e.clock_in)===day).forEach(e=>{if(e.clock_in)a.push(entryIn24(e).slice(0,5));if(e.clock_out)a.push(entryOut24(e).slice(0,5))});return a.sort()}
 function readDayPunchTimes(){return Array.from(document.querySelectorAll("#dayPunchRows .day-punch-time")).map(i=>i.value).filter(Boolean).sort()}
 function renderDayPunchRows(times){const rows=document.getElementById("dayPunchRows");rows.innerHTML=times.map((t,i)=>`<div class="day-punch-row"><span class="day-punch-number">${i+1}</span><input type="time" step="60" value="${esc(t)}" class="day-punch-time"><button type="button" class="btn btn-danger day-punch-remove" title="Remove punch">−</button></div>`).join("");rows.querySelectorAll(".day-punch-remove").forEach((b,i)=>b.addEventListener("click",()=>{const n=readDayPunchTimes();n.splice(i,1);renderDayPunchRows(n);updateDayPunchPreview()}));rows.querySelectorAll(".day-punch-time").forEach(i=>i.addEventListener("input",updateDayPunchPreview))}
-function updateDayPunchPreview(){const t=readDayPunchTimes(),pairs=[];for(let i=0;i<t.length;i+=2)pairs.push(`${t[i]}–${t[i+1]||"OPEN"}`);const today=new Date().toLocaleDateString("en-CA",{timeZone:"America/New_York"}),warning=t.length%2&&dayPunchEditDate<today?"Past dates must end with complete IN/OUT pairs.":"";document.getElementById("dayPunchPreview").innerHTML=`<strong>Result:</strong> ${pairs.length?pairs.map(esc).join(" | "):"No punches"}${warning?`<div class="day-punch-warning">${esc(warning)}</div>`:""}`}
+function updateDayPunchPreview(){const t=readDayPunchTimes(),pairs=[],today=easternDate(new Date());for(let i=0;i<t.length;i+=2)pairs.push(`${t[i]}–${t[i+1]||(dayPunchEditDate<today?"MISSING":"OPEN")}`);const warning=t.length%2&&dayPunchEditDate<today?"Past dates must end with complete IN/OUT pairs.":"";document.getElementById("dayPunchPreview").innerHTML=`<strong>Result:</strong> ${pairs.length?pairs.map(esc).join(" | "):"No punches"}${warning?`<div class="day-punch-warning">${esc(warning)}</div>`:""}`}
 function openDayPunchEditor(day){dayPunchEditDate=day;document.getElementById("dayPunchModalTitle").textContent=`Edit Day Punches — ${localDateLabel(day)}`;document.getElementById("dayPunchReason").value="";document.getElementById("dayPunchMessage").textContent="";renderDayPunchRows(dayPunchTimes(day));updateDayPunchPreview();modal("dayPunchModal",true)}
 document.getElementById("dayPunchAddBtn").addEventListener("click",()=>{const t=readDayPunchTimes();t.push("12:00");renderDayPunchRows(t);updateDayPunchPreview()});
 document.getElementById("dayPunchSaveBtn").addEventListener("click",async()=>{const times=readDayPunchTimes(),reason=document.getElementById("dayPunchReason").value.trim(),box=document.getElementById("dayPunchMessage");box.textContent="";box.className="day-punch-message";try{if(!reason)throw new Error("Reason is required");const today=new Date().toLocaleDateString("en-CA",{timeZone:"America/New_York"});if(times.length%2&&dayPunchEditDate<today)throw new Error("Past dates must have complete in/out punch pairs before saving.");const punches=times.map(t=>timestamp(dayPunchEditDate,t));await jsonOrError(await apiFetch(`${apiBase}/supervisor/replace-day-punches`,{method:"POST",body:JSON.stringify({employee_id:selectedEmployeeId,work_date:dayPunchEditDate,punches,reason})}));modal("dayPunchModal",false);showMessage("Day punches updated");await loadTimecard()}catch(err){box.textContent=err.message||"Unable to update day punches";box.className="day-punch-message error"}});
@@ -396,26 +396,30 @@ document.getElementById("returnBtn").addEventListener("click",async()=>{const no
 
 async function refreshQuickPunch(){
   const btn=document.getElementById("quickPunchBtn");
-  if(!selectedIsSelf()||!has("clock_in_out")){btn.classList.add("hidden");return}
+  const oldNotice=document.getElementById("historicalPunchNotice");
+  if(!selectedIsSelf()||!has("clock_in_out")){btn.classList.add("hidden");oldNotice?.classList.add("hidden");return}
   try{
     const s=await jsonOrError(await apiFetch(`${apiBase}/quick-status`));
     btn.classList.remove("hidden");
-    btn.dataset.action=s.next_action;
+    btn.dataset.action=s.next_action||"";
     btn.dataset.entryId=s.current_entry_id||"";
     btn.dataset.locked=s.timecard_locked?"1":"0";
+    btn.dataset.pending=s.today_pending_correction?"1":"0";
+    const oldCount=Number(s.historical_incomplete_count||0);
+    if(oldNotice){
+      oldNotice.classList.toggle("hidden",oldCount===0);
+      oldNotice.textContent=oldCount?oldCount+" earlier incomplete "+(oldCount===1?"day needs":"days need")+" correction; open the affected pay period's timecard.":"";
+    }
     if(s.timecard_locked){
-      btn.dataset.stale="0";
       btn.disabled=true;
       btn.textContent="Timecard Signed — Punching Locked";
       btn.title="Your supervisor must return the timecard before you can punch again.";
       return;
     }
-    btn.disabled=false;
-    btn.title="";
-    const stale=Boolean(s.requires_correction)||(s.current_clock_in&&(dateOnly(s.current_clock_in)<new Date().toLocaleDateString("en-CA",{timeZone:"America/New_York"})||Date.now()-new Date(s.current_clock_in).getTime()>=23*3600000));
-    btn.dataset.stale=stale?"1":"0";
-    btn.textContent=stale?"Correct Missing Punch":(s.next_action==="clock_out"?"Click Here to Clock Out":"Click Here to Clock In")
-  }catch(_){btn.classList.add("hidden")}
+    btn.disabled=Boolean(s.today_pending_correction);
+    btn.title=s.today_pending_correction?"Today's clock-out correction is pending review.":"";
+    btn.textContent=s.today_pending_correction?"Today's Correction Pending":(s.next_action==="clock_out"?"Click Here to Clock Out":"Click Here to Clock In")
+  }catch(_){btn.classList.add("hidden");oldNotice?.classList.add("hidden")}
 }
 function freshLocation(){
   return new Promise(resolve=>{
@@ -430,7 +434,7 @@ function freshLocation(){
 document.getElementById("quickPunchBtn").addEventListener("click",async()=>{
   const btn=document.getElementById("quickPunchBtn");
   if(btn.dataset.locked==="1"){showMessage("This timecard is signed and locked. Your supervisor must return it before you can punch again.","warning");return}
-  if(btn.dataset.stale==="1"){const open=(currentData.entries||[]).find(e=>!e.clock_out);if(open){activeEntry={...open,clickedKind:"out"};openEntryModal("request",activeEntry);showEntryModalMessage("This older open punch must be corrected and approved before another normal punch.",false);return}showMessage("Open the missing punch on the timecard and request a correction.","warning");return}
+  if(btn.dataset.pending==="1"){showMessage("Today's clock-out correction is pending review.","warning");return}
   const action=btn.dataset.action;if(!action)return;
   btn.disabled=true;const prior=btn.textContent;btn.textContent="Getting current location…";
   try{
@@ -438,7 +442,7 @@ document.getElementById("quickPunchBtn").addEventListener("click",async()=>{
     const data=await jsonOrError(await apiFetch(`${apiBase}/${action==="clock_out"?"clock-out":"clock-in"}`,{method:"POST",body:JSON.stringify({...location,client_source:"timecard_web"})}));
     showMessage(data.message||"Punch recorded");await loadTimecard()
   }catch(err){
-    if(err.data?.code==="STALE_OPEN_PUNCH"){await loadTimecard();showMessage(err.message,"warning")}
+    if(err.data?.code==="PENDING_CORRECTION"){await loadTimecard();showMessage(err.message,"warning")}
     else if(err.data?.code==="TIMECARD_LOCKED"){await loadTimecard();showMessage(err.message,"warning")}
     else showMessage(err.message,"error")
   }finally{

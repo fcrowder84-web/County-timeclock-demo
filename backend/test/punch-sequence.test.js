@@ -110,6 +110,21 @@ function makeClient(initialEntries = []) {
   assert.strictEqual(iso(result.entries[0].clock_in), '2026-08-13T08:00:00.000Z');
   assert.strictEqual(result.entries[0].clock_out, null);
 
+  // A supervisor can approve an older clock-in even with two other incomplete
+  // dates, including a newer active day. Only the requested date is rebuilt.
+  client=makeClient([
+    {id:41,employee_id:7,clock_in:'2026-10-16T12:00:00Z',clock_out:null,status:'open',deleted_at:null},
+    {id:42,employee_id:7,clock_in:'2026-10-18T12:00:00Z',clock_out:null,status:'open',deleted_at:null},
+  ]);
+  result=await insertPunchIntoSequence({
+    client,employeeId:7,punchAt:'2026-10-15T12:00:00Z',
+    actorEmployeeId:22,reason:'Historical missing clock-in',
+  });
+  assert.strictEqual(result.inferred_punch_type,'clock_in');
+  assert.strictEqual(result.entries.length,1);
+  assert.deepStrictEqual(client.entries.filter(row=>!row.clock_out).map(row=>iso(row.clock_in)),
+    ['2026-10-16T12:00:00.000Z','2026-10-18T12:00:00.000Z','2026-10-15T12:00:00.000Z']);
+
 
   // Management removal operates on the day's chronological punch sequence.
   // Dan regression: 09:00,11:14,11:16,14:29,17:36 -> remove 11:14

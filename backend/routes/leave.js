@@ -305,9 +305,9 @@ function createLeaveRouter({ requireUser, pool, audit, canAccessEmployee, getReq
         const totals = await client.query(
           `SELECT
              COALESCE(
-               FLOOR(SUM(EXTRACT(EPOCH FROM (COALESCE(clock_out,NOW()) - clock_in)) / 900))
+               FLOOR(SUM(EXTRACT(EPOCH FROM (COALESCE(clock_out,CASE WHEN clock_in::date=(NOW() AT TIME ZONE 'America/New_York')::date THEN NOW() END) - clock_in)) / 900))
                + CASE
-                   WHEN MOD(ROUND(SUM(EXTRACT(EPOCH FROM (COALESCE(clock_out,NOW()) - clock_in)) / 60))::int, 15) > 5
+                   WHEN MOD(ROUND(SUM(EXTRACT(EPOCH FROM (COALESCE(clock_out,CASE WHEN clock_in::date=(NOW() AT TIME ZONE 'America/New_York')::date THEN NOW() END) - clock_in)) / 60))::int, 15) > 5
                    THEN 1 ELSE 0
                  END,
                0
@@ -505,9 +505,9 @@ function createLeaveRouter({ requireUser, pool, audit, canAccessEmployee, getReq
       const totals=await client.query(
         `SELECT
            COALESCE(
-             FLOOR(SUM(EXTRACT(EPOCH FROM (COALESCE(clock_out,NOW()) - clock_in)) / 900))
+             FLOOR(SUM(EXTRACT(EPOCH FROM (COALESCE(clock_out,CASE WHEN clock_in::date=(NOW() AT TIME ZONE 'America/New_York')::date THEN NOW() END) - clock_in)) / 900))
              + CASE
-                 WHEN MOD(ROUND(SUM(EXTRACT(EPOCH FROM (COALESCE(clock_out,NOW()) - clock_in)) / 60))::int,15)>5
+                 WHEN MOD(ROUND(SUM(EXTRACT(EPOCH FROM (COALESCE(clock_out,CASE WHEN clock_in::date=(NOW() AT TIME ZONE 'America/New_York')::date THEN NOW() END) - clock_in)) / 60))::int,15)>5
                  THEN 1 ELSE 0
                END,
              0
@@ -777,6 +777,9 @@ function createLeaveRouter({ requireUser, pool, audit, canAccessEmployee, getReq
       const period = await getRequestedPayPeriod(req);
       client=await pool.connect();
       await client.query('BEGIN');
+
+      // Serialize on-behalf signing with a normal clock-in for this employee.
+      await client.query('SELECT id FROM employees WHERE id=$1 FOR UPDATE', [employeeId]);
 
       const approvalResult=await client.query(
         `SELECT *
