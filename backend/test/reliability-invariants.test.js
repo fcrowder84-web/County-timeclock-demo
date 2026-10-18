@@ -53,7 +53,7 @@ assert.match(team, /cannot be assigned as their own supervisor/);
 
 assert.match(quick, /UPDATE time_change_requests[\s\S]*status='voided'/);
 assert.match(quick, /deleted_at=NOW\(\)/);
-assert.match(quick, /clock_out IS NULL\s+RETURNING \*/);
+assert.match(quick, /clock_out IS NULL AND pending_clock_out IS NULL\s+AND clock_in::date=\(NOW\(\) AT TIME ZONE 'America\/New_York'\)::date RETURNING \*/);
 
 // Denied punch requests require a non-empty reason in the API and both
 // supervisor UI surfaces, capped at 1000 characters.

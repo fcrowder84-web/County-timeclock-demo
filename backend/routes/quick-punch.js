@@ -16,14 +16,16 @@ function createQuickPunchRouter({ requireUser, requireAnyPermission, pool, audit
     const result = await db.query(
       `SELECT clock_in,clock_out,
               GREATEST(clock_in,COALESCE(clock_out,clock_in)) AS last_punch_at,
-              GREATEST(
-                0,
-                CEIL(EXTRACT(EPOCH FROM (
-                  GREATEST(clock_in,COALESCE(clock_out,clock_in))
-                  + ($2::int * INTERVAL '1 second')
-                  - NOW()
-                )))
-              )::int AS remaining_seconds,
+              CASE WHEN clock_in::date=(NOW() AT TIME ZONE 'America/New_York')::date
+                THEN GREATEST(
+                  0,
+                  CEIL(EXTRACT(EPOCH FROM (
+                    GREATEST(clock_in,COALESCE(clock_out,clock_in))
+                    + ($2::int * INTERVAL '1 second')
+                    - NOW()
+                  )))
+                )::int
+                ELSE 0 END AS remaining_seconds,
               GREATEST(clock_in,COALESCE(clock_out,clock_in))
                 + ($2::int * INTERVAL '1 second') AS cooldown_until
          FROM time_entries
@@ -64,7 +66,7 @@ function createQuickPunchRouter({ requireUser, requireAnyPermission, pool, audit
       `SELECT id,status,employee_signed_at,supervisor_approved_at,payroll_finalized_at
          FROM pay_period_approvals
         WHERE employee_id=$1
-          AND CURRENT_DATE BETWEEN pay_period_start AND pay_period_end
+          AND (NOW() AT TIME ZONE 'America/New_York')::date BETWEEN pay_period_start AND pay_period_end
         ORDER BY id DESC
         LIMIT 1`,
       [employeeId],
@@ -153,17 +155,27 @@ function createQuickPunchRouter({ requireUser, requireAnyPermission, pool, audit
 
   router.get('/quick-status', requireUser, canPunch, async (req, res) => {
     try {
-      const [openResult, cooldown, lock] = await Promise.all([
+      const [openResult, historicalResult, cooldown, lock] = await Promise.all([
         pool.query(
-          `SELECT id,clock_in,
-                  (clock_in::date < CURRENT_DATE OR clock_in <= NOW() - INTERVAL '23 hours') AS requires_correction
+          `SELECT id,clock_in,pending_clock_out
              FROM time_entries
             WHERE employee_id=$1
               AND deleted_at IS NULL
               AND clock_out IS NULL
-              AND pending_clock_out IS NULL
+              AND clock_in::date=(NOW() AT TIME ZONE 'America/New_York')::date
             ORDER BY clock_in DESC
             LIMIT 1`,
+          [req.user.id],
+        ),
+        pool.query(
+          `SELECT id,clock_in,pending_clock_out,COUNT(*) OVER()::int AS total_incomplete
+             FROM time_entries
+            WHERE employee_id=$1
+              AND deleted_at IS NULL
+              AND clock_out IS NULL
+              AND clock_in::date<(NOW() AT TIME ZONE 'America/New_York')::date
+            ORDER BY (pending_clock_out IS NOT NULL),clock_in DESC
+            LIMIT 30`,
           [req.user.id],
         ),
         punchCooldown(req.user.id),
@@ -172,13 +184,20 @@ function createQuickPunchRouter({ requireUser, requireAnyPermission, pool, audit
 
       const openEntry = openResult.rows[0] || null;
       const clockedIn = Boolean(openEntry);
+      const historical = historicalResult.rows.map(row => ({
+        id: row.id, clock_in: row.clock_in,
+        pending_clock_out: row.pending_clock_out || null,
+      }));
 
       return res.json({
         clocked_in: clockedIn,
-        next_action: clockedIn ? 'clock_out' : 'clock_in',
+        next_action: openEntry?.pending_clock_out ? null : (clockedIn ? 'clock_out' : 'clock_in'),
         current_entry_id: openEntry?.id || null,
         current_clock_in: openEntry?.clock_in || null,
-        requires_correction: Boolean(openEntry?.requires_correction),
+        requires_correction: false,
+        today_pending_correction: Boolean(openEntry?.pending_clock_out),
+        historical_incomplete_entries: historical,
+        historical_incomplete_count: Number(historicalResult.rows[0]?.total_incomplete || 0),
         timecard_locked: lock.locked,
         timecard_status: lock.approval?.status || null,
         employee_signed_at: lock.approval?.employee_signed_at || null,
@@ -205,7 +224,9 @@ function createQuickPunchRouter({ requireUser, requireAnyPermission, pool, audit
            status,
            to_char(clock_in,'MM/DD/YYYY HH12:MI AM') AS clock_in_display,
            CASE WHEN clock_out IS NULL THEN NULL ELSE to_char(clock_out,'MM/DD/YYYY HH12:MI AM') END AS clock_out_display,
-           ROUND((EXTRACT(EPOCH FROM (COALESCE(clock_out,NOW())-clock_in))/3600)::numeric,2) AS hours_worked
+           CASE WHEN clock_out IS NULL THEN NULL
+                ELSE ROUND((EXTRACT(EPOCH FROM (clock_out-clock_in))/3600)::numeric,2)
+           END AS hours_worked
          FROM time_entries
         WHERE employee_id=$1
           AND deleted_at IS NULL
@@ -393,21 +414,20 @@ function createQuickPunchRouter({ requireUser, requireAnyPermission, pool, audit
       }
 
       const openEntry = await pool.query(
-        `SELECT id,clock_in,
-                (clock_in::date < CURRENT_DATE OR clock_in <= NOW() - INTERVAL '23 hours') AS requires_correction
+        `SELECT id,clock_in,pending_clock_out
            FROM time_entries
           WHERE employee_id=$1
             AND deleted_at IS NULL
             AND clock_out IS NULL
-            AND pending_clock_out IS NULL
+            AND clock_in::date=(NOW() AT TIME ZONE 'America/New_York')::date
           ORDER BY clock_in DESC LIMIT 1`,
         [req.user.id],
       );
       if (openEntry.rows.length) {
-        if (openEntry.rows[0].requires_correction) {
+        if (openEntry.rows[0].pending_clock_out) {
           return res.status(409).json({
-            error: 'Your previous open punch must have a correction request submitted before you can punch again.',
-            code: 'STALE_OPEN_PUNCH',time_entry_id: openEntry.rows[0].id,clock_in: openEntry.rows[0].clock_in,
+            error: 'Today has a pending clock-out correction. Wait for review before adding another punch.',
+            code: 'PENDING_CORRECTION',time_entry_id: openEntry.rows[0].id,clock_in: openEntry.rows[0].clock_in,
           });
         }
         return res.status(400).json({ error: 'You are already clocked in' });
@@ -447,22 +467,21 @@ function createQuickPunchRouter({ requireUser, requireAnyPermission, pool, audit
       }
 
       const openResult = await pool.query(
-        `SELECT id,clock_in,
-                (clock_in::date < CURRENT_DATE OR clock_in <= NOW() - INTERVAL '23 hours') AS requires_correction
+        `SELECT id,clock_in,pending_clock_out
            FROM time_entries
           WHERE employee_id=$1
             AND deleted_at IS NULL
             AND clock_out IS NULL
-            AND pending_clock_out IS NULL
+            AND clock_in::date=(NOW() AT TIME ZONE 'America/New_York')::date
           ORDER BY clock_in DESC LIMIT 1`,
         [req.user.id],
       );
       if (!openResult.rows.length) return res.status(400).json({ error: 'You are not currently clocked in' });
       const openEntry = openResult.rows[0];
-      if (openEntry.requires_correction) {
+      if (openEntry.pending_clock_out) {
         return res.status(409).json({
-          error: 'Your previous open punch must have a correction request submitted before you can punch again.',
-          code: 'STALE_OPEN_PUNCH',time_entry_id: openEntry.id,clock_in: openEntry.clock_in,
+          error: 'Today has a pending clock-out correction. Wait for review before punching again.',
+          code: 'PENDING_CORRECTION',time_entry_id: openEntry.id,clock_in: openEntry.clock_in,
         });
       }
 
@@ -474,7 +493,9 @@ function createQuickPunchRouter({ requireUser, requireAnyPermission, pool, audit
 
       const result = await pool.query(
         `UPDATE time_entries SET clock_out=NOW(),status='closed'
-          WHERE id=$1 AND employee_id=$2 AND deleted_at IS NULL AND clock_out IS NULL RETURNING *`,
+          WHERE id=$1 AND employee_id=$2 AND deleted_at IS NULL
+            AND clock_out IS NULL AND pending_clock_out IS NULL
+            AND clock_in::date=(NOW() AT TIME ZONE 'America/New_York')::date RETURNING *`,
         [openEntry.id, req.user.id],
       );
       if (!result.rows.length) return res.status(400).json({ error: 'You are not currently clocked in' });

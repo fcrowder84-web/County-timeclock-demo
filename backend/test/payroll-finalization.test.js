@@ -69,6 +69,18 @@ function fakeDb({
   }),2,period);
   assert.deepStrictEqual(state.blockers,[]);
 
+  const finalizationQueries=[];
+  const db=fakeDb({openPunches:1});
+  state=await finalizationState({query:async(sql,args)=>{
+    finalizationQueries.push(sql);
+    return db.query(sql,args);
+  }},2,period);
+  assert(state.blockers.includes('Open punch remains in the pay period'));
+  const openPunchQuery=finalizationQueries.find(sql=>sql.includes('FROM time_entries'));
+  assert(openPunchQuery.includes('clock_out IS NULL'));
+  assert(!openPunchQuery.includes('CURRENT_DATE')&&!openPunchQuery.includes('NOW()'),
+    'a prior-day incomplete punch must continue to block finalization');
+
   console.log('payroll-finalization tests: PASS');
 })().catch(err=>{
   console.error(err);

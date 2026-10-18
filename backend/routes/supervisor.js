@@ -404,7 +404,7 @@ function createSupervisorRouter({
               WHERE employee_id=$1
                 AND deleted_at IS NULL
                 AND clock_in < $3::timestamp
-                AND COALESCE(clock_out,NOW()) > $2::timestamp
+                AND COALESCE(clock_out,clock_in::date + INTERVAL '1 day') > $2::timestamp
               LIMIT 1
               FOR UPDATE`,
             [request.employee_id, newClockIn, newClockOut],
@@ -490,6 +490,7 @@ function createSupervisorRouter({
     requireUser,
     requireAnyPermission('approve_punch_correction'),
     async (req, res) => {
+      let client = null;
       try {
         const requestId = parsePositiveInt(req.body?.request_id, 'change request');
         const supervisorNote = String(req.body?.supervisor_note || '').trim();
@@ -511,7 +512,32 @@ function createSupervisorRouter({
           return res.status(403).json({ error: 'Access denied' });
         }
 
-        const denied = await pool.query(
+        client = await pool.connect();
+        await client.query('BEGIN');
+        const locked = await client.query(
+          `SELECT * FROM time_change_requests WHERE id=$1 FOR UPDATE`,
+          [requestId],
+        );
+        const request = locked.rows[0];
+        if (!request || request.status !== 'pending') {
+          await client.query('ROLLBACK');
+          return res.status(409).json({ error: 'This change request has already been reviewed' });
+        }
+        if (request.time_entry_id) {
+          await client.query(
+            `UPDATE time_entries
+                SET pending_clock_in=CASE
+                      WHEN pending_clock_in IS NOT DISTINCT FROM $1::timestamp THEN NULL
+                      ELSE pending_clock_in END,
+                    pending_clock_out=CASE
+                      WHEN pending_clock_out IS NOT DISTINCT FROM $2::timestamp THEN NULL
+                      ELSE pending_clock_out END
+              WHERE id=$3 AND employee_id=$4 AND deleted_at IS NULL`,
+            [request.requested_clock_in,request.requested_clock_out,
+              request.time_entry_id,request.employee_id],
+          );
+        }
+        const denied = await client.query(
           `UPDATE time_change_requests
               SET status='denied',supervisor_id=$1,supervisor_note=$2,reviewed_at=NOW()
             WHERE id=$3 AND status='pending'
@@ -519,17 +545,22 @@ function createSupervisorRouter({
           [req.user.id, supervisorNote, requestId],
         );
         if (!denied.rows.length) {
+          await client.query('ROLLBACK');
           return res.status(409).json({ error: 'This change request has already been reviewed' });
         }
+        await client.query('COMMIT');
         await audit(req.user.id, 'deny_time_change_request', 'time_change_request', requestId, {
           employee_id: requestResult.rows[0].employee_id,
           supervisor_note: supervisorNote,
         });
         return res.json({ message: 'Request denied' });
       } catch (err) {
+        if (client) await client.query('ROLLBACK').catch(() => {});
         if (err.statusCode) return res.status(err.statusCode).json({ error: err.message });
         console.error(err);
         return res.status(500).json({ error: 'Deny request error' });
+      } finally {
+        if (client) client.release();
       }
     },
   );
@@ -586,7 +617,10 @@ function createSupervisorRouter({
                CASE WHEN clock_out IS NULL THEN NULL ELSE to_char(clock_out,'YYYY-MM-DD') END AS clock_out_date_iso,
                CASE WHEN pending_clock_in IS NULL THEN NULL ELSE to_char(pending_clock_in,'HH12:MI AM') END AS pending_clock_in_time,
                CASE WHEN pending_clock_out IS NULL THEN NULL ELSE to_char(pending_clock_out,'HH12:MI AM') END AS pending_clock_out_time,
-               ROUND((EXTRACT(EPOCH FROM (COALESCE(clock_out,pending_clock_out,NOW())-COALESCE(clock_in,pending_clock_in)))/3600)::numeric,2) AS hours_worked
+               CASE WHEN clock_out IS NOT NULL THEN ROUND((EXTRACT(EPOCH FROM (clock_out-clock_in))/3600)::numeric,2)
+                    WHEN clock_in::date=(NOW() AT TIME ZONE 'America/New_York')::date
+                      THEN ROUND((EXTRACT(EPOCH FROM (NOW()-clock_in))/3600)::numeric,2)
+                    ELSE NULL END AS hours_worked
              FROM time_entries
              WHERE employee_id=$1
                AND deleted_at IS NULL
@@ -921,8 +955,8 @@ function createSupervisorRouter({
             WHERE employee_id=$1
               AND id<>$2
               AND deleted_at IS NULL
-              AND clock_in < COALESCE($4::timestamp, 'infinity'::timestamp)
-              AND COALESCE(clock_out, 'infinity'::timestamp) > $3::timestamp
+              AND clock_in < COALESCE($4::timestamp, $3::timestamp::date + INTERVAL '1 day')
+              AND COALESCE(clock_out, clock_in::date + INTERVAL '1 day') > $3::timestamp
             LIMIT 1
             FOR UPDATE`,
           [existing.employee_id, timeEntryId, newClockIn, finalClockOut],

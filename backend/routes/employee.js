@@ -141,7 +141,10 @@ function createEmployeeRouter({ requireUser, requireAnyPermission, pool, audit, 
            CASE WHEN clock_out IS NULL THEN NULL ELSE to_char(clock_out, 'HH24:MI') END AS clock_out_24,
            CASE WHEN pending_clock_in IS NULL THEN NULL ELSE to_char(pending_clock_in, 'HH12:MI AM') END AS pending_clock_in_display,
            CASE WHEN pending_clock_out IS NULL THEN NULL ELSE to_char(pending_clock_out, 'HH12:MI AM') END AS pending_clock_out_display,
-           ROUND((EXTRACT(EPOCH FROM (COALESCE(clock_out, pending_clock_out, NOW()) - COALESCE(clock_in, pending_clock_in))) / 3600)::numeric, 2) AS hours_worked
+           CASE WHEN clock_out IS NOT NULL THEN ROUND((EXTRACT(EPOCH FROM (clock_out - clock_in)) / 3600)::numeric, 2)
+                WHEN clock_in::date=(NOW() AT TIME ZONE 'America/New_York')::date
+                  THEN ROUND((EXTRACT(EPOCH FROM (NOW() - clock_in)) / 3600)::numeric, 2)
+                ELSE NULL END AS hours_worked
          FROM time_entries
         WHERE employee_id=$1
           AND deleted_at IS NULL
@@ -712,8 +715,8 @@ function createEmployeeRouter({ requireUser, requireAnyPermission, pool, audit, 
                FROM time_entries
               WHERE employee_id=$1
                 AND deleted_at IS NULL
-                AND clock_in < COALESCE($3::timestamp, 'infinity'::timestamp)
-                AND COALESCE(clock_out, 'infinity'::timestamp) > $2::timestamp
+                AND clock_in < COALESCE($3::timestamp, $2::timestamp::date + INTERVAL '1 day')
+                AND COALESCE(clock_out, clock_in::date + INTERVAL '1 day') > $2::timestamp
               LIMIT 1
               FOR UPDATE`,
             [employeeId, legacyClockIn, legacyClockOut],

@@ -124,7 +124,8 @@ function punchCells(day,entries){
     punches.push({label:entryInDisplay(e),entry:e,kind:"in",cls:editCls});
     if(e.clock_out)punches.push({label:entryOutDisplay(e),entry:e,kind:"out",cls:editCls});
     else{
-      const age=Date.now()-new Date(e.clock_in).getTime(),isOld=day<new Date().toISOString().slice(0,10)||age>=23*3600000;
+      const today=new Intl.DateTimeFormat("en-CA",{timeZone:"America/New_York",year:"numeric",month:"2-digit",day:"2-digit"}).format(new Date());
+      const isOld=day<today;
       punches.push({label:isOld?"MISSING OUT":"OPEN",entry:e,kind:"out",cls:isOld?"missing":"open"});
     }
   });

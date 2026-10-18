@@ -489,8 +489,9 @@ for(const cap of [null,40]) {
   const old=punchSummary({
     clockIn:'2026-10-05T00:00:00-04:00',asOf:'2026-10-05T23:00:00-04:00',cap,
   });
-  assert.strictEqual(old.weeks[0].total_worked_hours,0);
-  assert.strictEqual(old.weeks[0].total_paid_hours,0);
+  assert.strictEqual(old.weeks[0].total_worked_hours,23,
+    'a still-open punch on the same Eastern calendar day remains live');
+  assert.strictEqual(old.weeks[0].total_paid_hours,23);
   const alongside=punchSummary({
     clockIn:'2026-10-05T08:00:00-04:00',asOf:'2026-10-07T12:00:00-04:00',cap,
     others:[{entry_date_iso:'2026-10-06',clock_in:'2026-10-06T08:00:00-04:00',clock_out:'2026-10-06T16:00:00-04:00'}],

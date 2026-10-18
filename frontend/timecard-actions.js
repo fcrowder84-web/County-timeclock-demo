@@ -396,26 +396,30 @@ document.getElementById("returnBtn").addEventListener("click",async()=>{const no
 
 async function refreshQuickPunch(){
   const btn=document.getElementById("quickPunchBtn");
-  if(!selectedIsSelf()||!has("clock_in_out")){btn.classList.add("hidden");return}
+  const oldNotice=document.getElementById("historicalPunchNotice");
+  if(!selectedIsSelf()||!has("clock_in_out")){btn.classList.add("hidden");oldNotice?.classList.add("hidden");return}
   try{
     const s=await jsonOrError(await apiFetch(`${apiBase}/quick-status`));
     btn.classList.remove("hidden");
-    btn.dataset.action=s.next_action;
+    btn.dataset.action=s.next_action||"";
     btn.dataset.entryId=s.current_entry_id||"";
     btn.dataset.locked=s.timecard_locked?"1":"0";
+    btn.dataset.pending=s.today_pending_correction?"1":"0";
+    const oldCount=Number(s.historical_incomplete_count||0);
+    if(oldNotice){
+      oldNotice.classList.toggle("hidden",oldCount===0);
+      oldNotice.textContent=oldCount?oldCount+" earlier incomplete "+(oldCount===1?"day needs":"days need")+" correction; open the affected pay period's timecard.":"";
+    }
     if(s.timecard_locked){
-      btn.dataset.stale="0";
       btn.disabled=true;
       btn.textContent="Timecard Signed — Punching Locked";
       btn.title="Your supervisor must return the timecard before you can punch again.";
       return;
     }
-    btn.disabled=false;
-    btn.title="";
-    const stale=Boolean(s.requires_correction)||(s.current_clock_in&&(dateOnly(s.current_clock_in)<new Date().toLocaleDateString("en-CA",{timeZone:"America/New_York"})||Date.now()-new Date(s.current_clock_in).getTime()>=23*3600000));
-    btn.dataset.stale=stale?"1":"0";
-    btn.textContent=stale?"Correct Missing Punch":(s.next_action==="clock_out"?"Click Here to Clock Out":"Click Here to Clock In")
-  }catch(_){btn.classList.add("hidden")}
+    btn.disabled=Boolean(s.today_pending_correction);
+    btn.title=s.today_pending_correction?"Today's clock-out correction is pending review.":"";
+    btn.textContent=s.today_pending_correction?"Today's Correction Pending":(s.next_action==="clock_out"?"Click Here to Clock Out":"Click Here to Clock In")
+  }catch(_){btn.classList.add("hidden");oldNotice?.classList.add("hidden")}
 }
 function freshLocation(){
   return new Promise(resolve=>{
@@ -430,7 +434,7 @@ function freshLocation(){
 document.getElementById("quickPunchBtn").addEventListener("click",async()=>{
   const btn=document.getElementById("quickPunchBtn");
   if(btn.dataset.locked==="1"){showMessage("This timecard is signed and locked. Your supervisor must return it before you can punch again.","warning");return}
-  if(btn.dataset.stale==="1"){const open=(currentData.entries||[]).find(e=>!e.clock_out);if(open){activeEntry={...open,clickedKind:"out"};openEntryModal("request",activeEntry);showEntryModalMessage("This older open punch must be corrected and approved before another normal punch.",false);return}showMessage("Open the missing punch on the timecard and request a correction.","warning");return}
+  if(btn.dataset.pending==="1"){showMessage("Today's clock-out correction is pending review.","warning");return}
   const action=btn.dataset.action;if(!action)return;
   btn.disabled=true;const prior=btn.textContent;btn.textContent="Getting current location…";
   try{
@@ -438,7 +442,7 @@ document.getElementById("quickPunchBtn").addEventListener("click",async()=>{
     const data=await jsonOrError(await apiFetch(`${apiBase}/${action==="clock_out"?"clock-out":"clock-in"}`,{method:"POST",body:JSON.stringify({...location,client_source:"timecard_web"})}));
     showMessage(data.message||"Punch recorded");await loadTimecard()
   }catch(err){
-    if(err.data?.code==="STALE_OPEN_PUNCH"){await loadTimecard();showMessage(err.message,"warning")}
+    if(err.data?.code==="PENDING_CORRECTION"){await loadTimecard();showMessage(err.message,"warning")}
     else if(err.data?.code==="TIMECARD_LOCKED"){await loadTimecard();showMessage(err.message,"warning")}
     else showMessage(err.message,"error")
   }finally{

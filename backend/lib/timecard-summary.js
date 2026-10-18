@@ -232,8 +232,7 @@ function summarizeTimecard({
     const staleOpenPunch = inMs != null
       && actualOutMs == null
       && asOfMs != null
-      && (day < payrollLocalDate(asOf)
-        || asOfMs - inMs >= 23 * 60 * 60 * 1000);
+      && day < payrollLocalDate(asOf);
     const calculationOutMs = inMs != null && actualOutMs == null
       ? (staleOpenPunch ? null : asOfMs)
       : actualOutMs;

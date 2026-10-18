@@ -29,8 +29,9 @@ function compact(sql) { return String(sql).replace(/\s+/g, ' ').trim(); }
     const text = compact(sql);
     queries.push({ text, args });
     if (text === 'BEGIN' || text === 'COMMIT' || text === 'ROLLBACK') return { rows: [] };
-    if (text.startsWith('SELECT id,clock_in,') && text.includes('requires_correction')) {
-      return { rows: [{ id: 1, clock_in: '2026-08-20T17:44:27Z', requires_correction: false }] };
+    if (text.includes('AS total_incomplete')) return { rows: [] };
+    if (text.startsWith('SELECT id,clock_in,pending_clock_out')) {
+      return { rows: [{ id: 1, clock_in: '2026-08-20T17:44:27Z', pending_clock_out: null }] };
     }
     if (text.includes('AS remaining_seconds') && text.includes('AS cooldown_until')) {
       return { rows: [{
@@ -67,6 +68,7 @@ function compact(sql) { return String(sql).replace(/\s+/g, ' ').trim(); }
   assert.strictEqual(res.body.current_entry_id, 1);
   assert.strictEqual(res.body.current_clock_in, '2026-08-20T17:44:27Z');
   assert.strictEqual(res.body.requires_correction, false);
+  assert.deepStrictEqual(res.body.historical_incomplete_entries, []);
   assert.strictEqual(res.body.timecard_locked, false);
   assert.strictEqual(res.body.last_punch_type, 'clock_out');
   assert.strictEqual(res.body.last_punch_at, '2026-08-20T17:42:09Z');
@@ -130,7 +132,8 @@ function compact(sql) { return String(sql).replace(/\s+/g, ' ').trim(); }
   assert.strictEqual(res.statusCode, 400);
   assert.strictEqual(res.body.error, 'You are not currently clocked in');
   const clockOutSql = queries.find((item) => item.text.startsWith('UPDATE time_entries SET clock_out=NOW()'))?.text || '';
-  assert.match(clockOutSql, /AND deleted_at IS NULL AND clock_out IS NULL RETURNING \*/);
+  assert.match(clockOutSql, /AND clock_out IS NULL AND pending_clock_out IS NULL/);
+  assert.match(clockOutSql, /clock_in::date=\(NOW\(\) AT TIME ZONE 'America\/New_York'\)::date RETURNING \*/);
 
   const lockedQueries = [];
   const lockedPool = {
@@ -140,7 +143,8 @@ function compact(sql) { return String(sql).replace(/\s+/g, ' ').trim(); }
       if (text.includes('FROM pay_period_approvals')) {
         return { rows: [{ id: 12, status: 'employee_submitted', employee_signed_at: '2026-08-21T09:00:00-04:00', supervisor_approved_at: null, payroll_finalized_at: null }] };
       }
-      if (text.startsWith('SELECT id,clock_in,') && text.includes('requires_correction')) return { rows: [] };
+      if (text.includes('AS total_incomplete')) return { rows: [] };
+      if (text.startsWith('SELECT id,clock_in,pending_clock_out')) return { rows: [] };
       if (text.includes('AS remaining_seconds') && text.includes('AS cooldown_until')) return { rows: [{
         clock_in: '2026-08-21T08:00:00-04:00',
         clock_out: '2026-08-21T08:30:00-04:00',
@@ -177,7 +181,7 @@ function compact(sql) { return String(sql).replace(/\s+/g, ' ').trim(); }
     query: async (sql) => {
       const text = compact(sql);
       if (text.includes('FROM pay_period_approvals')) return { rows: [] };
-      if (text.startsWith('SELECT id,clock_in,') && text.includes('requires_correction')) return { rows: [{ id: 77, clock_in: '2026-08-19T12:00:00Z', requires_correction: true }] };
+      if (text.startsWith('SELECT id,clock_in,pending_clock_out')) return { rows: [{ id: 77, clock_in: '2026-08-19T12:00:00Z', pending_clock_out: '2026-08-19T17:00:00Z' }] };
       if (text.startsWith('SELECT clock_in,clock_out FROM time_entries')) return { rows: [] };
       throw new Error(`unexpected stale query: ${text}`);
     },
@@ -187,7 +191,7 @@ function compact(sql) { return String(sql).replace(/\s+/g, ' ').trim(); }
   res = makeRes();
   await handlerFor(staleRouter, 'post', '/clock-out')({ user: { id: 7, first_name: 'Pat' } }, res);
   assert.strictEqual(res.statusCode, 409);
-  assert.strictEqual(res.body.code, 'STALE_OPEN_PUNCH');
+  assert.strictEqual(res.body.code, 'PENDING_CORRECTION');
   assert.strictEqual(res.body.time_entry_id, 77);
 
   const cooldownQueries = [];
@@ -196,8 +200,9 @@ function compact(sql) { return String(sql).replace(/\s+/g, ' ').trim(); }
       const text = compact(sql);
       cooldownQueries.push(text);
       if (text.includes('FROM pay_period_approvals')) return { rows: [] };
-      if (text.startsWith('SELECT id,clock_in,') && text.includes('requires_correction')) {
-        return { rows: [{ id: 88, clock_in: '2026-09-22T12:00:00Z', requires_correction: false }] };
+      if (text.includes('AS total_incomplete')) return { rows: [] };
+      if (text.startsWith('SELECT id,clock_in,pending_clock_out')) {
+        return { rows: [{ id: 88, clock_in: '2026-09-22T12:00:00Z', pending_clock_out: null }] };
       }
       if (text.includes('AS remaining_seconds') && text.includes('AS cooldown_until')) {
         return { rows: [{
@@ -238,7 +243,7 @@ function compact(sql) { return String(sql).replace(/\s+/g, ' ').trim(); }
     query: async (sql) => {
       const text = compact(sql);
       if (text.includes('FROM pay_period_approvals')) return { rows: [] };
-      if (text.startsWith('SELECT id,clock_in,') && text.includes('requires_correction')) return { rows: [] };
+      if (text.startsWith('SELECT id,clock_in,pending_clock_out')) return { rows: [] };
       if (text.includes('AS remaining_seconds') && text.includes('AS cooldown_until')) {
         return { rows: [{
           clock_in: '2026-09-22T12:00:00Z',
@@ -269,7 +274,7 @@ function compact(sql) { return String(sql).replace(/\s+/g, ' ').trim(); }
         const text = compact(sql);
         gpsQueries.push(text);
         if (text.includes('FROM pay_period_approvals')) return { rows: [] };
-        if (text.startsWith('SELECT id,clock_in,') && text.includes('requires_correction')) return { rows: [] };
+        if (text.startsWith('SELECT id,clock_in,pending_clock_out')) return { rows: [] };
         if (text.includes('AS remaining_seconds') && text.includes('AS cooldown_until')) return { rows: [] };
         if (text.startsWith('INSERT INTO time_entries')) throw new Error('GPS gate must block insert');
         throw new Error(`unexpected GPS gate query: ${text}`);
@@ -294,7 +299,7 @@ function compact(sql) { return String(sql).replace(/\s+/g, ' ').trim(); }
     query: async (sql) => {
       const text = compact(sql);
       if (text.includes('FROM pay_period_approvals')) return { rows: [] };
-      if (text.startsWith('SELECT id,clock_in,') && text.includes('requires_correction')) return { rows: [] };
+      if (text.startsWith('SELECT id,clock_in,pending_clock_out')) return { rows: [] };
       if (text.includes('AS remaining_seconds') && text.includes('AS cooldown_until')) return { rows: [] };
       if (text.startsWith('INSERT INTO time_entries(employee_id,clock_in,status)')) throw duplicateError;
       throw new Error(`unexpected race query: ${text}`);
@@ -306,6 +311,87 @@ function compact(sql) { return String(sql).replace(/\s+/g, ' ').trim(); }
   await handlerFor(raceRouter, 'post', '/clock-in')({ user: { id: 7, first_name: 'Pat' }, headers: { 'cf-connecting-ip': '64.139.245.9' }, body: { location_status: 'denied' } }, res);
   assert.strictEqual(res.statusCode, 400);
   assert.strictEqual(res.body.error, 'You are already clocked in');
+
+  // Two older missing days remain visible, while today's state alone permits
+  // a new in/out pair. The database query itself enforces the Eastern date.
+  {
+    const dayQueries=[];
+    let todayOpen=null;
+    const historical=[
+      {id:71,clock_in:'2026-10-17T08:00:00-04:00',pending_clock_out:null,total_incomplete:2},
+      {id:70,clock_in:'2026-10-16T08:00:00-04:00',pending_clock_out:'2026-10-16T16:00:00-04:00',total_incomplete:2},
+    ];
+    const dayPool={
+      async query(sql,args=[]){
+        const text=compact(sql);dayQueries.push({text,args});
+        if(text.includes('FROM pay_period_approvals'))return {rows:[]};
+        if(text.includes('AS total_incomplete')){
+          assert.match(text,/clock_in::date<\(NOW\(\) AT TIME ZONE 'America\/New_York'\)::date/);
+          return {rows:historical};
+        }
+        if(text.startsWith('SELECT id,clock_in,pending_clock_out')){
+          assert.match(text,/clock_in::date=\(NOW\(\) AT TIME ZONE 'America\/New_York'\)::date/);
+          return {rows:todayOpen?[todayOpen]:[]};
+        }
+        if(text.includes('AS remaining_seconds')){
+          assert.match(text,/CASE WHEN clock_in::date=\(NOW\(\) AT TIME ZONE 'America\/New_York'\)::date/);
+          return {rows:[{
+            clock_in:'2026-10-17T23:59:00-04:00',clock_out:null,
+            last_punch_at:'2026-10-17T23:59:00-04:00',remaining_seconds:0,
+          }]};
+        }
+        if(text.startsWith('SELECT value FROM settings'))return {rows:[]};
+        if(text.startsWith('INSERT INTO time_entries(employee_id,clock_in,status)')){
+          todayOpen={id:90,clock_in:'2026-10-18T00:01:00-04:00',pending_clock_out:null};
+          return {rows:[{...todayOpen,employee_id:7,clock_out:null}]};
+        }
+        if(text.startsWith('UPDATE time_entries SET clock_out=NOW()')){
+          assert.strictEqual(args[0],90,'clock-out must select today, not a historical open row');
+          assert.match(text,/clock_in::date=\(NOW\(\) AT TIME ZONE 'America\/New_York'\)::date/);
+          todayOpen=null;
+          return {rows:[{id:90,employee_id:7,clock_in:'2026-10-18T00:01:00-04:00',clock_out:'2026-10-18T00:10:00-04:00'}]};
+        }
+        if(text.startsWith('INSERT INTO time_punch_metadata'))return {rows:[]};
+        throw new Error('unexpected calendar-day query: '+text);
+      },
+    };
+    const dayRouter=createQuickPunchRouter({requireUser:noop,requireAnyPermission:allow,pool:dayPool,audit:async()=>{}});
+    const request={user:{id:7,first_name:'Pat'},headers:{'cf-connecting-ip':'192.0.2.25'},
+      body:{location_status:'captured',latitude:33.92,longitude:-80.94,client_source:'mobile_pwa'}};
+    res=makeRes();
+    await handlerFor(dayRouter,'get','/quick-status')(request,res);
+    assert.strictEqual(res.statusCode,200);
+    assert.strictEqual(res.body.clocked_in,false);
+    assert.strictEqual(res.body.next_action,'clock_in');
+    assert.strictEqual(res.body.historical_incomplete_count,2);
+    assert.deepStrictEqual(res.body.historical_incomplete_entries.map(row=>row.id),[71,70]);
+    assert.strictEqual(res.body.punch_cooldown_seconds_remaining,0,
+      "a prior-day punch must not impose today's cooldown");
+    res=makeRes();
+    await handlerFor(dayRouter,'post','/clock-in')(request,res);
+    assert.strictEqual(res.statusCode,200);
+    res=makeRes();
+    await handlerFor(dayRouter,'get','/quick-status')(request,res);
+    assert.strictEqual(res.body.clocked_in,true);
+    assert.strictEqual(res.body.current_entry_id,90);
+    res=makeRes();
+    await handlerFor(dayRouter,'post','/clock-out')(request,res);
+    assert.strictEqual(res.statusCode,200);
+    assert.strictEqual(historical.length,2,'older incomplete punches remain untouched');
+    assert(dayQueries.some(({text})=>text.startsWith('INSERT INTO time_punch_metadata')),
+      'GPS/IP metadata capture remains active for the new punch');
+    todayOpen={id:91,clock_in:'2026-10-18T00:20:00-04:00',
+      pending_clock_out:'2026-10-18T00:30:00-04:00'};
+    res=makeRes();
+    await handlerFor(dayRouter,'get','/quick-status')(request,res);
+    assert.strictEqual(res.body.clocked_in,true);
+    assert.strictEqual(res.body.next_action,null);
+    assert.strictEqual(res.body.today_pending_correction,true);
+    res=makeRes();
+    await handlerFor(dayRouter,'post','/clock-in')(request,res);
+    assert.strictEqual(res.statusCode,409);
+    assert.strictEqual(res.body.code,'PENDING_CORRECTION');
+  }
 
   console.log('quick-punch tests: PASS');
 })().catch((err) => { console.error(err.stack || err.message); process.exit(1); });

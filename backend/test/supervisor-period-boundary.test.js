@@ -20,8 +20,8 @@ async function edit(newClockIn,{newClockOut=`${newClockIn.slice(0,10)} 13:00:00`
         clock_in:new Date('2026-09-20T06:00:00-04:00'),clock_out:new Date('2026-09-20T07:00:00-04:00'),
       }]};
       if(q.includes('FROM time_entries')&&q.includes('id<>$2')){
-        assert(q.includes("clock_in < COALESCE($4::timestamp, 'infinity'::timestamp)"));
-        assert(q.includes("COALESCE(clock_out, 'infinity'::timestamp) > $3::timestamp"));
+        assert(q.includes("clock_in < COALESCE($4::timestamp, $3::timestamp::date + INTERVAL '1 day')"));
+        assert(q.includes("COALESCE(clock_out, clock_in::date + INTERVAL '1 day') > $3::timestamp"));
         const overlaps=otherEntries.some(row=>new Date(row.start)<(args[3]?new Date(args[3]):Infinity)
           &&(row.end?new Date(row.end):Infinity)>new Date(args[2]));
         return {rows:overlaps?[{id:6}]:[]};
