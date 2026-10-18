@@ -122,6 +122,7 @@ function capAdjustedDisplay(adjustment){
   const amount=fmt(adjustment.hours);
   return adjustment.leaveTypes?.length?esc(`${amount} ${adjustment.leaveTypes.join(" + ")}`):amount
 }
+function incompleteHoursDisplay(hours,incomplete){return incomplete?(num(hours)?`${fmt(hours)} · INCOMPLETE`:"INCOMPLETE"):fmt(hours)}
 function punchCells(day,entries){
   const punches=[];
   entries.forEach(e=>{
@@ -130,7 +131,7 @@ function punchCells(day,entries){
     if(e.clock_out)punches.push({label:entryOutDisplay(e),entry:e,kind:"out",cls:editCls});
     else{
       const isOld=day<easternDate(new Date());
-      punches.push({label:isOld?"MISSING OUT":"OPEN",entry:e,kind:"out",cls:isOld?"missing":"open"});
+      punches.push({label:isOld?"MISSING":"OPEN",entry:e,kind:"out",cls:isOld?"missing":"open"});
     }
   });
   const cells=[];for(let i=0;i<4;i++){let items=[];if(i<3)items=punches[i]?[punches[i]]:[];else items=punches.slice(3);cells.push(`<td>${items.map(p=>`<span class="punch ${p.cls}" data-entry-id="${Number(p.entry.id)}" data-kind="${p.kind}"${p.entry.was_edited?' title="Edited punch — audit history available"':''}>${esc(p.label)}${p.entry.was_edited?' <small class="edited-tag">EDITED</small>':''}</span>`).join(" ")}</td>`)}return cells.join("")

@@ -301,7 +301,7 @@
             const punches = [];
             entries.forEach(entry => {
                 if (entry.clock_in) punches.push(entry.clock_in);
-                punches.push(entry.clock_out || "OPEN");
+                punches.push(entry.clock_in_raw && entry.hours_worked == null ? "MISSING" : (entry.clock_out || "OPEN"));
             });
             return punches;
         }
@@ -335,6 +335,7 @@
                 const day = date.toISOString().slice(0,10);
                 const dayEntries = entryMap[day] || [];
                 const punches = punchList(dayEntries);
+                const incomplete = dayEntries.some(entry => entry.clock_in_raw && entry.hours_worked == null && !entry.clock_out_raw);
                 const worked = num(daySummary[day]?.total_worked_hours);
                 const forced = num(daySummary[day]?.forced_lunch_deduction_hours);
                 const remaining = Math.max(0, 40 - weekWorked);
@@ -353,8 +354,8 @@
                 const paid = worked + holiday + vacation + sick + floating + other;
                 rows.push(`<tr class="${offset % 2 ? "day-b" : "day-a"}">
                     <td>${date.toLocaleDateString([], {weekday:"short",month:"numeric",day:"numeric"})}</td>
-                    <td>${punches.map(esc).join(" · ")}</td>
-                    <td>${fmt(regular + forced)}</td>
+                    <td>${punches.map(esc).join(" · ")}${incomplete ? " · Correction Required" : ""}</td>
+                    <td>${incomplete ? (regular + forced ? `${fmt(regular + forced)} · INCOMPLETE` : "INCOMPLETE") : fmt(regular + forced)}</td>
                     <td>${forced ? "-" + fmt(forced) : ""}</td>
                     <td>${fmt(ot)}</td>
                     <td>${holiday ? fmt(holiday) : ""}</td>
@@ -362,7 +363,7 @@
                     <td>${sick ? fmt(sick) : ""}</td>
                     <td>${floating ? fmt(floating) : ""}</td>
                     <td>${other ? fmt(other) : ""}</td>
-                    <td>${fmt(paid)}</td>
+                    <td>${incomplete ? (paid ? `${fmt(paid)} · INCOMPLETE` : "INCOMPLETE") : fmt(paid)}</td>
                 </tr>`);
                 if (offset === 6) {
                     rows.push(totalRow("Week 1 Totals", summary?.weeks?.[0], "week-total"));

@@ -57,7 +57,7 @@
         events.push({ts:e.clock_out,label:entryOutDisplay(e),entry:e,kind:"out",cls:editCls,pending:false});
       }else{
         const isOld=day<easternDate(new Date());
-        events.push({ts:new Date(e.clock_in).getTime()+1,label:isOld?"MISSING OUT":"OPEN",entry:e,kind:"out",cls:isOld?"missing":"open",pending:false,placeholder:true});
+        events.push({ts:new Date(e.clock_in).getTime()+1,label:isOld?"MISSING":"OPEN",entry:e,kind:"out",cls:isOld?"missing":"open",pending:false,placeholder:true});
       }
     });
     pending.forEach(p=>events.push({ts:p.ts,label:`${punchTimeLabel(p.ts)} PENDING`,pending:true,request:p.request}));

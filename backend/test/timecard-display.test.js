@@ -13,7 +13,7 @@ const html = fs.readFileSync(path.join(frontend, 'timecard.html'), 'utf8');
 const helpers = vm.runInNewContext(
   base.slice(base.indexOf('function allocateDailyWork('), base.indexOf('function punchCells(')) +
   base.slice(base.indexOf('function totalRow(')) +
-  ';({allocateDailyWork,capAdjustedDaily,capAdjustedDisplay,totalRow})',
+  ';({allocateDailyWork,capAdjustedDaily,capAdjustedDisplay,incompleteHoursDisplay,totalRow})',
   {
     num: value => Number(value || 0),
     dateOnly: value => String(value).slice(0, 10),
@@ -82,6 +82,8 @@ function renderedRows(summary, workEntries, leaveEntries = []) {
     allocateDailyWork: helpers.allocateDailyWork,
     capAdjustedDaily: helpers.capAdjustedDaily,
     capAdjustedDisplay: helpers.capAdjustedDisplay,
+    incompleteHoursDisplay: helpers.incompleteHoursDisplay,
+    easternDate: () => '2026-10-18',
     dailyWorked: dayEntries => dayEntries.reduce((sum, entry) => sum + Number(entry.hours_worked), 0),
     approvedLeaveHours: (date, type) => leaveEntries.filter(entry => entry.leave_date_iso === date && entry.status === 'approved' &&
       (type === 'other' ? !['holiday', 'vacation', 'sick', 'floating_holiday'].includes(entry.leave_type) : entry.leave_type === type))
@@ -117,6 +119,18 @@ const cappedWithLeave = summarizeTimecard({
 const leaveRows = renderedRows(cappedWithLeave, workWithLeave, sickLeave);
 assert(leaveRows[4].endsWith('<td><strong>8.00</strong></td><td><strong>4.00 Sick</strong></td>'));
 assert(leaveRows[7].endsWith('<td>44.00</td><td><strong>40.00</strong></td>'));
+const incompleteEntry = { entry_date_iso: dates[0], clock_in: '2026-10-05T08:00:00-04:00', clock_out: null, hours_worked: null };
+const completeEntry = { entry_date_iso: dates[0], clock_in: '2026-10-05T12:00:00-04:00', clock_out: '2026-10-05T15:00:00-04:00', hours_worked: 3 };
+const incompleteSummary = summarizeTimecard({ payPeriodStart: dates[0], entries: [incompleteEntry, completeEntry], asOf: '2026-10-18T12:00:00-04:00' });
+const incompleteRows = renderedRows(incompleteSummary, [incompleteEntry, completeEntry]);
+assert(incompleteRows[0].includes('Correction Required'));
+assert(incompleteRows[0].includes('3.00 · INCOMPLETE'), 'known completed hours remain visible');
+assert(!incompleteRows[0].includes('NaN'));
+assert.strictEqual(helpers.incompleteHoursDisplay(0, true), 'INCOMPLETE');
+const openOnlySummary = summarizeTimecard({ payPeriodStart: dates[0], entries: [incompleteEntry], asOf: '2026-10-18T12:00:00-04:00' });
+const openOnlyRow = renderedRows(openOnlySummary, [incompleteEntry])[0];
+assert(openOnlyRow.includes('<td>INCOMPLETE</td>'));
+assert(openOnlyRow.includes('<td><strong>INCOMPLETE</strong></td>'));
 
 const mixedEntries = [
   { entry_date_iso: dates[0], hours_worked: 44 },
@@ -164,6 +178,17 @@ assert.strictEqual(printCells(printRows[9])[4], '2.00'); // uncapped week retain
 assert.strictEqual(printCells(printRows[8]).at(-1), '40.00');
 assert.strictEqual(printCells(printRows[16]).at(-1), '50.00');
 assert.strictEqual(printCells(printRows[17]).at(-1), '90.00');
+const incompletePrint = printHelpers.renderEmployeeTable(1, [
+  { work_date_iso: dates[0], clock_in_raw: incompleteEntry.clock_in, clock_in: '8:00 AM', clock_out_raw: null, hours_worked: null },
+  { work_date_iso: dates[0], clock_in_raw: completeEntry.clock_in, clock_in: '12:00 PM', clock_out: '3:00 PM', clock_out_raw: completeEntry.clock_out, hours_worked: 3 },
+], [], incompleteSummary, dates[0]);
+assert(incompletePrint.includes('MISSING'));
+assert(incompletePrint.includes('Correction Required'));
+assert(incompletePrint.includes('3.00 · INCOMPLETE'));
+const openOnlyPrint = printHelpers.renderEmployeeTable(1, [
+  { work_date_iso: dates[0], clock_in_raw: incompleteEntry.clock_in, clock_in: '8:00 AM', clock_out_raw: null, hours_worked: null },
+], [], openOnlySummary, dates[0]);
+assert(openOnlyPrint.includes('<td>INCOMPLETE</td>'));
 
 // The single-punch overlay must keep an unresolved row visible even when a
 // correction is pending. A 24-hour-old punch on the fall DST day is still OPEN
@@ -194,13 +219,31 @@ const fallMarkup = overlayContext.punchCells('2026-11-01', [{
 }]);
 assert(fallMarkup.includes('OPEN'), 'same Eastern date must remain open despite elapsed hours');
 assert(fallMarkup.includes('PENDING'), 'pending correction remains visible');
-assert(!fallMarkup.includes('MISSING OUT'));
+assert(!fallMarkup.includes('MISSING'));
 const oldMarkup = overlayContext.punchCells('2026-10-31', [{
   id: 8, clock_in: '2026-10-31T08:00:00-04:00', clock_out: null,
 }]);
-assert(oldMarkup.includes('MISSING OUT'));
+assert(oldMarkup.includes('MISSING'));
 
+for (const page of ['employee.html', 'supervisor.html', 'payroll.html']) {
+  const source = fs.readFileSync(path.join(frontend, page), 'utf8');
+  assert(source.includes('Correction Required'), `${page} needs an entry notice`);
+  assert(source.includes('INCOMPLETE'), `${page} must show NULL hours explicitly`);
+  assert(source.includes('MISSING'), `${page} must show the missing clock-out`);
+}
+const payrollPage = fs.readFileSync(path.join(frontend, 'payroll.html'), 'utf8');
+assert(payrollPage.includes('csvValue(row.hours_worked == null ? "MISSING"'));
+assert(payrollPage.includes('csvValue(row.hours_worked == null ? "INCOMPLETE"'));
+const punchesSource = fs.readFileSync(path.join(frontend, 'punches.html'), 'utf8');
+const punchesDisplay = vm.runInNewContext(
+  punchesSource.slice(punchesSource.indexOf('function easternDate('), punchesSource.indexOf('async function load()')) + ';({historicalIncomplete})',
+);
+assert(punchesDisplay.historicalIncomplete({ clock_in: '2026-10-17T08:00:00-04:00', clock_out: null }));
+assert(!punchesDisplay.historicalIncomplete({ clock_in: new Date(), clock_out: null }));
+assert(punchesSource.includes("incomplete?'INCOMPLETE'"));
 const mobileSource = fs.readFileSync(path.join(frontend, 'mobile.html'), 'utf8');
+assert(mobileSource.includes('<h2>Correction Required</h2>'));
+assert(mobileSource.includes('Clock Out: MISSING. Hours: INCOMPLETE.'));
 const mobileEasternInput = vm.runInNewContext(
   mobileSource.slice(mobileSource.indexOf('function localDateTimeValue('), mobileSource.indexOf('function showCorrection(')) + ';localDateTimeValue',
 );
