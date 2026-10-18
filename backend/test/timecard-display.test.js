@@ -165,4 +165,46 @@ assert.strictEqual(printCells(printRows[8]).at(-1), '40.00');
 assert.strictEqual(printCells(printRows[16]).at(-1), '50.00');
 assert.strictEqual(printCells(printRows[17]).at(-1), '90.00');
 
+// The single-punch overlay must keep an unresolved row visible even when a
+// correction is pending. A 24-hour-old punch on the fall DST day is still OPEN
+// until that Eastern calendar day ends.
+const easternDate = vm.runInNewContext(
+  base.slice(base.indexOf('function easternDate('), base.indexOf('function localDateLabel(')) + ';easternDate',
+);
+assert.strictEqual(easternDate('2026-11-02T04:30:00Z'), '2026-11-01');
+class FallBackDate extends Date {
+  constructor(value) { super(value === undefined ? '2026-11-02T04:30:00Z' : value); }
+  static now() { return Date.parse('2026-11-02T04:30:00Z'); }
+}
+const overlaySource = fs.readFileSync(path.join(frontend, 'timecard-single-punch.js'), 'utf8');
+const overlayContext = {
+  Date: FallBackDate, easternDate, dateOnly: value => String(value).slice(0, 10),
+  currentData: { entries: [], change_requests: [
+    { id: 10, status: 'pending', time_entry_id: 7,
+      requested_clock_out: '2026-11-01T12:00:00-05:00' },
+    { id: 11, status: 'pending', time_entry_id: 8,
+      requested_clock_out: '2026-10-31T16:00:00-04:00' },
+  ] },
+  punchCells: () => '<td></td>'.repeat(4),
+  entryInDisplay: () => '12:05 AM', entryOutDisplay: () => '', esc: value => String(value),
+};
+vm.runInNewContext(overlaySource.slice(0, overlaySource.indexOf('  document.addEventListener(')) + '})();', overlayContext);
+const fallMarkup = overlayContext.punchCells('2026-11-01', [{
+  id: 7, clock_in: '2026-11-01T00:05:00-04:00', clock_out: null,
+}]);
+assert(fallMarkup.includes('OPEN'), 'same Eastern date must remain open despite elapsed hours');
+assert(fallMarkup.includes('PENDING'), 'pending correction remains visible');
+assert(!fallMarkup.includes('MISSING OUT'));
+const oldMarkup = overlayContext.punchCells('2026-10-31', [{
+  id: 8, clock_in: '2026-10-31T08:00:00-04:00', clock_out: null,
+}]);
+assert(oldMarkup.includes('MISSING OUT'));
+
+const mobileSource = fs.readFileSync(path.join(frontend, 'mobile.html'), 'utf8');
+const mobileEasternInput = vm.runInNewContext(
+  mobileSource.slice(mobileSource.indexOf('function localDateTimeValue('), mobileSource.indexOf('function showCorrection(')) + ';localDateTimeValue',
+);
+assert.strictEqual(mobileEasternInput('2026-10-19T00:15:00Z'), '2026-10-18T20:15');
+assert.strictEqual(mobileEasternInput('2026-11-01T04:05:00Z'), '2026-11-01T00:05');
+
 console.log('timecard display tests passed');

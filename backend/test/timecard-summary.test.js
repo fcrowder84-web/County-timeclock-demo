@@ -511,6 +511,13 @@ const pendingCorrection=summarizeTimecard({
 });
 assert.strictEqual(pendingCorrection.weeks[0].total_paid_hours,0);
 
+const fallBackOpen=summarizeTimecard({
+  payPeriodStart:'2026-10-26',asOf:new Date('2026-11-02T04:30:00Z'),
+  entries:[{entry_date_iso:'2026-11-01',clock_in:'2026-11-01T00:05:00-04:00',clock_out:null}],
+});
+assert(fallBackOpen.weeks[0].total_worked_hours>23,
+  'a fall DST workday remains open until the Eastern date changes, even after 23 elapsed hours');
+
 const easternWeekBoundary=summarizeTimecard({
   payPeriodStart:'2026-10-05',weeklyHoursCap:40,
   forcedLunchEnabled:true,forcedLunchMinutes:60,

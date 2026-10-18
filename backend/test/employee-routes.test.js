@@ -56,6 +56,28 @@ function compact(sql) { return String(sql).replace(/\s+/g, ' ').trim(); }
     ],
   );
 
+  const signingQueries=[];
+  const signingClient={
+    async query(sql){
+      const text=compact(sql);signingQueries.push(text);
+      if(['BEGIN','COMMIT','ROLLBACK'].includes(text))return {rows:[]};
+      if(text.startsWith('SELECT id FROM employees WHERE id=$1 FOR UPDATE'))return {rows:[{id:7}]};
+      if(text.startsWith('SELECT id FROM time_entries'))return {rows:[]};
+      if(text.includes('FROM pay_period_approvals'))return {rows:[]};
+      if(text.startsWith('INSERT INTO pay_period_approvals'))return {rows:[{id:1}]};
+      throw new Error('unexpected signing SQL: '+text);
+    },release(){},
+  };
+  const signingRouter=createEmployeeRouter({requireUser:noop,requireAnyPermission:allow,
+    canAccessEmployee:async()=>true,getRequestedPayPeriod:async()=>period,audit:async()=>{},
+    pool:{connect:async()=>signingClient}});
+  let signingResponse=makeRes();
+  await handlerFor(signingRouter,'post','/submit-timecard')({user:{id:7},body:{}},signingResponse);
+  assert.strictEqual(signingResponse.statusCode,200);
+  assert(signingQueries.findIndex(q=>q.startsWith('SELECT id FROM employees WHERE id=$1 FOR UPDATE'))
+    <signingQueries.findIndex(q=>q.startsWith('SELECT id FROM time_entries')),
+  'signing must lock the employee before checking for an open punch');
+
   let res = makeRes();
   await handlerFor(router, 'post', '/employee/edit-time-entry')(
     { user: { id: 7 }, body: {} },
@@ -178,6 +200,7 @@ function compact(sql) { return String(sql).replace(/\s+/g, ' ').trim(); }
         const text = compact(sql);
         txQueries.push(text);
         if (text === 'BEGIN' || text === 'COMMIT' || text === 'ROLLBACK') return { rows: [] };
+        if (text.startsWith('SELECT id FROM employees WHERE id=$1 FOR UPDATE')) return { rows: [{id:7}] };
         if (text.startsWith('SELECT id FROM time_entries')) return { rows: openRows };
         if (text.startsWith('SELECT * FROM pay_period_approvals')) return { rows: approvalRows };
         if (text.startsWith('UPDATE pay_period_approvals')) return { rows: [] };

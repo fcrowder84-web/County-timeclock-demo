@@ -7,6 +7,9 @@ const {createEmployeeRouter}=require('../routes/employee');
 const {createSupervisorRouter}=require('../routes/supervisor');
 
 const migration=fs.readFileSync(path.resolve(__dirname,'../../migrations/021_calendar_day_punch_state.sql'),'utf8');
+assert.match(migration,/^BEGIN;/);
+assert.match(migration,/more than one unresolved time entry exists/);
+assert.match(migration,/overlapping time entries must be corrected first/);
 assert.match(migration,/ON time_entries\(employee_id, \(clock_in::date\)\)/);
 assert.match(migration,/WHERE deleted_at IS NULL\s+AND clock_out IS NULL;/);
 assert.match(migration,/COALESCE\(clock_out, clock_in::date \+ INTERVAL '1 day'\)/);

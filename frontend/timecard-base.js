@@ -13,6 +13,11 @@ function esc(v){return SafeHtml.escape(v)}
 function num(v){const n=Number(v||0);return Number.isFinite(n)?n:0}
 function fmt(v){return num(v)?num(v).toFixed(2):""}
 function dateOnly(v){return v?String(v).slice(0,10):""}
+function easternDate(v){
+  const parts=new Intl.DateTimeFormat("en-US",{timeZone:"America/New_York",year:"numeric",month:"2-digit",day:"2-digit"}).formatToParts(new Date(v));
+  const part=type=>parts.find(item=>item.type===type).value;
+  return `${part("year")}-${part("month")}-${part("day")}`
+}
 function localDateLabel(v){if(!v)return"";return new Date(dateOnly(v)+"T12:00:00").toLocaleDateString()}
 function localDateTime(v){if(!v)return"";const d=new Date(v);return Number.isNaN(d.getTime())?String(v):d.toLocaleString()}
 function addDays(s,n){const d=new Date(s+"T12:00:00Z");d.setUTCDate(d.getUTCDate()+n);return d.toISOString().slice(0,10)}
@@ -124,8 +129,7 @@ function punchCells(day,entries){
     punches.push({label:entryInDisplay(e),entry:e,kind:"in",cls:editCls});
     if(e.clock_out)punches.push({label:entryOutDisplay(e),entry:e,kind:"out",cls:editCls});
     else{
-      const today=new Intl.DateTimeFormat("en-CA",{timeZone:"America/New_York",year:"numeric",month:"2-digit",day:"2-digit"}).format(new Date());
-      const isOld=day<today;
+      const isOld=day<easternDate(new Date());
       punches.push({label:isOld?"MISSING OUT":"OPEN",entry:e,kind:"out",cls:isOld?"missing":"open"});
     }
   });

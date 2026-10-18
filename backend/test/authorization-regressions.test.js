@@ -117,6 +117,7 @@ function compact(sql){return String(sql).replace(/\s+/g,' ').trim();}
       async query(sql){
         const q=compact(sql);
         if(q==='BEGIN'||q==='ROLLBACK') return {rows:[]};
+        if(q.startsWith('SELECT id FROM employees WHERE id=$1 FOR UPDATE')) return {rows:[{id:8}]};
         if(q.includes('FROM pay_period_approvals')) return {rows:[{
           id:11,employee_id:8,status:'payroll_finalized',
           payroll_finalized_at:'2026-09-21T09:00:00Z',

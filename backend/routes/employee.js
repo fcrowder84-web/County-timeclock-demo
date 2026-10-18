@@ -43,6 +43,8 @@ function createEmployeeRouter({ requireUser, requireAnyPermission, pool, audit, 
     try {
       const period = await getRequestedPayPeriod(req);
       await client.query('BEGIN');
+      // Serialize signing with a normal clock-in for the same employee.
+      await client.query('SELECT id FROM employees WHERE id=$1 FOR UPDATE', [req.user.id]);
 
       const openPunches = await client.query(
         `SELECT id

@@ -64,26 +64,6 @@ function createSupervisorRouter({
              ppa.status,
              ppa.employee_signed_at,
              ppa.supervisor_approved_at,
-             ROUND(
-               COALESCE((
-                 SELECT SUM(
-                   FLOOR(daily.day_minutes / 15.0) * 15
-                   + CASE WHEN MOD(daily.day_minutes, 15) > 5 THEN 15 ELSE 0 END
-                 ) / 60.0
-                 FROM (
-                   SELECT ROUND(SUM(
-                     EXTRACT(EPOCH FROM (COALESCE(day_entry.clock_out,NOW()) - day_entry.clock_in)) / 60
-                   ))::int AS day_minutes
-                   FROM time_entries day_entry
-                   WHERE day_entry.employee_id=e.id
-                     AND day_entry.deleted_at IS NULL
-                     AND day_entry.clock_in >= $1::date
-                     AND day_entry.clock_in < ($2::date + INTERVAL '1 day')
-                   GROUP BY day_entry.clock_in::date
-                 ) daily
-               ),0)::numeric,
-               2
-             ) AS total_hours,
              COALESCE((
                SELECT COUNT(*)
                FROM leave_entries pending_leave
@@ -222,6 +202,7 @@ function createSupervisorRouter({
               weeklyHoursCap: row.weekly_hours_cap,
               weeklyHoursCapHistory: weeklyCapHistory.get(id) || [],
             });
+            row.total_hours = summary.period.gross_worked_hours;
             row.payable_hours = summary.period.total_paid_hours;
           }
         }

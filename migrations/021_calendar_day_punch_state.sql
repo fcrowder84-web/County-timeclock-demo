@@ -4,6 +4,29 @@ BEGIN;
 -- An unresolved punch from a prior date remains an incomplete payroll item,
 -- but it must not reserve the employee's active punch state forever.
 
+-- Check existing production rows before changing either protection. The
+-- transaction leaves the old index and exclusion constraint intact on failure.
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM time_entries
+    WHERE deleted_at IS NULL AND clock_out IS NULL
+    GROUP BY employee_id,clock_in::date HAVING COUNT(*) > 1
+  ) THEN
+    RAISE EXCEPTION 'Cannot apply calendar-day punch state: more than one unresolved time entry exists for an employee on one date.';
+  END IF;
+
+  IF EXISTS (
+    SELECT 1 FROM time_entries a JOIN time_entries b
+      ON a.employee_id=b.employee_id AND a.id<b.id
+     AND a.deleted_at IS NULL AND b.deleted_at IS NULL
+     AND tsrange(a.clock_in,COALESCE(a.clock_out,a.clock_in::date + INTERVAL '1 day'),'[)')
+         && tsrange(b.clock_in,COALESCE(b.clock_out,b.clock_in::date + INTERVAL '1 day'),'[)')
+  ) THEN
+    RAISE EXCEPTION 'Cannot apply calendar-day punch state: overlapping time entries must be corrected first.';
+  END IF;
+END $$;
+
 DROP INDEX IF EXISTS idx_time_entries_one_active_open_per_employee;
 DROP INDEX IF EXISTS idx_time_entries_one_active_open_per_employee_day;
 

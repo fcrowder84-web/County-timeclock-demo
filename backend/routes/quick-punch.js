@@ -12,17 +12,17 @@ function createQuickPunchRouter({ requireUser, requireAnyPermission, pool, audit
   const router = express.Router();
   const canPunch = requireAnyPermission('clock_in_out');
 
-  async function punchCooldown(employeeId, db = pool) {
+  async function punchCooldown(employeeId, db = pool, at = null) {
     const result = await db.query(
       `SELECT clock_in,clock_out,
               GREATEST(clock_in,COALESCE(clock_out,clock_in)) AS last_punch_at,
-              CASE WHEN clock_in::date=(NOW() AT TIME ZONE 'America/New_York')::date
+              CASE WHEN clock_in::date=(COALESCE($3::timestamptz,statement_timestamp()) AT TIME ZONE 'America/New_York')::date
                 THEN GREATEST(
                   0,
                   CEIL(EXTRACT(EPOCH FROM (
                     GREATEST(clock_in,COALESCE(clock_out,clock_in))
                     + ($2::int * INTERVAL '1 second')
-                    - NOW()
+                    - COALESCE($3::timestamptz,statement_timestamp())
                   )))
                 )::int
                 ELSE 0 END AS remaining_seconds,
@@ -33,7 +33,7 @@ function createQuickPunchRouter({ requireUser, requireAnyPermission, pool, audit
           AND deleted_at IS NULL
         ORDER BY GREATEST(clock_in,COALESCE(clock_out,clock_in)) DESC
         LIMIT 1`,
-      [employeeId,PUNCH_COOLDOWN_SECONDS],
+      [employeeId,PUNCH_COOLDOWN_SECONDS,at],
     );
     const latest=result.rows[0]||null;
     const remaining=Number(latest?.remaining_seconds||0);
@@ -61,15 +61,15 @@ function createQuickPunchRouter({ requireUser, requireAnyPermission, pool, audit
     });
   }
 
-  async function currentTimecardLock(employeeId, db = pool) {
+  async function currentTimecardLock(employeeId, db = pool, at = null) {
     const result = await db.query(
       `SELECT id,status,employee_signed_at,supervisor_approved_at,payroll_finalized_at
          FROM pay_period_approvals
         WHERE employee_id=$1
-          AND (NOW() AT TIME ZONE 'America/New_York')::date BETWEEN pay_period_start AND pay_period_end
+          AND (COALESCE($2::timestamptz,statement_timestamp()) AT TIME ZONE 'America/New_York')::date BETWEEN pay_period_start AND pay_period_end
         ORDER BY id DESC
         LIMIT 1`,
-      [employeeId],
+      [employeeId,at],
     );
     const approval = result.rows[0] || null;
     return {
@@ -155,6 +155,8 @@ function createQuickPunchRouter({ requireUser, requireAnyPermission, pool, audit
 
   router.get('/quick-status', requireUser, canPunch, async (req, res) => {
     try {
+      // All four reads must classify the same Eastern workday at midnight.
+      const statusAt = (await pool.query('SELECT clock_timestamp() AS status_at')).rows[0].status_at;
       const [openResult, historicalResult, cooldown, lock] = await Promise.all([
         pool.query(
           `SELECT id,clock_in,pending_clock_out
@@ -162,10 +164,10 @@ function createQuickPunchRouter({ requireUser, requireAnyPermission, pool, audit
             WHERE employee_id=$1
               AND deleted_at IS NULL
               AND clock_out IS NULL
-              AND clock_in::date=(NOW() AT TIME ZONE 'America/New_York')::date
+              AND clock_in::date=($2::timestamptz AT TIME ZONE 'America/New_York')::date
             ORDER BY clock_in DESC
             LIMIT 1`,
-          [req.user.id],
+          [req.user.id,statusAt],
         ),
         pool.query(
           `SELECT id,clock_in,pending_clock_out,COUNT(*) OVER()::int AS total_incomplete
@@ -173,13 +175,13 @@ function createQuickPunchRouter({ requireUser, requireAnyPermission, pool, audit
             WHERE employee_id=$1
               AND deleted_at IS NULL
               AND clock_out IS NULL
-              AND clock_in::date<(NOW() AT TIME ZONE 'America/New_York')::date
+              AND clock_in::date<($2::timestamptz AT TIME ZONE 'America/New_York')::date
             ORDER BY (pending_clock_out IS NOT NULL),clock_in DESC
             LIMIT 30`,
-          [req.user.id],
+          [req.user.id,statusAt],
         ),
-        punchCooldown(req.user.id),
-        currentTimecardLock(req.user.id),
+        punchCooldown(req.user.id,pool,statusAt),
+        currentTimecardLock(req.user.id,pool,statusAt),
       ]);
 
       const openEntry = openResult.rows[0] || null;
@@ -394,6 +396,7 @@ function createQuickPunchRouter({ requireUser, requireAnyPermission, pool, audit
     } catch (err) {
       if (client) await client.query('ROLLBACK').catch(() => {});
       if (err.code === '23P01') return res.status(409).json({ error: 'The remaining punch sequence would overlap another time entry.' });
+      if (err.code === '23505') return res.status(409).json({ error: 'The remaining punch sequence would create a second open entry on this date.' });
       console.error(err);
       return res.status(500).json({ error: 'Delete punch error' });
     } finally {
@@ -402,6 +405,7 @@ function createQuickPunchRouter({ requireUser, requireAnyPermission, pool, audit
   });
 
   router.post('/clock-in', requireUser, canPunch, async (req, res) => {
+    let client = null;
     try {
       const lock = await currentTimecardLock(req.user.id);
       if (lock.locked) {
@@ -439,18 +443,62 @@ function createQuickPunchRouter({ requireUser, requireAnyPermission, pool, audit
       const locationGate = await requirePunchLocation(req, res, 'clock_in');
       if (!locationGate) return;
 
-      const result = await pool.query(
-        `INSERT INTO time_entries(employee_id,clock_in,status) VALUES($1,NOW(),'open') RETURNING *`,
-        [req.user.id],
+      client = await pool.connect();
+      await client.query('BEGIN');
+      // Signing routes take the same employee row lock before checking for
+      // open punches. Repeat state checks after GPS while holding that lock.
+      await client.query('SELECT id FROM employees WHERE id=$1 FOR UPDATE', [req.user.id]);
+      const punchAt = (await client.query('SELECT clock_timestamp() AS punch_at')).rows[0].punch_at;
+      const finalLock = await currentTimecardLock(req.user.id, client, punchAt);
+      if (finalLock.locked) {
+        await client.query('ROLLBACK');
+        return res.status(409).json({
+          error: 'This timecard has been signed and is locked. Your supervisor must return it before you can punch again.',
+          code: 'TIMECARD_LOCKED',
+          timecard_status: finalLock.approval?.status || null,
+          employee_signed_at: finalLock.approval?.employee_signed_at || null,
+        });
+      }
+      const finalOpen = await client.query(
+        `SELECT id,clock_in,pending_clock_out FROM time_entries
+          WHERE employee_id=$1 AND deleted_at IS NULL AND clock_out IS NULL
+            AND clock_in::date=($2::timestamptz AT TIME ZONE 'America/New_York')::date
+          ORDER BY clock_in DESC LIMIT 1`,
+        [req.user.id,punchAt],
       );
+      if (finalOpen.rows.length) {
+        await client.query('ROLLBACK');
+        const open = finalOpen.rows[0];
+        if (open.pending_clock_out) return res.status(409).json({
+          error: 'Today has a pending clock-out correction. Wait for review before adding another punch.',
+          code: 'PENDING_CORRECTION',time_entry_id: open.id,clock_in: open.clock_in,
+        });
+        return res.status(400).json({ error: 'You are already clocked in' });
+      }
+      const finalCooldown = await punchCooldown(req.user.id, client, punchAt);
+      if (finalCooldown.active) {
+        await client.query('ROLLBACK');
+        return cooldownResponse(res, finalCooldown);
+      }
+
+      const result = await client.query(
+        `INSERT INTO time_entries(employee_id,clock_in,status) VALUES($1,$2::timestamptz,'open') RETURNING *`,
+        [req.user.id,punchAt],
+      );
+      await client.query('COMMIT');
+      client.release();
+      client = null;
       const metadata = await captureMetadata(req, result.rows[0].id, 'clock_in');
       await audit(req.user.id, 'clock_in', 'time_entry', result.rows[0].id, metadata);
       return res.json({ message: `${req.user.first_name} clocked in successfully`, entry: result.rows[0], metadata_recorded: Boolean(metadata) });
     } catch (err) {
+      if (client) await client.query('ROLLBACK').catch(() => {});
       if (err.code === '23P01') return res.status(409).json({ error: 'This punch would overlap another time entry.' });
       if (err.code === '23505') return res.status(400).json({ error: 'You are already clocked in' });
       console.error(err);
       return res.status(500).json({ error: 'Clock-in error' });
+    } finally {
+      if (client) client.release();
     }
   });
 

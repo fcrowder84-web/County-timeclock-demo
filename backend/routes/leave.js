@@ -778,6 +778,9 @@ function createLeaveRouter({ requireUser, pool, audit, canAccessEmployee, getReq
       client=await pool.connect();
       await client.query('BEGIN');
 
+      // Serialize on-behalf signing with a normal clock-in for this employee.
+      await client.query('SELECT id FROM employees WHERE id=$1 FOR UPDATE', [employeeId]);
+
       const approvalResult=await client.query(
         `SELECT *
            FROM pay_period_approvals
