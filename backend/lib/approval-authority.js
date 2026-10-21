@@ -25,8 +25,14 @@ async function getApprovalAuthority(pool,user,employeeId){
   );
   const isCountywideRole=role==='payroll'||role==='timeclock_manager';
 
-  const isDepartmentHead=role==='department_head'
-    && Number(user?.department_id)===Number(departmentId);
+  // Organizational Department Head is an independent relationship. It must
+  // remain effective even when the employee has a higher application role.
+  const head=await pool.query(
+    `SELECT 1 FROM department_heads
+      WHERE employee_id=$1 AND department_id=$2 AND active=TRUE LIMIT 1`,
+    [user.id,departmentId],
+  );
+  const isDepartmentHead=head.rows.length>0;
 
   let isAssignedSupervisor=false;
   if(role==='supervisor'&&!isSelf){
