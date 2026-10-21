@@ -23,7 +23,13 @@ async function canEditPunch(db,user,employeeId,action='edit'){
                WHERE sea.employee_id=target.id
                  AND sea.supervisor_employee_id=$2
                  AND sea.active=TRUE
-            ) AS is_assigned
+            ) AS is_assigned,
+            EXISTS (
+              SELECT 1 FROM department_heads dh
+               WHERE dh.employee_id=$2
+                 AND dh.department_id=target.department_id
+                 AND dh.active=TRUE
+            ) AS is_department_head
        FROM employees target
       WHERE target.id=$1
       LIMIT 1`,
@@ -38,9 +44,9 @@ async function canEditPunch(db,user,employeeId,action='edit'){
 
   if(userHasPermission(user,'app_admin')) return sameDepartment;
 
-  // Department Head has a hard department boundary. A retained
-  // supervisor assignment outside that department must not widen scope.
-  if(role==='department_head') return sameDepartment;
+  // Organizational Department Head is relationship-based and additive to the
+  // application role. Retained assignments outside the department never widen it.
+  if(target.is_department_head) return sameDepartment;
 
   // Employee is always self-only. Supervisor is assigned-employees-only and
   // never implicitly gets self edit authority.
