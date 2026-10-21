@@ -2,7 +2,24 @@
 
 const { userHasPermission } = require('./permissions');
 
-function canManageTeamStructureScope(user, departmentId = null) {
+async function isOrganizationalDepartmentHead(db,user,departmentId=null){
+  if(!user?.id) return false;
+  const params=[user.id];
+  let departmentFilter='';
+  if(departmentId!=null){
+    params.push(departmentId);
+    departmentFilter=' AND dh.department_id=$2';
+  }
+  const result=await db.query(
+    `SELECT 1 FROM department_heads dh
+      WHERE dh.employee_id=$1 AND dh.active=TRUE${departmentFilter}
+      LIMIT 1`,
+    params,
+  );
+  return result.rows.length>0;
+}
+
+async function canManageTeamStructureScope(db,user,departmentId = null) {
   const role=String(user?.role||'').toLowerCase();
   const canManage=
     userHasPermission(user,'manage_supervisor_assignments')
@@ -16,12 +33,7 @@ function canManageTeamStructureScope(user, departmentId = null) {
   }
 
   if(role==='timeclock_manager'||role==='payroll') return true;
-  if(role==='department_head'){
-    if(departmentId==null) return Number(user.department_id)>0;
-    return Number(user.department_id)>0&&Number(user.department_id)===Number(departmentId);
-  }
-
-  return false;
+  return isOrganizationalDepartmentHead(db,user,departmentId);
 }
 
-module.exports={canManageTeamStructureScope};
+module.exports={canManageTeamStructureScope,isOrganizationalDepartmentHead};
