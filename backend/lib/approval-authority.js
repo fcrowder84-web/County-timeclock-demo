@@ -25,14 +25,22 @@ async function getApprovalAuthority(pool,user,employeeId){
   );
   const isCountywideRole=role==='payroll'||role==='timeclock_manager';
 
-  // Organizational Department Head is an independent relationship. It must
-  // remain effective even when the employee has a higher application role.
-  const head=await pool.query(
-    `SELECT 1 FROM department_heads
-      WHERE employee_id=$1 AND department_id=$2 AND active=TRUE LIMIT 1`,
-    [user.id,departmentId],
+  // Prefer the organizational relationship hydrated onto the request user.
+  // Preserve the legacy role fallback during migration. If neither is known,
+  // query the relationship so higher application roles can still also be an
+  // organizational Department Head without changing their application role.
+  const sameDepartment=Number(user?.department_id)>0&&Number(user.department_id)===Number(departmentId);
+  let isDepartmentHead=sameDepartment&&(
+    Boolean(user?.is_department_head)||role==='department_head'
   );
-  const isDepartmentHead=head.rows.length>0;
+  if(!isDepartmentHead&&user?.id){
+    const head=await pool.query(
+      `SELECT 1 FROM department_heads
+        WHERE employee_id=$1 AND department_id=$2 AND active=TRUE LIMIT 1`,
+      [user.id,departmentId],
+    );
+    isDepartmentHead=head.rows.length>0;
+  }
 
   let isAssignedSupervisor=false;
   if(role==='supervisor'&&!isSelf){
