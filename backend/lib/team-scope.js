@@ -19,7 +19,7 @@ async function isOrganizationalDepartmentHead(db,user,departmentId=null){
   return result.rows.length>0;
 }
 
-async function canManageTeamStructureScope(db,user,departmentId = null) {
+function canManageTeamStructureScope(user,departmentId = null) {
   const role=String(user?.role||'').toLowerCase();
   const canManage=
     userHasPermission(user,'manage_supervisor_assignments')
@@ -33,7 +33,15 @@ async function canManageTeamStructureScope(db,user,departmentId = null) {
   }
 
   if(role==='timeclock_manager'||role==='payroll') return true;
-  return isOrganizationalDepartmentHead(db,user,departmentId);
+
+  // Preserve the existing synchronous authorization contract. Organizational
+  // Department Head membership is hydrated onto the request user separately.
+  // Keep the legacy role fallback during migration so existing heads do not
+  // unexpectedly lose access before all directory records have synchronized.
+  const organizationalHead=Boolean(user?.is_department_head)||role==='department_head';
+  if(!organizationalHead) return false;
+  if(departmentId==null) return Number(user.department_id)>0;
+  return Number(user.department_id)>0&&Number(user.department_id)===Number(departmentId);
 }
 
 module.exports={canManageTeamStructureScope,isOrganizationalDepartmentHead};
