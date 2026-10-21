@@ -25,7 +25,9 @@ new="""async function isDepartmentHead(user,departmentId=null){
 }"""
 once(old,new,'isDepartmentHead')
 
-once('  return canManageTeamStructureScope(user,departmentId);','  return canManageTeamStructureScope(pool,user,departmentId);','team structure scope call')
+# canManageTeamStructureScope deliberately remains synchronous. Request-user
+# hydration/legacy role fallback handles the scope helper; DB relationship checks
+# are used by isDepartmentHead where asynchronous authorization is already valid.
 once("  if(role==='department_head') return sameDepartment;","  if(await isDepartmentHead(user,targetDepartment)) return true;",'employee access head check')
 
 marker="""function resolveApplicationRole(explicitRole,permissions){
@@ -98,7 +100,6 @@ once(old,new,'directory removal relationship')
 
 p.write_text(s)
 
-# Correct the source-of-truth wording anywhere the old Access Matrix wording remains.
 for name in ['frontend/department-structure.html','backend/routes/team-structure.js']:
     q=Path(name)
     if q.exists():
