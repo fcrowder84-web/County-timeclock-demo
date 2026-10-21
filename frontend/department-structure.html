@@ -54,7 +54,7 @@ function renderStructure(){
         const supervisors=people.filter(person=>supervisorIds.has(Number(person.id)));
         const unassigned=people.filter(person=>!assignmentsByEmployee.has(Number(person.id))&&Number(department.department_head_id)!==Number(person.id));
 
-        const headControl=`<p>${department.department_head_first_name?esc(`${department.department_head_first_name} ${department.department_head_last_name}`):"Not assigned"}</p><p class="muted">Department Head is assigned in Employee Portal → Access Matrix.</p>`;
+        const headControl=`<p>${department.department_head_first_name?esc(`${department.department_head_first_name} ${department.department_head_last_name}`):"Not assigned"}</p><p class="muted">Department Head is assigned in Employee Portal → Departments.</p>`;
 
         const assignmentControl=canAssign
             ? `<label><strong>Assign Employee to Supervisor</strong></label><select id="teamEmployee-${Number(department.id)}"><option value="">Select employee</option>${people.map(person=>`<option value="${Number(person.id)}">${esc(employeeName(person))}</option>`).join("")}</select><select id="teamSupervisor-${Number(department.id)}"><option value="">Select supervisor</option>${people.map(person=>`<option value="${Number(person.id)}">${esc(employeeName(person))}</option>`).join("")}</select><button class="primary" onclick="assignEmployee(${Number(department.id)})">Assign</button>`

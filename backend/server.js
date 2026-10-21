@@ -29,6 +29,8 @@ const { createSettingsRouter } = require("./routes/settings");
 const { fetchPortalAuthorization } = require("./lib/portal-authorization");
 const { canManageTeamStructureScope } = require("./lib/team-scope");
 
+const { syncOrganizationalDepartmentHead } = require("./lib/department-head-sync");
+
 const app = express();
 app.use(express.json({ limit: "1mb" }));
 if (!process.env.PGPASSWORD) throw new Error("PGPASSWORD is required");
@@ -44,7 +46,10 @@ async function getCurrentPayPeriod() { return getPayPeriod(); }
 async function getRequestedPayPeriod(req) { return getPayPeriod(req.query?.period_start || req.body?.period_start || null); }
 async function getUserByIdLocal(id) {
   const result = await pool.query(
-    `SELECT e.*, d.name AS department_name
+    `SELECT e.*, d.name AS department_name,
+            EXISTS (SELECT 1 FROM department_heads dh
+              WHERE dh.employee_id=e.id AND dh.department_id=e.department_id
+                AND dh.active=TRUE AND e.active=TRUE) AS is_department_head
        FROM employees e
        LEFT JOIN departments d ON d.id=e.department_id
       WHERE e.id=$1`,
@@ -100,6 +105,8 @@ async function refreshPortalAuthorization(user) {
     permissions: current.timeclock_access ? current.permissions : [],
     timeclock_role: current.timeclock_access ? current.timeclock_role : 'employee',
     app_admin_scope: current.timeclock_access ? current.app_admin_scope : 'own',
+    ...(Object.prototype.hasOwnProperty.call(current,'is_department_head')
+      ? {is_department_head:current.is_active && current.timeclock_access ? current.is_department_head : false} : {}),
     ...(Object.prototype.hasOwnProperty.call(current,'weekly_hours_cap') ? {weekly_hours_cap:current.weekly_hours_cap} : {}),
     ...(Object.prototype.hasOwnProperty.call(current,'weekly_hours_cap_target_period') ? {weekly_hours_cap_target_period:current.weekly_hours_cap_target_period} : {}),
     ...(Object.prototype.hasOwnProperty.call(current,'weekly_hours_cap_changed_at') ? {weekly_hours_cap_changed_at:current.weekly_hours_cap_changed_at} : {}),
@@ -190,7 +197,7 @@ function requirePayroll(req,res,next){if(userHasAnyPermission(req.user,PERMISSIO
 async function isSameDepartment(user,employeeId){const result=await pool.query(`SELECT 1 FROM employees target WHERE target.id=$1 AND target.department_id=$2 LIMIT 1`,[employeeId,user.department_id]);return result.rows.length>0;}
 async function isDepartmentHead(user,departmentId=null){
   const role=String(user?.role||'').toLowerCase();
-  return role==='department_head'
+  return (role==='department_head'||user?.is_department_head===true)
     && (!departmentId||Number(user.department_id)===Number(departmentId));
 }
 async function isAssignedEmployee(user,employeeId){const result=await pool.query(`SELECT 1 FROM supervisor_employee_assignments sea WHERE sea.employee_id=$1 AND sea.supervisor_employee_id=$2 AND sea.active=TRUE LIMIT 1`,[employeeId,user.id]);return result.rows.length>0;}
@@ -250,7 +257,7 @@ async function canAccessEmployee(user,employeeId,actionPermissions=[]){
   // Department-scoped App Admin and Department Head have hard department
   // boundaries. Retained supervisor assignments must never widen that scope.
   if(userHasPermission(user,'app_admin')) return sameDepartment;
-  if(role==='department_head') return sameDepartment;
+  if(role==='department_head'||user?.is_department_head===true) return sameDepartment;
 
   // Employee is always self-only. Supervisor is assigned-employees-only.
   if(role==='employee') return false;
@@ -310,6 +317,9 @@ async function syncPortalUser(payload){
       }
       await recordWeeklyCapChange(client,{employeeId:user.id,previousCap:null,weeklyHoursCap:user.weekly_hours_cap,source:'portal-auth-create',targetPeriod:payload.weekly_hours_cap_target_period||'auto',changedAt:payload.weekly_hours_cap_changed_at||null,force:true});
     }
+    if(Object.prototype.hasOwnProperty.call(payload,'is_department_head')){
+      await syncOrganizationalDepartmentHead(client,user.id,departmentId,payload.is_department_head);
+    }
     await client.query('COMMIT');
     return {user,permissions,appAdminScope};
   }catch(err){
@@ -342,6 +352,9 @@ async function upsertDirectoryEmployee(client,item){
     const capFresh=capPresent&&portalCapSnapshotIsFresh(item.weekly_hours_cap_changed_at??null,existing.rows[0].portal_weekly_hours_cap_changed_at);
     const updated=await client.query(`UPDATE employees SET portal_user_id=$1,employee_number=COALESCE($2,employee_number),first_name=$3,last_name=$4,email=$5,department=$6,department_id=$7,portal_department_id=$8,role=$9,active=TRUE,is_active=TRUE,must_change_pin=FALSE,portal_permissions=$10::jsonb,app_admin_scope=$11,weekly_hours_cap=CASE WHEN $12::boolean THEN $13::numeric ELSE weekly_hours_cap END,auth_source='portal',last_portal_sync_at=NOW(),access_removed_at=NULL,directory_sync_state='active',portal_weekly_hours_cap_changed_at=CASE WHEN $15::boolean THEN $16::timestamptz ELSE portal_weekly_hours_cap_changed_at END WHERE id=$14 RETURNING id`,[item.portal_user_id,item.employee_number?String(item.employee_number):null,item.first_name,item.last_name,item.email||null,departmentName,departmentId,item.portal_department_id||null,role,JSON.stringify(permissions),appAdminScope,capFresh,capFresh?item.weekly_hours_cap:null,existing.rows[0].id,capFresh&&item.weekly_hours_cap_changed_at!=null,item.weekly_hours_cap_changed_at??null]);
     if(capFresh) await recordWeeklyCapChange(client,{employeeId:updated.rows[0].id,previousCap:existing.rows[0].weekly_hours_cap,weeklyHoursCap:item.weekly_hours_cap,source:'portal-directory-sync',targetPeriod:item.weekly_hours_cap_target_period||'auto',changedAt:item.weekly_hours_cap_changed_at||null});
+    if(Object.prototype.hasOwnProperty.call(item,'is_department_head')){
+      await syncOrganizationalDepartmentHead(client,updated.rows[0].id,departmentId,item.is_department_head);
+    }
     return {id:updated.rows[0].id,activated:!wasActive};
   }
   const inserted=await client.query(`INSERT INTO employees(portal_user_id,employee_number,first_name,last_name,email,role,is_active,pin,department,active,department_id,must_change_pin,portal_department_id,portal_permissions,app_admin_scope,weekly_hours_cap,auth_source,last_portal_sync_at,access_removed_at,directory_sync_state,portal_weekly_hours_cap_changed_at) VALUES($1,$2,$3,$4,$5,$6,TRUE,NULL,$7,TRUE,$8,FALSE,$9,$10::jsonb,$11,$12,'portal',NOW(),NULL,'active',$13::timestamptz) RETURNING id`,[item.portal_user_id,item.employee_number?String(item.employee_number):null,item.first_name,item.last_name,item.email||null,role,departmentName,departmentId,item.portal_department_id||null,JSON.stringify(permissions),appAdminScope,item.weekly_hours_cap??null,item.weekly_hours_cap_changed_at??null]);
@@ -349,9 +362,12 @@ async function upsertDirectoryEmployee(client,item){
     await recordWeeklyCapChange(client,{employeeId:inserted.rows[0].id,previousCap:null,weeklyHoursCap:item.weekly_hours_cap_previous??null,source:'portal-directory-create-prior',targetPeriod:'current',changedAt:item.weekly_hours_cap_changed_at,force:true});
   }
   await recordWeeklyCapChange(client,{employeeId:inserted.rows[0].id,previousCap:null,weeklyHoursCap:item.weekly_hours_cap??null,source:'portal-directory-create',targetPeriod:item.weekly_hours_cap_target_period||'auto',changedAt:item.weekly_hours_cap_changed_at||null,force:true});
+  if(Object.prototype.hasOwnProperty.call(item,'is_department_head')){
+    await syncOrganizationalDepartmentHead(client,inserted.rows[0].id,departmentId,item.is_department_head);
+  }
   return {id:inserted.rows[0].id,activated:true};
 }
-async function syncPortalDirectory(trigger="scheduled"){if(portalSyncRunning)return{skipped:true,reason:"sync already running",lastPortalSync};if(!PORTAL_DIRECTORY_URL||!PORTAL_DIRECTORY_API_KEY)throw new Error("Portal directory sync is not configured");portalSyncRunning=true;let logId=null;let client=null;try{const log=await pool.query(`INSERT INTO portal_directory_sync_log(status) VALUES('running') RETURNING id`);logId=log.rows[0].id;const response=await fetch(PORTAL_DIRECTORY_URL,{headers:{"x-internal-api-key":PORTAL_DIRECTORY_API_KEY,accept:"application/json"},signal:AbortSignal.timeout(15000)});if(!response.ok)throw new Error(`Portal directory returned HTTP ${response.status}`);const body=await response.json();if(!body||!Array.isArray(body.employees))throw new Error("Portal directory response is missing the employees array; refusing destructive sync");const employees=body.employees;const ids=new Set();for(const item of employees){if(!item||!item.portal_user_id||!item.first_name||!item.last_name)throw new Error("Portal directory contains an incomplete employee record; refusing destructive sync");const id=String(item.portal_user_id);if(ids.has(id))throw new Error(`Portal directory contains duplicate portal_user_id ${id}`);ids.add(id);}client=await pool.connect();await client.query('BEGIN');const current=await client.query(`SELECT COUNT(*)::int AS count FROM employees WHERE auth_source='portal' AND active=TRUE`);const currentActive=Number(current.rows[0]?.count||0);if(currentActive>0&&employees.length===0)throw new Error("Portal directory returned zero employees while active Portal users exist; refusing mass deactivation");if(currentActive>=5&&employees.length<Math.ceil(currentActive*0.5))throw new Error(`Portal directory shrank from ${currentActive} active users to ${employees.length}; refusing automatic deactivation below 50% safety threshold`);let activated=0;for(const item of employees){const result=await upsertDirectoryEmployee(client,item);if(result.activated)activated+=1;}const removed=await client.query(`UPDATE employees SET active=FALSE,is_active=FALSE,portal_permissions='[]'::jsonb,access_removed_at=COALESCE(access_removed_at,NOW()),directory_sync_state='removed',last_portal_sync_at=NOW() WHERE auth_source='portal' AND active=TRUE AND NOT (portal_user_id::text = ANY($1::text[])) RETURNING id`,[Array.from(ids)]);await client.query('COMMIT');client.release();client=null;const deactivated=removed.rowCount;lastPortalSync={at:new Date().toISOString(),trigger,received:employees.length,activated,deactivated,ok:true};await pool.query(`UPDATE portal_directory_sync_log SET completed_at=NOW(),status='success',received_count=$1,activated_count=$2,deactivated_count=$3 WHERE id=$4`,[employees.length,activated,deactivated,logId]);return lastPortalSync;}catch(err){if(client){await client.query('ROLLBACK').catch(()=>{});client.release();client=null;}lastPortalSync={at:new Date().toISOString(),trigger,ok:false,error:err.message};if(logId!=null)await pool.query(`UPDATE portal_directory_sync_log SET completed_at=NOW(),status='failed',error_message=$1 WHERE id=$2`,[err.message,logId]).catch(logErr=>console.error('Portal directory failure log error:',logErr.message));throw err;}finally{portalSyncRunning=false;}}
+async function syncPortalDirectory(trigger="scheduled"){if(portalSyncRunning)return{skipped:true,reason:"sync already running",lastPortalSync};if(!PORTAL_DIRECTORY_URL||!PORTAL_DIRECTORY_API_KEY)throw new Error("Portal directory sync is not configured");portalSyncRunning=true;let logId=null;let client=null;try{const log=await pool.query(`INSERT INTO portal_directory_sync_log(status) VALUES('running') RETURNING id`);logId=log.rows[0].id;const response=await fetch(PORTAL_DIRECTORY_URL,{headers:{"x-internal-api-key":PORTAL_DIRECTORY_API_KEY,accept:"application/json"},signal:AbortSignal.timeout(15000)});if(!response.ok)throw new Error(`Portal directory returned HTTP ${response.status}`);const body=await response.json();if(!body||!Array.isArray(body.employees))throw new Error("Portal directory response is missing the employees array; refusing destructive sync");const employees=body.employees;const ids=new Set();for(const item of employees){if(!item||!item.portal_user_id||!item.first_name||!item.last_name)throw new Error("Portal directory contains an incomplete employee record; refusing destructive sync");const id=String(item.portal_user_id);if(ids.has(id))throw new Error(`Portal directory contains duplicate portal_user_id ${id}`);ids.add(id);}client=await pool.connect();await client.query('BEGIN');const current=await client.query(`SELECT COUNT(*)::int AS count FROM employees WHERE auth_source='portal' AND active=TRUE`);const currentActive=Number(current.rows[0]?.count||0);if(currentActive>0&&employees.length===0)throw new Error("Portal directory returned zero employees while active Portal users exist; refusing mass deactivation");if(currentActive>=5&&employees.length<Math.ceil(currentActive*0.5))throw new Error(`Portal directory shrank from ${currentActive} active users to ${employees.length}; refusing automatic deactivation below 50% safety threshold`);let activated=0;for(const item of employees){const result=await upsertDirectoryEmployee(client,item);if(result.activated)activated+=1;}const removed=await client.query(`UPDATE employees SET active=FALSE,is_active=FALSE,portal_permissions='[]'::jsonb,access_removed_at=COALESCE(access_removed_at,NOW()),directory_sync_state='removed',last_portal_sync_at=NOW() WHERE auth_source='portal' AND active=TRUE AND NOT (portal_user_id::text = ANY($1::text[])) RETURNING id`,[Array.from(ids)]);if(removed.rows.length)await client.query('UPDATE department_heads SET active=FALSE WHERE active=TRUE AND employee_id=ANY($1::int[])',[removed.rows.map(row=>row.id)]);await client.query('COMMIT');client.release();client=null;const deactivated=removed.rowCount;lastPortalSync={at:new Date().toISOString(),trigger,received:employees.length,activated,deactivated,ok:true};await pool.query(`UPDATE portal_directory_sync_log SET completed_at=NOW(),status='success',received_count=$1,activated_count=$2,deactivated_count=$3 WHERE id=$4`,[employees.length,activated,deactivated,logId]);return lastPortalSync;}catch(err){if(client){await client.query('ROLLBACK').catch(()=>{});client.release();client=null;}lastPortalSync={at:new Date().toISOString(),trigger,ok:false,error:err.message};if(logId!=null)await pool.query(`UPDATE portal_directory_sync_log SET completed_at=NOW(),status='failed',error_message=$1 WHERE id=$2`,[err.message,logId]).catch(logErr=>console.error('Portal directory failure log error:',logErr.message));throw err;}finally{portalSyncRunning=false;}}
 app.post('/admin/sync-portal-directory',requireUser,requireAnyPermission('app_admin'),async(req,res)=>{try{res.json(await syncPortalDirectory('manual'));}catch(err){res.status(502).json({error:err.message,last_sync:lastPortalSync});}});
 app.get('/admin/portal-sync-status',requireUser,requireAnyPermission('app_admin'),async(req,res)=>{const recent=await pool.query(`SELECT * FROM portal_directory_sync_log ORDER BY id DESC LIMIT 10`);res.json({configured:!!PORTAL_DIRECTORY_URL&&!!PORTAL_DIRECTORY_API_KEY,running:portalSyncRunning,last_sync:lastPortalSync,recent:recent.rows});});
 setTimeout(()=>syncPortalDirectory('startup').catch(err=>console.error('Portal directory startup sync failed:',err.message)),10000);setInterval(()=>syncPortalDirectory('scheduled').catch(err=>console.error('Portal directory scheduled sync failed:',err.message)),PORTAL_SYNC_INTERVAL_MINUTES*60*1000);

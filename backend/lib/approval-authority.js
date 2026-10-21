@@ -25,31 +25,15 @@ async function getApprovalAuthority(pool,user,employeeId){
   );
   const isCountywideRole=role==='payroll'||role==='timeclock_manager';
 
-  // Organizational head status is additive to application role. Portal-synced
-  // request users carry is_department_head. Preserve the legacy role fallback
-  // during migration; do not turn ordinary employees/supervisors into a DB
-  // lookup path merely because they happen to be in the same department.
+  // Request hydration supplies organizational status without replacing the role.
+  // Keep the legacy role fallback while Portal records migrate.
   const sameDepartment=Number(user?.department_id)>0&&Number(user.department_id)===Number(departmentId);
-  let isDepartmentHead=sameDepartment&&(
-    Boolean(user?.is_department_head)||role==='department_head'
+  const isDepartmentHead=sameDepartment&&(
+    user?.is_department_head===true||role==='department_head'
   );
 
-  // Higher application roles can also be organizational Department Heads. If
-  // their hydrated flag is unavailable, consult the relationship without
-  // changing their application role or permissions.
-  if(!isDepartmentHead&&sameDepartment&&user?.id&&(
-    role==='timeclock_manager'||role==='payroll'||role==='admin'
-  )){
-    const head=await pool.query(
-      `SELECT 1 FROM department_heads
-        WHERE employee_id=$1 AND department_id=$2 AND active=TRUE LIMIT 1`,
-      [user.id,departmentId],
-    );
-    isDepartmentHead=head.rows.length>0;
-  }
-
   let isAssignedSupervisor=false;
-  if(role==='supervisor'&&!isSelf){
+  if(role==='supervisor'&&!user?.is_department_head&&!isSelf){
     const assigned=await pool.query(
       `SELECT 1 FROM supervisor_employee_assignments
         WHERE supervisor_employee_id=$1 AND employee_id=$2 AND active=TRUE LIMIT 1`,

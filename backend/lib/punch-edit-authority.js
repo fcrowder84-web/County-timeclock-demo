@@ -46,7 +46,7 @@ async function canEditPunch(db,user,employeeId,action='edit'){
 
   // Organizational Department Head is relationship-based and additive to the
   // application role. Retained assignments outside the department never widen it.
-  if(target.is_department_head) return sameDepartment;
+  if(role==='department_head'||user?.is_department_head===true||target.is_department_head) return sameDepartment;
 
   // Employee is always self-only. Supervisor is assigned-employees-only and
   // never implicitly gets self edit authority.
