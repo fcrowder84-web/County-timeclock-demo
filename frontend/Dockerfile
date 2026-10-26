@@ -28,4 +28,5 @@ COPY manifest.webmanifest /usr/share/nginx/html/manifest.webmanifest
 COPY mobile-sw.js /usr/share/nginx/html/mobile-sw.js
 COPY timeclock-icon.svg /usr/share/nginx/html/timeclock-icon.svg
 
+COPY privacy.html /usr/share/nginx/html/privacy.html
 COPY global-logout.html /usr/share/nginx/html/global-logout.html
