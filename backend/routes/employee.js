@@ -4,6 +4,7 @@ const express = require('express');
 const { canEditPunch, hasPayrollOverride } = require('../lib/punch-edit-authority');
 const { summarizeTimecard } = require('../lib/timecard-summary');
 const { fetchWeeklyCapHistory } = require('../lib/weekly-cap-history');
+const { fetchWeeklyExtraHours } = require('../lib/weekly-cap-extra-hours');
 const { insertPunchIntoSequence, replaceDayPunchSequence } = require('../lib/punch-sequence');
 const { createApproveSinglePunchHandler } = require('../lib/approve-single-punch');
 const { userHasPermission } = require('../lib/permissions');
@@ -220,9 +221,10 @@ function createEmployeeRouter({ requireUser, requireAnyPermission, pool, audit, 
       );
 
       const weeklyCapHistory = await fetchWeeklyCapHistory(pool, [req.user.id], period.pay_period_end);
+      const extrasByEmployee = await fetchWeeklyExtraHours(pool,[req.user.id],period.pay_period_start);
 
       const approval = approvalResult.rows[0] || null;
-      const canEditEntries = !approval?.employee_signed_at || approval?.status === 'returned_to_employee';
+      const canEditEntries = (!approval?.employee_signed_at || approval?.status === 'returned_to_employee') && !approval?.supervisor_approved_at && !approval?.payroll_finalized_at;
 
       return res.json({
         employee: req.user,
@@ -242,6 +244,7 @@ function createEmployeeRouter({ requireUser, requireAnyPermission, pool, audit, 
           lunchWaivers: lunchWaiverResult.rows,
           weeklyHoursCap: req.user.weekly_hours_cap,
           weeklyHoursCapHistory: weeklyCapHistory.get(Number(req.user.id)) || [],
+          weeklyCapExtraHours: extrasByEmployee.get(Number(req.user.id)) || [0,0],
         }),
         requests: requestsResult.rows,
       });
