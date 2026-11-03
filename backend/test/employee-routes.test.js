@@ -266,6 +266,7 @@ function compact(sql) { return String(sql).replace(/\s+/g, ' ').trim(); }
         if (text.includes('FROM forced_lunch_waivers')) return { rows: [] };
         if (text.includes('FROM forced_lunch_waiver_requests')) return { rows: [] };
         if (text.includes('FROM weekly_hours_cap_history')) return { rows: [{employee_id:7,effective_date_iso:period.pay_period_start,weekly_hours_cap:32}] };
+        if (text.includes('FROM weekly_cap_extra_hours')) return { rows: [] };
         throw new Error(`unexpected timecard query: ${text}`);
       },
     },
@@ -294,3 +295,5 @@ function compact(sql) { return String(sql).replace(/\s+/g, ' ').trim(); }
   const integerComparisons = routeSource.match(/employee_id=\$1::int/g) || [];
   assert.ok(integerComparisons.length >= 4);
 }
+
+
