@@ -65,8 +65,11 @@ function fakeDb({
   assert(state.blockers.includes('Pending leave request remains'));
   assert(state.blockers.includes('Pending lunch-waiver request remains'));
 
-  state=await finalizationState(fakeDb({approval:{id:13,employee_signed_at:null,supervisor_override_reason:'Employee unavailable',supervisor_approved_at:'2026-09-21T08:00:00',status:'supervisor_approved'}}),2,period);
+  state=await finalizationState(fakeDb({approval:{id:13,employee_signed_at:null,supervisor_override_reason:'Employee unavailable',supervisor_employee_id:9,supervisor_approved_at:'2026-09-21T08:00:00',status:'supervisor_approved'}}),2,period);
   assert.deepStrictEqual(state.blockers,[]);
+
+  state=await finalizationState(fakeDb({approval:{id:14,employee_signed_at:null,supervisor_override_reason:' ',supervisor_employee_id:9,supervisor_approved_at:'2026-09-21T08:00:00',status:'supervisor_approved'}}),2,period);
+  assert(state.blockers.includes('Employee signature or documented supervisor override is missing'));
 
   state=await finalizationState(fakeDb({
     approval:{

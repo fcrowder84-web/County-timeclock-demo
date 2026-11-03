@@ -5,6 +5,7 @@ const { summarizeTimecard } = require('../lib/timecard-summary');
 const { fetchWeeklyCapHistory } = require('../lib/weekly-cap-history');
 const { fetchWeeklyExtraHours } = require('../lib/weekly-cap-extra-hours');
 const { loadExtraHoursSummary } = require('../lib/timecard-extra-approval');
+const { hasEmployeeSignoffOrOverride } = require('../lib/timecard-signoff');
 
 function positiveInt(value,label='employee'){
   const parsed=Number(value);
@@ -47,7 +48,7 @@ async function finalizationState(db,employeeId,period,{lock=false}={}){
   if(!approval){
     blockers.push('Timecard has not been submitted');
   }else{
-    if(!approval.employee_signed_at && !approval.supervisor_override_reason) blockers.push('Employee signature or documented supervisor override is missing');
+    if(!hasEmployeeSignoffOrOverride(approval)) blockers.push('Employee signature or documented supervisor override is missing');
     if(!approval.supervisor_approved_at) blockers.push('Supervisor approval is missing');
     if(!['supervisor_approved','payroll_finalized'].includes(approval.status)){
       blockers.push(`Timecard status is ${approval.status}`);
@@ -585,6 +586,13 @@ function createPayrollRouter({
           await client.query('ROLLBACK');
           return res.status(403).json({error:'No employees are within your finalization scope'});
         }
+
+        // Match individual finalization's employee lock. Lock all scoped rows in
+        // a stable order before reading approvals, punches, or weekly extras.
+        await client.query(
+          'SELECT id FROM employees WHERE id=ANY($1::int[]) ORDER BY id FOR UPDATE',
+          [authorized.map(employee=>employee.id).sort((a,b)=>a-b)],
+        );
 
         const blockers=[];
         const ready=[];

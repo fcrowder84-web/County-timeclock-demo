@@ -6,6 +6,7 @@ const { summarizeTimecard } = require('../lib/timecard-summary');
 const { fetchWeeklyCapHistory } = require('../lib/weekly-cap-history');
 const { fetchWeeklyExtraHours } = require('../lib/weekly-cap-extra-hours');
 const { loadExtraHoursSummary } = require('../lib/timecard-extra-approval');
+const { hasEmployeeSignoffOrOverride } = require('../lib/timecard-signoff');
 const { resolvePayPeriod } = require('../lib/pay-period');
 const {
   requireReopenForFinalized,
@@ -992,7 +993,7 @@ function createSupervisorRouter({
         }
         if (payrollOverride && (
           !approval || !cards.some(card => card.destination_period)
-          || cards.some(card => !card.employee_signed_at || !card.supervisor_approved_at
+          || cards.some(card => !hasEmployeeSignoffOrOverride(card) || !card.supervisor_approved_at
             || !['supervisor_approved', 'payroll_finalized'].includes(card.status))
         )) {
           await client.query('ROLLBACK');
