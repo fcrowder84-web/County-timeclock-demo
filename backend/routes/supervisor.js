@@ -4,6 +4,7 @@ const express = require('express');
 const { canEditPunch } = require('../lib/punch-edit-authority');
 const { summarizeTimecard } = require('../lib/timecard-summary');
 const { fetchWeeklyCapHistory } = require('../lib/weekly-cap-history');
+const { fetchWeeklyExtraHours } = require('../lib/weekly-cap-extra-hours');
 const { resolvePayPeriod } = require('../lib/pay-period');
 const {
   requireReopenForFinalized,
@@ -136,6 +137,7 @@ function createSupervisorRouter({
         const visibleIds = visible.map(row => Number(row.id));
         if (visibleIds.length) {
           const weeklyCapHistory = await fetchWeeklyCapHistory(pool, visibleIds, period.pay_period_end);
+          const extrasByEmployee = await fetchWeeklyExtraHours(pool, visibleIds, period.pay_period_start);
           const [entriesResult, leaveResult, lunchSettingsResult, lunchWaiverResult] = await Promise.all([
             pool.query(
               `SELECT employee_id,
@@ -201,6 +203,7 @@ function createSupervisorRouter({
               lunchWaivers: lunchWaiversByEmployee.get(id) || [],
               weeklyHoursCap: row.weekly_hours_cap,
               weeklyHoursCapHistory: weeklyCapHistory.get(id) || [],
+              weeklyCapExtraHours: extrasByEmployee.get(id) || [0,0],
             });
             row.total_hours = summary.period.gross_worked_hours;
             row.payable_hours = summary.period.total_paid_hours;
@@ -663,6 +666,7 @@ function createSupervisorRouter({
         );
 
         const weeklyCapHistory = await fetchWeeklyCapHistory(pool, [employeeId], period.pay_period_end);
+        const extrasByEmployee = await fetchWeeklyExtraHours(pool, [employeeId], period.pay_period_start);
 
         const approval = approvalResult.rows[0] || null;
         const payrollCanEdit =
@@ -677,6 +681,7 @@ function createSupervisorRouter({
           employee: employeeResult.rows[0],
           approval,
           can_edit_entries: payrollCanEdit || supervisorCanEdit,
+          can_edit_weekly_extra: userHasPermission(req.user,'approve_timecard') && !approval?.supervisor_approved_at && !approval?.payroll_finalized_at && (!approval || ['open','employee_submitted','returned_to_employee'].includes(approval.status)),
           edit_mode: payrollCanEdit ? 'payroll' : (supervisorCanEdit ? 'supervisor' : 'locked'),
           correction_requests: correctionResult.rows,
           change_requests: requestsResult.rows,
@@ -694,6 +699,7 @@ function createSupervisorRouter({
             lunchWaivers: lunchWaiverResult.rows,
             weeklyHoursCap: employeeResult.rows[0].weekly_hours_cap,
             weeklyHoursCapHistory: weeklyCapHistory.get(employeeId) || [],
+            weeklyCapExtraHours: extrasByEmployee.get(employeeId) || [0,0],
           }),
         });
       } catch (err) {
