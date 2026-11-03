@@ -89,11 +89,12 @@ function renderTimecard(){
 function statusLabel(a){if(!a)return"In Progress";return({open:"In Progress",employee_submitted:"Employee Submitted",returned_to_employee:"Returned to Employee",supervisor_approved:"Supervisor Approved",payroll_finalized:"Payroll Finalized"})[a.status]||String(a.status||"In Progress").replaceAll("_"," ")}
 function renderSignatures(){
   const a=currentData.approval,e=currentData.employee||currentUser;
-  document.getElementById("employeeSignature").textContent=a?.employee_signed_at?`${e.first_name} ${e.last_name} — ${localDateTime(a.employee_signed_at)}`:"Not signed";
-  document.getElementById("supervisorSignature").textContent=a?.supervisor_approved_at?`${a.supervisor_first_name&&a.supervisor_last_name?`${a.supervisor_first_name} ${a.supervisor_last_name} — `:""}${localDateTime(a.supervisor_approved_at)}`:(a?.employee_signed_at?"Waiting for supervisor":"Waiting for employee");
+  document.getElementById("employeeSignature").textContent=a?.employee_signed_at?`${e.first_name} ${e.last_name} — ${localDateTime(a.employee_signed_at)}`:(a?.supervisor_approved_at&&a?.supervisor_override_reason?"Not signed — supervisor override used":"Not signed");
+  document.getElementById("supervisorSignature").textContent=a?.supervisor_approved_at?`${a.supervisor_first_name&&a.supervisor_last_name?`${a.supervisor_first_name} ${a.supervisor_last_name} — `:""}${localDateTime(a.supervisor_approved_at)}${a.supervisor_override_reason?` — Employee sign-off overridden: ${a.supervisor_override_reason}`:""}`:(a?.employee_signed_at?"Waiting for supervisor":"Waiting for employee");
   document.getElementById("payrollSignature").textContent=a?.payroll_finalized_at?`${a.payroll_first_name&&a.payroll_last_name?`${a.payroll_first_name} ${a.payroll_last_name} — `:""}${localDateTime(a.payroll_finalized_at)}`:"Not finalized";
   const empBtn=document.getElementById("employeeSignBtn");empBtn.classList.toggle("hidden",!(currentMode==="employee"&&selectedIsSelf()&&has("submit_timecard")&&currentData.can_edit_entries!==false));
-  const supBtn=document.getElementById("supervisorSignBtn");supBtn.classList.toggle("hidden",!(currentMode==="supervisor"&&has("approve_timecard")&&a?.status==="employee_submitted"&&!a?.supervisor_approved_at));
+  const supBtn=document.getElementById("supervisorSignBtn");supBtn.classList.toggle("hidden",!(currentMode==="supervisor"&&(has("approve_timecard")||(selectedIsSelf()&&selfApprovalRoleAllowed()&&has("approve_own_timecard")))&&a?.status==="employee_submitted"&&!a?.supervisor_approved_at));
+  const overrideBtn=document.getElementById("overrideEmployeeSignBtn");overrideBtn.classList.toggle("hidden",!(currentMode==="supervisor"&&(has("approve_timecard")||(selectedIsSelf()&&selfApprovalRoleAllowed()&&has("approve_own_timecard")))&&!a?.employee_signed_at&&!a?.supervisor_approved_at&&!a?.payroll_finalized_at&&(!a||["open","returned_to_employee","employee_submitted"].includes(a.status))));
   const ret=document.getElementById("returnBtn");ret.classList.toggle("hidden",!(currentMode==="supervisor"&&canReturn()&&a));
   const addTimeBtn=document.getElementById("addTimeBtn");addTimeBtn.classList.toggle("hidden",!(currentMode==="supervisor"&&!selectedIsSelf()&&currentData.can_edit_entries===true&&canAddEntries()));
   const payrollLink=document.getElementById("payrollLink");payrollLink.classList.toggle("hidden",!payrollView());payrollLink.href=`/payroll.html?employeeId=${encodeURIComponent(selectedEmployeeId)}&periodStart=${encodeURIComponent(selectedPeriodStart||"")}`;
@@ -392,6 +393,7 @@ async function reviewChange(id,status){
 
 document.getElementById("employeeSignBtn").addEventListener("click",async()=>{if(!confirm("Sign and submit this timecard to your supervisor?"))return;try{await jsonOrError(await apiFetch(`${apiBase}/submit-timecard`,{method:"POST",body:"{}"}));showMessage("Timecard submitted");await loadTimecard()}catch(err){showMessage(err.message,"error")}});
 document.getElementById("supervisorSignBtn").addEventListener("click",async()=>{if(!confirm("Approve and sign this employee timecard?"))return;try{await jsonOrError(await apiFetch(`${apiBase}/supervisor/approve-timecard`,{method:"POST",body:JSON.stringify({employee_id:selectedEmployeeId})}));showMessage("Timecard approved");await loadTimecard()}catch(err){showMessage(err.message,"error")}});
+document.getElementById("overrideEmployeeSignBtn").addEventListener("click",async()=>{const answer=prompt("Written reason for overriding the employee sign-off (required):");if(answer===null)return;const reason=answer.trim();if(!reason){showMessage("A written reason is required","error");return}try{await jsonOrError(await apiFetch(`${apiBase}/supervisor/override-employee-signoff`,{method:"POST",body:JSON.stringify({employee_id:selectedEmployeeId,reason})}));showMessage("Timecard approved with supervisor override");await loadTimecard()}catch(err){showMessage(err.message,"error")}});
 document.getElementById("returnBtn").addEventListener("click",async()=>{const note=prompt("Reason for returning this timecard:");if(note===null)return;const target=payrollView()&&currentData.approval?.status==="supervisor_approved"&&confirm("Return to supervisor review instead of returning all the way to the employee?\n\nOK = Supervisor, Cancel = Employee")?"supervisor":"employee";try{await jsonOrError(await apiFetch(`${apiBase}/supervisor/return-timecard`,{method:"POST",body:JSON.stringify({employee_id:selectedEmployeeId,supervisor_note:note,target_stage:target})}));showMessage(target==="supervisor"?"Returned to supervisor review":"Returned to employee");await loadTimecard()}catch(err){showMessage(err.message,"error")}});
 
 async function refreshQuickPunch(){
@@ -458,3 +460,5 @@ init().then(()=>{
     const url=new URL(location.href);url.searchParams.delete("addEntry");history.replaceState({},"",url);
   }
 });
+
+

@@ -4,6 +4,7 @@ const express = require('express');
 const { summarizeTimecard } = require('../lib/timecard-summary');
 const { fetchWeeklyCapHistory } = require('../lib/weekly-cap-history');
 const { fetchWeeklyExtraHours } = require('../lib/weekly-cap-extra-hours');
+const { loadExtraHoursSummary } = require('../lib/timecard-extra-approval');
 
 function positiveInt(value,label='employee'){
   const parsed=Number(value);
@@ -46,7 +47,7 @@ async function finalizationState(db,employeeId,period,{lock=false}={}){
   if(!approval){
     blockers.push('Timecard has not been submitted');
   }else{
-    if(!approval.employee_signed_at) blockers.push('Employee has not submitted the timecard');
+    if(!approval.employee_signed_at && !approval.supervisor_override_reason) blockers.push('Employee signature or documented supervisor override is missing');
     if(!approval.supervisor_approved_at) blockers.push('Supervisor approval is missing');
     if(!['supervisor_approved','payroll_finalized'].includes(approval.status)){
       blockers.push(`Timecard status is ${approval.status}`);
@@ -100,6 +101,11 @@ async function finalizationState(db,employeeId,period,{lock=false}={}){
   if(Number(pendingLeave.rows[0]?.count||0)>0) blockers.push('Pending leave request remains');
   if(Number(pendingLunch.rows[0]?.count||0)>0) blockers.push('Pending lunch-waiver request remains');
 
+  if(approval?.supervisor_approved_at){
+    const {summary}=await loadExtraHoursSummary(db,employeeId,period);
+    if(summary.period.cap_extra_invalid) blockers.push('Approved extra hours exceed worked hours removed by the weekly cap');
+  }
+
   return {approval,blockers};
 }
 
@@ -130,6 +136,7 @@ function createPayrollRouter({
              e.weekly_hours_cap,
              ppa.status,
              ppa.employee_signed_at,
+             ppa.supervisor_override_reason,
              ppa.supervisor_approved_at,
              ppa.payroll_finalized_at
            FROM employees e
@@ -342,6 +349,7 @@ function createPayrollRouter({
              d.name AS department,
              ppa.status AS approval_status,
              ppa.employee_signed_at,
+             ppa.supervisor_override_reason,
              ppa.supervisor_approved_at,
              ppa.payroll_finalized_at,
              te.id AS time_entry_id,
@@ -493,6 +501,7 @@ function createPayrollRouter({
         const period=await getRequestedPayPeriod(req);
         client=await pool.connect();
         await client.query('BEGIN');
+        await client.query('SELECT id FROM employees WHERE id=$1 FOR UPDATE',[employeeId]);
         const state=await finalizationState(client,employeeId,period,{lock:true});
         if(state.approval?.payroll_finalized_at||state.approval?.status==='payroll_finalized'){
           await client.query('ROLLBACK');
@@ -642,3 +651,5 @@ function createPayrollRouter({
 }
 
 module.exports={createPayrollRouter,finalizationState};
+
+

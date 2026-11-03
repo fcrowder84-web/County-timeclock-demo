@@ -96,7 +96,7 @@ function installTimecardOverrides(router, {
         await client.query('ROLLBACK');
         return res.status(409).json({error:'Employee already signed. Use normal supervisor approval.'});
       }
-      if (a?.supervisor_approved_at || a?.payroll_finalized_at || (a && !['open','returned_to_employee'].includes(a.status))) {
+      if (a?.supervisor_approved_at || a?.payroll_finalized_at || (a && !['open','returned_to_employee','employee_submitted'].includes(a.status))) {
         await client.query('ROLLBACK');
         return res.status(409).json({error:'Timecard is already approved or not open for supervisor override'});
       }
@@ -106,7 +106,8 @@ function installTimecardOverrides(router, {
         client.query(`SELECT tcr.id FROM time_change_requests tcr LEFT JOIN time_entries te ON te.id=tcr.time_entry_id
           WHERE tcr.employee_id=$1 AND tcr.status='pending' AND (tcr.time_entry_id IS NULL OR te.deleted_at IS NULL)
             AND ((te.clock_in >= $2::date AND te.clock_in < ($3::date + INTERVAL '1 day'))
-              OR (tcr.requested_clock_in >= $2::date AND tcr.requested_clock_in < ($3::date + INTERVAL '1 day')))`,[employeeId,period.pay_period_start,period.pay_period_end]),
+              OR (tcr.requested_clock_in >= $2::date AND tcr.requested_clock_in < ($3::date + INTERVAL '1 day'))
+              OR (tcr.requested_clock_out >= $2::date AND tcr.requested_clock_out < ($3::date + INTERVAL '1 day')))`,[employeeId,period.pay_period_start,period.pay_period_end]),
         client.query(`SELECT id FROM forced_lunch_waiver_requests WHERE employee_id=$1 AND work_date BETWEEN $2::date AND $3::date AND status='pending'`,[employeeId,period.pay_period_start,period.pay_period_end]),
       ]);
       if (openPunches.rows.length||pendingLeave.rows.length||pendingChanges.rows.length||pendingLunch.rows.length) {
@@ -128,8 +129,12 @@ function installTimecardOverrides(router, {
          VALUES($1,$2,$3,NOW(),$4,$5,'supervisor_approved')`,
         [employeeId,period.pay_period_start,period.pay_period_end,req.user.id,reason],
       );
+      await client.query(
+        `INSERT INTO timeclock_audit_log(actor_employee_id,action,target_type,target_id,details)
+         VALUES($1,'override_employee_timecard_signoff','employee',$2,$3)`,
+        [req.user.id,String(employeeId),JSON.stringify({...period,reason})],
+      );
       await client.query('COMMIT');
-      await audit(req.user.id,'override_employee_timecard_signoff','employee',employeeId,{...period,reason});
       return res.json({message:'Supervisor approved timecard without employee signature'});
     } catch(err) {
       if (client) await client.query('ROLLBACK').catch(()=>{});
@@ -141,3 +146,5 @@ function installTimecardOverrides(router, {
 }
 
 module.exports={installTimecardOverrides};
+
+

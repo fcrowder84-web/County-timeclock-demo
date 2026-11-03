@@ -57,6 +57,7 @@ async function invalidateApprovals(db, approvals) {
     `UPDATE pay_period_approvals
         SET supervisor_approved_at=NULL,
             supervisor_employee_id=NULL,
+            supervisor_override_reason=NULL,
             payroll_finalized_at=NULL,
             payroll_finalized_by=NULL,
             status=CASE WHEN employee_signed_at IS NULL THEN 'open' ELSE 'employee_submitted' END
@@ -73,3 +74,5 @@ module.exports={
   requireReopenForFinalized,
   invalidateApprovals,
 };
+
+

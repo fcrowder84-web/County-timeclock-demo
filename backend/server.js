@@ -189,7 +189,9 @@ function selfApprovalRouteAllowed(req,keys){
     )) return true;
   if(keys.includes("approve_timecard")
     && userHasPermission(req.user,"approve_own_timecard")
-    && path.endsWith("/supervisor/approve-timecard")) return true;
+    && (path.endsWith("/supervisor/approve-timecard")
+      || path.endsWith("/supervisor/weekly-cap-extra")
+      || path.endsWith("/supervisor/override-employee-signoff"))) return true;
   return false;
 }
 function requireAnyPermission(...permissionKeys){const keys=permissionKeys.flat();return(req,res,next)=>{if(userHasAnyPermission(req.user,keys)||selfApprovalRouteAllowed(req,keys))return next();return res.status(403).json({error:`Permission required: ${keys.join(" or ")}`,required_permissions:keys});};}
@@ -378,3 +380,5 @@ app.get("/pay-periods",requireUser,async(req,res)=>{try{const current=await getC
 app.post("/employee/change-pin",requireUser,async(req,res)=>{if(req.user.auth_source==="portal")return res.status(400).json({error:"Employee Portal users manage their password in Employee Portal"});const{new_pin}=req.body;if(!new_pin||new_pin.length<4)return res.status(400).json({error:"New PIN must be at least 4 digits"});try{await pool.query(`UPDATE employees SET pin=$1,must_change_pin=false WHERE id=$2`,[new_pin,req.user.id]);res.json({message:"PIN changed successfully"});}catch(err){console.error(err);res.status(500).send("Change PIN error");}});
 app.post("/supervisor/reset-pin",requireUser,requireAnyPermission("manage_employee_timeclock_settings"),async(req,res)=>{const{employee_id}=req.body;try{const targetResult=await pool.query(`SELECT auth_source FROM employees WHERE id=$1`,[employee_id]);if(!targetResult.rows.length)return res.status(404).json({error:"Employee not found"});if(targetResult.rows[0].auth_source==="portal")return res.status(400).json({error:"Employee Portal users do not use a TimeClock PIN"});const access=await canAccessEmployee(req.user,employee_id,["manage_employee_timeclock_settings"]);if(!access)return res.status(403).json({error:"Access denied"});await pool.query(`UPDATE employees SET pin='1111',must_change_pin=true WHERE id=$1`,[employee_id]);res.json({message:"PIN reset to 1111. Employee must change PIN at next login."});}catch(err){console.error(err);res.status(500).send("Reset PIN error");}});
 app.listen(3000,()=>console.log("Server running on port 3000"));
+
+

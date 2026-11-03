@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Edgefield County Timecard</title>
 <link rel="stylesheet" href="/timecard.css?v=20261003-1">
+<link rel="stylesheet" href="/weekly-extra-hours.css?v=20261103-2">
 <link rel="stylesheet" href="/app-shell.css?v=20260923-1">
 </head>
 <body>
@@ -32,7 +33,7 @@
   <div id="pendingPanel" class="pending-panel"><h3>Pending items for this pay period</h3><div id="pendingList" class="pending-list"></div></div>
   <div class="signatures">
     <div class="sig"><div><strong>Employee Approval</strong><small id="employeeSignature">Not signed</small></div><button id="employeeSignBtn" class="btn btn-success hidden">Sign Off</button></div>
-    <div class="sig"><div><strong>Supervisor Approval</strong><small id="supervisorSignature">Not signed</small></div><div><button id="returnBtn" class="btn btn-warn hidden">Return</button><button id="supervisorSignBtn" class="btn btn-success hidden">Sign Off</button></div></div>
+    <div class="sig"><div><strong>Supervisor Approval</strong><small id="supervisorSignature">Not signed</small></div><div><button id="returnBtn" class="btn btn-warn hidden">Return</button><button id="supervisorSignBtn" class="btn btn-success hidden">Sign Off</button><button id="overrideEmployeeSignBtn" class="btn btn-warn hidden">Override Employee Sign-Off</button></div></div>
     <div class="sig"><div><strong>Payroll</strong><small id="payrollSignature">Not finalized</small></div><a id="payrollLink" class="btn hidden" href="/payroll.html" style="text-decoration:none">Payroll Portal</a></div>
   </div>
   <div class="foot">Regular and overtime totals use the server's weekly worked-hours rule. Approved leave is paid time but does not create overtime.</div>
@@ -44,7 +45,10 @@
 <script src="/app-shell.js?v=20260923-1"></script>\n<script src="/safe-html.js?v=20260828-1"></script>
 <script src="/timecard-base.js?v=20261018-3"></script>
 <script src="/timecard-actions.js?v=20261018-2"></script>
+<script src="/weekly-extra-hours.js?v=20261103-2"></script>
 <script src="/timecard-single-punch.js?v=20261018-2"></script>
 <script src="/mobile-pairing.js?v=20260921-3"></script>
 </body>
 </html>
+
+

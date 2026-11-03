@@ -403,6 +403,8 @@ function summarizeTimecard({
         week.regular_worked_hours + week.adjusted_total_leave_hours,
       );
     } else {
+      const requested = Number(weeklyCapExtraHours?.[weekIndex] ?? 0);
+      week.cap_extra_invalid = !Number.isFinite(requested) || requested !== 0;
       week.total_paid_hours = round2(week.total_worked_hours + week.total_leave_hours);
     }
   }
@@ -543,3 +545,5 @@ function summarizeTimecard({
 }
 
 module.exports = { summarizeTimecard, roundDailyMinutes };
+
+

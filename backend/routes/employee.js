@@ -75,6 +75,11 @@ function createEmployeeRouter({ requireUser, requireAnyPermission, pool, audit, 
       );
 
       const existing = existingApproval.rows[0] || null;
+      if (existing && (existing.supervisor_approved_at || existing.payroll_finalized_at ||
+          !['open', 'returned_to_employee', 'employee_submitted'].includes(existing.status))) {
+        await client.query('ROLLBACK');
+        return res.status(409).json({ error: 'This timecard must be returned before it can be signed.' });
+      }
       if (existing?.employee_signed_at && existing.status !== 'returned_to_employee') {
         await client.query('ROLLBACK');
         return res.status(409).json({
@@ -88,6 +93,7 @@ function createEmployeeRouter({ requireUser, requireAnyPermission, pool, audit, 
               SET employee_signed_at=NOW(),
                   supervisor_approved_at=NULL,
                   supervisor_employee_id=NULL,
+                  supervisor_override_reason=NULL,
                   payroll_finalized_at=NULL,
                   payroll_finalized_by=NULL,
                   status='employee_submitted'
@@ -791,3 +797,5 @@ function createEmployeeRouter({ requireUser, requireAnyPermission, pool, audit, 
 }
 
 module.exports = { createEmployeeRouter, validDate, canDirectEditEmployee };
+
+

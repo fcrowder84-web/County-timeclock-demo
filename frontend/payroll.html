@@ -579,7 +579,7 @@
 
             if (row.supervisor_approved_at || row.status === "supervisor_approved") {
                 return {
-                    text: "Approved",
+                    text: row.supervisor_override_reason ? "Approved (employee sign-off overridden)" : "Approved",
                     className: "status-good"
                 };
             }
@@ -733,7 +733,7 @@
                             </td>
 
                             <td>
-                                ${row.employee_signed_at ? "Yes" : "No"}
+                                ${row.employee_signed_at ? "Yes" : row.supervisor_override_reason ? "No — supervisor override" : "No"}
                             </td>
 
                             <td>
@@ -1236,3 +1236,5 @@
 </body>
 
 </html>
+
+

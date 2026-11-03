@@ -2,6 +2,24 @@
 const assert = require('assert');
 const { summarizeTimecard, roundDailyMinutes } = require('../lib/timecard-summary');
 
+const extraEntries = [0,1,2,3,4].map(day=>({entry_date_iso:`2026-10-${String(5+day).padStart(2,'0')}`,hours_worked:8}));
+const approvedExtra = summarizeTimecard({payPeriodStart:'2026-10-05',entries:extraEntries,weeklyHoursCap:35,weeklyCapExtraHours:[5,0]});
+assert.strictEqual(approvedExtra.weeks[0].max_cap_extra_hours,5);
+assert.strictEqual(approvedExtra.weeks[0].total_paid_hours,40);
+assert.strictEqual(approvedExtra.period.total_paid_hours,approvedExtra.weeks[0].total_paid_hours+approvedExtra.weeks[1].total_paid_hours);
+const excessiveExtra = summarizeTimecard({payPeriodStart:'2026-10-05',entries:extraEntries,weeklyHoursCap:35,weeklyCapExtraHours:[6,0]});
+assert.strictEqual(excessiveExtra.weeks[0].cap_extra_invalid,true);
+const belowCapExtra = summarizeTimecard({payPeriodStart:'2026-10-05',entries:extraEntries.slice(0,4),weeklyHoursCap:35,weeklyCapExtraHours:[1,0]});
+assert.strictEqual(belowCapExtra.weeks[0].max_cap_extra_hours,0);
+assert.strictEqual(belowCapExtra.weeks[0].cap_extra_invalid,true);
+const twoWeekExtra = summarizeTimecard({payPeriodStart:'2026-10-05',entries:[...extraEntries,...extraEntries.map((e,i)=>({...e,entry_date_iso:`2026-10-${12+i}`}))],weeklyHoursCap:35,weeklyCapExtraHours:[2,4]});
+assert.strictEqual(twoWeekExtra.weeks[0].cap_extra_hours,2);
+assert.strictEqual(twoWeekExtra.weeks[1].cap_extra_hours,4);
+assert.strictEqual(twoWeekExtra.period.total_paid_hours,76);
+const leaveExtra = summarizeTimecard({payPeriodStart:'2026-10-05',entries:extraEntries.slice(0,4),leaveEntries:[{leave_date_iso:'2026-10-09',leave_type:'sick',hours:8,status:'approved'}],weeklyHoursCap:35,weeklyCapExtraHours:[1,0]});
+assert.strictEqual(leaveExtra.weeks[0].max_cap_extra_hours,0);
+assert.strictEqual(leaveExtra.weeks[0].cap_extra_invalid,true);
+
 assert.strictEqual(roundDailyMinutes(485), 480);
 assert.strictEqual(roundDailyMinutes(486), 495);
 
@@ -666,3 +684,5 @@ assert.strictEqual(historicalHoliday.weeks[0].adjusted_leave_hours_by_type.holid
 assert.strictEqual(historicalHoliday.weeks[0].total_paid_hours, 40);
 
 console.log("timecard summary tests passed");
+
+
