@@ -33,6 +33,7 @@ const pool={async query(sql){
   if(q.includes('FROM forced_lunch_setting_history'))return {rows:lunchSettings};
   if(q.includes('FROM forced_lunch_waivers'))return {rows:lunchWaivers};
   if(q.includes('FROM weekly_hours_cap_history'))return {rows:[{employee_id:7,effective_date_iso:'2026-10-05',weekly_hours_cap:32}]};
+  if(q.includes('FROM weekly_cap_extra_hours'))return {rows:[]};
   throw new Error(`Unexpected query: ${q}`);
 }};
 const router=createSupervisorRouter({requireUser:noop,requireAnyPermission:()=>noop,pool,
@@ -47,3 +48,5 @@ handler({user:{id:2}},res).then(()=>{
   assert.strictEqual(res.body.employees[0].total_hours,summary.period.gross_worked_hours);
   console.log('supervisor payable date tests: PASS');
 }).catch(err=>{console.error(err);process.exitCode=1;});
+
+
