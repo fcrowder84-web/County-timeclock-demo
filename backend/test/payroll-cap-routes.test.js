@@ -29,6 +29,7 @@ async function run(history) {
     if (q.includes('FROM weekly_hours_cap_history')) return { rows: history
       .filter(row => row.effective_date_iso <= args[1])
       .map(row => ({ employee_id: 7, ...row })) };
+    if (q.includes('FROM weekly_cap_extra_hours')) return { rows: [] };
     throw new Error(`Unexpected payroll query: ${q}`);
   } };
   const router = createPayrollRouter({ requireUser: noop, requireAnyPermission: () => noop,
@@ -61,3 +62,5 @@ function assertSummary(path, summary) {
   ]);
   console.log('payroll cap route tests: PASS');
 })().catch(error => { console.error(error); process.exitCode = 1; });
+
+

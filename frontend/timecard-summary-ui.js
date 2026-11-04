@@ -28,6 +28,7 @@
                 <td>${leaveText(week.leave_hours_by_type)}</td>
                 <td>${hours(week.total_leave_hours)}</td>
                 <td>${hours(week.leave_hours_reduced_by_cap)}</td>
+                <td>${hours(week.cap_extra_hours)}</td>
                 <td>${leaveText(week.adjusted_leave_hours_by_type || week.leave_hours_by_type)}</td>
                 <td>${hours(week.adjusted_total_leave_hours ?? week.total_leave_hours)}</td>
                 <td><strong>${hours(week.total_paid_hours)}</strong></td>
@@ -41,10 +42,11 @@
                 ${summary.forced_lunch_enabled ? `<div class="summary-box"><strong>Forced Lunch</strong><br>−${hours(p.forced_lunch_hours)}</div>` : ``}
                 <div class="summary-box"><strong>Approved Leave</strong><br>${hours(p.total_leave_hours)}</div>\n                ${Number(p.leave_hours_reduced_by_cap || 0) > 0 ? `<div class="summary-box"><strong>Reduced By Cap</strong><br>${hours(p.leave_hours_reduced_by_cap)}</div><div class="summary-box"><strong>Charged Leave</strong><br>${hours(p.adjusted_total_leave_hours)}</div>` : ``}
                 <div class="summary-box"><strong>Total Paid</strong><br>${hours(p.total_paid_hours)}</div>
+                ${Number(p.cap_extra_hours || 0) > 0 ? `<div class="summary-box"><strong>Approved Extra Hours</strong><br>${hours(p.cap_extra_hours)}</div>` : ``}
             </div>
             <div style="margin:12px 0 18px;overflow-x:auto;">
                 <table>
-                    <thead><tr><th>Week</th><th>Regular Worked</th><th>OT Worked</th><th>Total Worked</th><th>Forced Lunch</th><th>Approved Leave</th><th>Total Approved Leave</th><th>Reduced By Cap</th><th>Charged Leave</th><th>Total Charged Leave</th><th>Total Paid</th></tr></thead>
+                    <thead><tr><th>Week</th><th>Regular Worked</th><th>OT Worked</th><th>Total Worked</th><th>Forced Lunch</th><th>Approved Leave</th><th>Total Approved Leave</th><th>Reduced By Cap</th><th>Approved Extra Hours</th><th>Charged Leave</th><th>Total Charged Leave</th><th>Total Paid</th></tr></thead>
                     <tbody>${weekRows}</tbody>
                 </table>
                 ${Number(p.pending_leave_hours || 0) > 0 ? `<p><strong>Pending leave:</strong> ${leaveText(p.pending_leave_hours_by_type)}. Pending leave is not included in paid totals.</p>` : ''}
@@ -171,3 +173,5 @@
         if (typeof global.loadRequests === 'function') global.loadRequests().catch(() => {});
     });
 })(window);
+
+

@@ -377,7 +377,7 @@
                 const approved = num(week.total_leave_hours);
                 const charged = num(week.adjusted_total_leave_hours);
                 const reduced = num(week.leave_hours_reduced_by_cap);
-                return `<div><strong>Week ${index + 1} cap reconciliation:</strong> Approved leave ${fmt(approved)} · Leave reduced by cap ${fmt(reduced)} · Leave charged/payable ${fmt(charged)} · Payroll total ${fmt(week.total_paid_hours)} / ${fmt(week.weekly_hours_cap)} cap. Daily rows above show approved leave as recorded.</div>`;
+                return `<div><strong>Week ${index + 1} cap reconciliation:</strong> Weekly cap ${fmt(week.weekly_hours_cap)} · Approved leave ${fmt(approved)} · Leave reduced by cap ${fmt(reduced)} · Leave charged/payable ${fmt(charged)} · Approved extra worked hours ${fmt(week.cap_extra_hours)} · Payroll total ${fmt(week.total_paid_hours)}. Daily rows above show approved leave as recorded.</div>`;
             }).filter(Boolean).join("");
             return `<table>
                 <thead><tr>
@@ -417,8 +417,8 @@
                         </div>
                         ${renderEmployeeTable(employeeId, group.entries, leaves, summary, data.pay_period_start)}
                         <div class="signatures">
-                            <div class="signature-box"><strong>Employee Approval</strong><br><br>Submitted: ${esc(employee.employee_signed_at || "Not Submitted")}</div>
-                            <div class="signature-box"><strong>Supervisor Approval</strong><br><br>Approved: ${esc(employee.supervisor_approved_at || "Not Approved")}</div>
+                            <div class="signature-box"><strong>Employee Approval</strong><br><br>${employee.employee_signed_at ? `Submitted: ${esc(employee.employee_signed_at)}` : employee.supervisor_override_reason ? "Not signed — supervisor override used" : "Not Submitted"}</div>
+                            <div class="signature-box"><strong>Supervisor Approval</strong><br><br>Approved: ${esc(employee.supervisor_approved_at || "Not Approved")}${employee.supervisor_override_reason ? `<br>Employee sign-off override reason: ${esc(employee.supervisor_override_reason)}` : ""}</div>
                         </div>
                     </div>`;
             });
@@ -432,3 +432,5 @@
 </body>
 
 </html>
+
+

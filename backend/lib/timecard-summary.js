@@ -117,6 +117,9 @@ function emptyWeek(weekNumber, start) {
     pending_leave_hours: 0,
     weekly_hours_cap: null,
     cap_applied: false,
+    cap_extra_hours: 0,
+    max_cap_extra_hours: 0,
+    cap_extra_invalid: false,
     total_paid_hours: 0,
   };
 }
@@ -137,6 +140,7 @@ function summarizeTimecard({
   lunchWaivers = [],
   weeklyHoursCap = null,
   weeklyHoursCapHistory = null,
+  weeklyCapExtraHours = [0, 0],
   asOf = new Date(),
 }) {
   const start = dateOnly(payPeriodStart);
@@ -383,10 +387,24 @@ function summarizeTimecard({
         Math.max(0, week.total_leave_hours - week.adjusted_total_leave_hours),
       );
       week.cap_applied = workedMinutes + Math.round(week.total_leave_hours * 60) > weeklyCapMinutes;
+      // Extra approval restores ONLY worked hours disallowed by the cap.
+      // It never restores leave and never creates hours not actually worked.
+      const maxExtraCents = Math.max(0, Math.round(week.total_worked_hours * 100)
+        - Math.round(week.regular_worked_hours * 100));
+      const requested = Number(weeklyCapExtraHours?.[weekIndex] ?? 0);
+      const validRequest = Number.isFinite(requested) && requested >= 0;
+      const requestedCents = validRequest ? Math.round(requested * 100) : 0;
+      const extraCents = Math.min(requestedCents, maxExtraCents);
+      week.max_cap_extra_hours = round2(maxExtraCents / 100);
+      week.cap_extra_invalid = !validRequest || requestedCents > maxExtraCents;
+      week.cap_extra_hours = round2(extraCents / 100);
+      week.regular_worked_hours = round2(week.regular_worked_hours + week.cap_extra_hours);
       week.total_paid_hours = round2(
         week.regular_worked_hours + week.adjusted_total_leave_hours,
       );
     } else {
+      const requested = Number(weeklyCapExtraHours?.[weekIndex] ?? 0);
+      week.cap_extra_invalid = !Number.isFinite(requested) || requested !== 0;
       week.total_paid_hours = round2(week.total_worked_hours + week.total_leave_hours);
     }
   }
@@ -480,6 +498,8 @@ function summarizeTimecard({
     leave_hours_reduced_by_cap: 0,
     pending_leave_hours: 0,
     total_paid_hours: 0,
+    cap_extra_hours: 0,
+    cap_extra_invalid: false,
   };
 
   for (const week of weeks) {
@@ -494,9 +514,11 @@ function summarizeTimecard({
       'leave_hours_reduced_by_cap',
       'pending_leave_hours',
       'total_paid_hours',
+      'cap_extra_hours',
     ]) {
       period[key] = round2(period[key] + week[key]);
     }
+    period.cap_extra_invalid = period.cap_extra_invalid || week.cap_extra_invalid;
     for (const [type, hours] of Object.entries(week.leave_hours_by_type)) addByType(period.leave_hours_by_type, type, hours);
     for (const [type, hours] of Object.entries(week.adjusted_leave_hours_by_type)) addByType(period.adjusted_leave_hours_by_type, type, hours);
     for (const [type, hours] of Object.entries(week.pending_leave_hours_by_type)) addByType(period.pending_leave_hours_by_type, type, hours);
@@ -523,3 +545,5 @@ function summarizeTimecard({
 }
 
 module.exports = { summarizeTimecard, roundDailyMinutes };
+
+

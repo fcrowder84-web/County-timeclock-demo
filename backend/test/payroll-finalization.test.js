@@ -25,6 +25,13 @@ function fakeDb({
       if(sql.includes('FROM time_change_requests')) return {rows:[{count:pendingChanges}]};
       if(sql.includes('FROM leave_entries')) return {rows:[{count:pendingLeave}]};
       if(sql.includes('FROM forced_lunch_waiver_requests')) return {rows:[{count:pendingLunch}]};
+      if(sql.includes('SELECT weekly_hours_cap FROM employees')) return {rows:[{weekly_hours_cap:null}]};
+      if(sql.includes('FROM weekly_cap_extra_hours')) return {rows:[]};
+      if(sql.includes('FROM forced_lunch_setting_history')) return {rows:[]};
+      if(sql.includes('FROM forced_lunch_waivers')) return {rows:[]};
+      if(sql.includes('FROM weekly_hours_cap_history')) return {rows:[]};
+      if(sql.includes('SELECT clock_in,clock_out FROM time_entries')) return {rows:[]};
+      if(sql.includes('SELECT leave_date,leave_type')) return {rows:[]};
       throw new Error('Unexpected test query: '+sql);
     },
   };
@@ -51,12 +58,18 @@ function fakeDb({
     pendingLeave:1,
     pendingLunch:1,
   }),2,period);
-  assert(state.blockers.includes('Employee has not submitted the timecard'));
+  assert(state.blockers.includes('Employee signature or documented supervisor override is missing'));
   assert(state.blockers.includes('Supervisor approval is missing'));
   assert(state.blockers.includes('Open punch remains in the pay period'));
   assert(state.blockers.includes('Pending punch correction remains'));
   assert(state.blockers.includes('Pending leave request remains'));
   assert(state.blockers.includes('Pending lunch-waiver request remains'));
+
+  state=await finalizationState(fakeDb({approval:{id:13,employee_signed_at:null,supervisor_override_reason:'Employee unavailable',supervisor_employee_id:9,supervisor_approved_at:'2026-09-21T08:00:00',status:'supervisor_approved'}}),2,period);
+  assert.deepStrictEqual(state.blockers,[]);
+
+  state=await finalizationState(fakeDb({approval:{id:14,employee_signed_at:null,supervisor_override_reason:' ',supervisor_employee_id:9,supervisor_approved_at:'2026-09-21T08:00:00',status:'supervisor_approved'}}),2,period);
+  assert(state.blockers.includes('Employee signature or documented supervisor override is missing'));
 
   state=await finalizationState(fakeDb({
     approval:{
@@ -86,3 +99,5 @@ function fakeDb({
   console.error(err);
   process.exitCode=1;
 });
+
+

@@ -4,6 +4,9 @@ const express = require('express');
 const { canEditPunch } = require('../lib/punch-edit-authority');
 const { summarizeTimecard } = require('../lib/timecard-summary');
 const { fetchWeeklyCapHistory } = require('../lib/weekly-cap-history');
+const { fetchWeeklyExtraHours } = require('../lib/weekly-cap-extra-hours');
+const { loadExtraHoursSummary } = require('../lib/timecard-extra-approval');
+const { hasEmployeeSignoffOrOverride } = require('../lib/timecard-signoff');
 const { resolvePayPeriod } = require('../lib/pay-period');
 const {
   requireReopenForFinalized,
@@ -136,6 +139,7 @@ function createSupervisorRouter({
         const visibleIds = visible.map(row => Number(row.id));
         if (visibleIds.length) {
           const weeklyCapHistory = await fetchWeeklyCapHistory(pool, visibleIds, period.pay_period_end);
+          const extrasByEmployee = await fetchWeeklyExtraHours(pool, visibleIds, period.pay_period_start);
           const [entriesResult, leaveResult, lunchSettingsResult, lunchWaiverResult] = await Promise.all([
             pool.query(
               `SELECT employee_id,
@@ -201,6 +205,7 @@ function createSupervisorRouter({
               lunchWaivers: lunchWaiversByEmployee.get(id) || [],
               weeklyHoursCap: row.weekly_hours_cap,
               weeklyHoursCapHistory: weeklyCapHistory.get(id) || [],
+              weeklyCapExtraHours: extrasByEmployee.get(id) || [0,0],
             });
             row.total_hours = summary.period.gross_worked_hours;
             row.payable_hours = summary.period.total_paid_hours;
@@ -281,7 +286,6 @@ function createSupervisorRouter({
 
         client = await pool.connect();
         await client.query('BEGIN');
-
         const requestResult = await client.query(
           `SELECT * FROM time_change_requests WHERE id=$1 FOR UPDATE`,
           [requestId],
@@ -663,6 +667,7 @@ function createSupervisorRouter({
         );
 
         const weeklyCapHistory = await fetchWeeklyCapHistory(pool, [employeeId], period.pay_period_end);
+        const extrasByEmployee = await fetchWeeklyExtraHours(pool, [employeeId], period.pay_period_start);
 
         const approval = approvalResult.rows[0] || null;
         const payrollCanEdit =
@@ -677,6 +682,7 @@ function createSupervisorRouter({
           employee: employeeResult.rows[0],
           approval,
           can_edit_entries: payrollCanEdit || supervisorCanEdit,
+          can_edit_weekly_extra: (userHasPermission(req.user,'approve_timecard') || userHasPermission(req.user,'approve_own_timecard')) && await canAccessEmployee(req.user,employeeId,['approve_timecard']) && !approval?.supervisor_approved_at && !approval?.payroll_finalized_at && (!approval || ['open','employee_submitted','returned_to_employee'].includes(approval.status)),
           edit_mode: payrollCanEdit ? 'payroll' : (supervisorCanEdit ? 'supervisor' : 'locked'),
           correction_requests: correctionResult.rows,
           change_requests: requestsResult.rows,
@@ -694,6 +700,7 @@ function createSupervisorRouter({
             lunchWaivers: lunchWaiverResult.rows,
             weeklyHoursCap: employeeResult.rows[0].weekly_hours_cap,
             weeklyHoursCapHistory: weeklyCapHistory.get(employeeId) || [],
+            weeklyCapExtraHours: extrasByEmployee.get(employeeId) || [0,0],
           }),
         });
       } catch (err) {
@@ -719,6 +726,8 @@ function createSupervisorRouter({
         client = await pool.connect();
         await client.query('BEGIN');
 
+        await client.query('SELECT id FROM employees WHERE id=$1 FOR UPDATE', [employeeId]);
+
         const approvalResult = await client.query(
           `SELECT * FROM pay_period_approvals
             WHERE employee_id=$1 AND pay_period_start=$2::date AND pay_period_end=$3::date
@@ -739,7 +748,7 @@ function createSupervisorRouter({
           return res.status(409).json({ error: 'Timecard is already payroll-finalized' });
         }
 
-        const [openPunches, pendingLeave, pendingChanges] = await Promise.all([
+        const [openPunches, pendingLeave, pendingChanges, pendingLunch] = await Promise.all([
           client.query(
             `SELECT id FROM time_entries
               WHERE employee_id=$1 AND deleted_at IS NULL
@@ -762,12 +771,15 @@ function createSupervisorRouter({
                   (te.clock_in >= $2::date AND te.clock_in < ($3::date + INTERVAL '1 day'))
                   OR
                   (tcr.requested_clock_in >= $2::date AND tcr.requested_clock_in < ($3::date + INTERVAL '1 day'))
+                  OR
+                  (tcr.requested_clock_out >= $2::date AND tcr.requested_clock_out < ($3::date + INTERVAL '1 day'))
                 )`,
             [employeeId, period.pay_period_start, period.pay_period_end],
           ),
+          client.query(`SELECT id FROM forced_lunch_waiver_requests WHERE employee_id=$1 AND work_date BETWEEN $2::date AND $3::date AND status='pending'`, [employeeId, period.pay_period_start, period.pay_period_end]),
         ]);
 
-        if (openPunches.rows.length || pendingLeave.rows.length || pendingChanges.rows.length) {
+        if (openPunches.rows.length || pendingLeave.rows.length || pendingChanges.rows.length || pendingLunch.rows.length) {
           await client.query('ROLLBACK');
           return res.status(409).json({
             error: 'Resolve open punches and pending leave/change requests before approving the timecard',
@@ -777,9 +789,15 @@ function createSupervisorRouter({
           });
         }
 
+        const { summary } = await loadExtraHoursSummary(client, employeeId, period);
+        if (summary.period.cap_extra_invalid) {
+          await client.query('ROLLBACK');
+          return res.status(409).json({ error: 'Approved extra hours exceed worked hours removed by the weekly cap.' });
+        }
+
         const updated = await client.query(
           `UPDATE pay_period_approvals
-              SET supervisor_approved_at=NOW(),supervisor_employee_id=$2,status='supervisor_approved'
+              SET supervisor_approved_at=NOW(),supervisor_employee_id=$2,supervisor_override_reason=NULL,status='supervisor_approved'
             WHERE id=$1 AND status='employee_submitted' AND employee_signed_at IS NOT NULL
             RETURNING *`,
           [approval.id, req.user.id],
@@ -826,6 +844,7 @@ function createSupervisorRouter({
         const period = await getRequestedPayPeriod(req);
         client = await pool.connect();
         await client.query('BEGIN');
+        await client.query('SELECT id FROM employees WHERE id=$1 FOR UPDATE', [employeeId]);
         const approvalResult = await client.query(
           `SELECT * FROM pay_period_approvals
             WHERE employee_id=$1 AND pay_period_start=$2::date AND pay_period_end=$3::date
@@ -854,6 +873,7 @@ function createSupervisorRouter({
                   employee_signed_at=CASE WHEN $3::boolean THEN NULL ELSE employee_signed_at END,
                   supervisor_approved_at=NULL,
                   supervisor_employee_id=NULL,
+                  supervisor_override_reason=NULL,
                   payroll_finalized_at=NULL,
                   payroll_finalized_by=NULL
             WHERE id=$1
@@ -973,7 +993,7 @@ function createSupervisorRouter({
         }
         if (payrollOverride && (
           !approval || !cards.some(card => card.destination_period)
-          || cards.some(card => !card.employee_signed_at || !card.supervisor_approved_at
+          || cards.some(card => !hasEmployeeSignoffOrOverride(card) || !card.supervisor_approved_at
             || !['supervisor_approved', 'payroll_finalized'].includes(card.status))
         )) {
           await client.query('ROLLBACK');
@@ -1035,6 +1055,7 @@ function createSupervisorRouter({
           `UPDATE pay_period_approvals
               SET supervisor_approved_at=NULL,
                   supervisor_employee_id=NULL,
+                  supervisor_override_reason=NULL,
                   payroll_finalized_at=NULL,
                   payroll_finalized_by=NULL,
                   status=CASE WHEN employee_signed_at IS NULL THEN 'open' ELSE 'employee_submitted' END
@@ -1118,3 +1139,5 @@ function createSupervisorRouter({
 }
 
 module.exports = { createSupervisorRouter, parsePositiveInt, parseTimestamp };
+
+

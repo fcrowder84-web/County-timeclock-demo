@@ -3,6 +3,9 @@
 const express = require('express');
 const { summarizeTimecard } = require('../lib/timecard-summary');
 const { fetchWeeklyCapHistory } = require('../lib/weekly-cap-history');
+const { fetchWeeklyExtraHours } = require('../lib/weekly-cap-extra-hours');
+const { loadExtraHoursSummary } = require('../lib/timecard-extra-approval');
+const { hasEmployeeSignoffOrOverride } = require('../lib/timecard-signoff');
 
 function positiveInt(value,label='employee'){
   const parsed=Number(value);
@@ -45,7 +48,7 @@ async function finalizationState(db,employeeId,period,{lock=false}={}){
   if(!approval){
     blockers.push('Timecard has not been submitted');
   }else{
-    if(!approval.employee_signed_at) blockers.push('Employee has not submitted the timecard');
+    if(!hasEmployeeSignoffOrOverride(approval)) blockers.push('Employee signature or documented supervisor override is missing');
     if(!approval.supervisor_approved_at) blockers.push('Supervisor approval is missing');
     if(!['supervisor_approved','payroll_finalized'].includes(approval.status)){
       blockers.push(`Timecard status is ${approval.status}`);
@@ -99,6 +102,11 @@ async function finalizationState(db,employeeId,period,{lock=false}={}){
   if(Number(pendingLeave.rows[0]?.count||0)>0) blockers.push('Pending leave request remains');
   if(Number(pendingLunch.rows[0]?.count||0)>0) blockers.push('Pending lunch-waiver request remains');
 
+  if(approval?.supervisor_approved_at){
+    const {summary}=await loadExtraHoursSummary(db,employeeId,period);
+    if(summary.period.cap_extra_invalid) blockers.push('Approved extra hours exceed worked hours removed by the weekly cap');
+  }
+
   return {approval,blockers};
 }
 
@@ -129,6 +137,7 @@ function createPayrollRouter({
              e.weekly_hours_cap,
              ppa.status,
              ppa.employee_signed_at,
+             ppa.supervisor_override_reason,
              ppa.supervisor_approved_at,
              ppa.payroll_finalized_at
            FROM employees e
@@ -286,6 +295,7 @@ function createPayrollRouter({
         }
 
         const weeklyCapHistory = await fetchWeeklyCapHistory(pool, employeeIds, period.pay_period_end);
+        const extrasByEmployee = await fetchWeeklyExtraHours(pool, employeeIds, period.pay_period_start);
         const summaries={};
         for(const employeeId of employeeIds){
           const employeeEntries=rows
@@ -305,6 +315,7 @@ function createPayrollRouter({
             lunchWaivers:lunchWaivers.filter(row=>Number(row.employee_id)===employeeId),
             weeklyHoursCap:employeeRow?.weekly_hours_cap,
             weeklyHoursCapHistory:weeklyCapHistory.get(employeeId) || [],
+            weeklyCapExtraHours:extrasByEmployee.get(employeeId) || [0,0],
           });
         }
 
@@ -339,6 +350,7 @@ function createPayrollRouter({
              d.name AS department,
              ppa.status AS approval_status,
              ppa.employee_signed_at,
+             ppa.supervisor_override_reason,
              ppa.supervisor_approved_at,
              ppa.payroll_finalized_at,
              te.id AS time_entry_id,
@@ -438,6 +450,7 @@ function createPayrollRouter({
         }
 
         const weeklyCapHistory = await fetchWeeklyCapHistory(pool, employeeIds, period.pay_period_end);
+        const extrasByEmployee = await fetchWeeklyExtraHours(pool, employeeIds, period.pay_period_start);
         const summaries={};
         for(const employeeId of employeeIds){
           const employeeEntries=rows
@@ -457,6 +470,7 @@ function createPayrollRouter({
             lunchWaivers:lunchWaivers.filter(row=>Number(row.employee_id)===employeeId),
             weeklyHoursCap:employeeRow?.weekly_hours_cap,
             weeklyHoursCapHistory:weeklyCapHistory.get(employeeId) || [],
+            weeklyCapExtraHours:extrasByEmployee.get(employeeId) || [0,0],
           });
         }
 
@@ -488,6 +502,7 @@ function createPayrollRouter({
         const period=await getRequestedPayPeriod(req);
         client=await pool.connect();
         await client.query('BEGIN');
+        await client.query('SELECT id FROM employees WHERE id=$1 FOR UPDATE',[employeeId]);
         const state=await finalizationState(client,employeeId,period,{lock:true});
         if(state.approval?.payroll_finalized_at||state.approval?.status==='payroll_finalized'){
           await client.query('ROLLBACK');
@@ -572,6 +587,13 @@ function createPayrollRouter({
           return res.status(403).json({error:'No employees are within your finalization scope'});
         }
 
+        // Match individual finalization's employee lock. Lock all scoped rows in
+        // a stable order before reading approvals, punches, or weekly extras.
+        await client.query(
+          'SELECT id FROM employees WHERE id=ANY($1::int[]) ORDER BY id FOR UPDATE',
+          [authorized.map(employee=>employee.id).sort((a,b)=>a-b)],
+        );
+
         const blockers=[];
         const ready=[];
         for(const employee of authorized){
@@ -637,3 +659,5 @@ function createPayrollRouter({
 }
 
 module.exports={createPayrollRouter,finalizationState};
+
+

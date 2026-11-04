@@ -81,6 +81,7 @@ function compact(sql){return String(sql).replace(/\s+/g,' ').trim();}
       async query(sql){
         const q=compact(sql);
         if(q==='BEGIN'||q==='ROLLBACK') return {rows:[]};
+        if(q.includes('FROM employees WHERE id=$1 FOR UPDATE')) return {rows:[{id:8}]};
         if(q.includes('FROM pay_period_approvals')) return {rows:[{
           id:10,employee_id:8,status:'payroll_finalized',
           employee_signed_at:'2026-09-20T17:00:00Z',
@@ -235,3 +236,5 @@ function compact(sql){return String(sql).replace(/\s+/g,' ').trim();}
 
   console.log('authorization regression tests: PASS');
 })().catch(err=>{console.error(err);process.exitCode=1;});
+
+
