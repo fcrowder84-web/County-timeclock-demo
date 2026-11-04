@@ -20,6 +20,8 @@ COPY app-shell.css /usr/share/nginx/html/app-shell.css
 COPY app-shell.js /usr/share/nginx/html/app-shell.js
 COPY timecard-base.js /usr/share/nginx/html/timecard-base.js
 COPY timecard-actions.js /usr/share/nginx/html/timecard-actions.js
+COPY weekly-extra-hours.js /usr/share/nginx/html/weekly-extra-hours.js
+COPY weekly-extra-hours.css /usr/share/nginx/html/weekly-extra-hours.css
 COPY timecard-single-punch.js /usr/share/nginx/html/timecard-single-punch.js
 COPY mobile-pairing.js /usr/share/nginx/html/mobile-pairing.js
 COPY mobile.html /usr/share/nginx/html/mobile.html
