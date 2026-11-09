@@ -31,7 +31,7 @@ function weeklyExtraValue(week, index) {
 
 function extraHoursSummaryRow(label, valueCell, className) {
   const row = document.createElement("tr");
-  row.className = "weekly-extra-row " + className;
+  row.className = "weekly-extra-row " + className + " payroll-extra";
   const labelCell = document.createElement("td");
   labelCell.colSpan = 13; // End the label before Total; keep the approval aligned with daily and weekly totals.
   labelCell.className = "weekly-extra-label";
