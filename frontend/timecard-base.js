@@ -162,5 +162,5 @@ function totalRow(label,summary,klass,capped=false){
   const ot=num(summary?.overtime_hours);
   const rawTotal=num(summary?.total_worked_hours)+num(summary?.total_leave_hours);
   const capAdjusted=capped?fmt(summary?.total_paid_hours):"";
-  return `<tr class="${klass}"><td class="left" colspan="5">${esc(label)}</td><td>${fmt(regular)}</td><td>${num(summary?.forced_lunch_hours)>0?"-"+fmt(summary.forced_lunch_hours):""}</td><td>${fmt(ot)}</td><td>${fmt(m.holiday)}</td><td>${fmt(m.vacation)}</td><td>${fmt(m.sick)}</td><td>${fmt(m.floating_holiday)}</td><td>${fmt(otherTotal(m))}</td><td>${fmt(rawTotal)}</td><td><strong>${capAdjusted}</strong></td></tr>`
+  return `<tr class="${klass} ${capped?"payroll-cap":"payroll-total"}"><td class="left" colspan="5">${esc(label)}</td><td>${fmt(regular)}</td><td>${num(summary?.forced_lunch_hours)>0?"-"+fmt(summary.forced_lunch_hours):""}</td><td>${fmt(ot)}</td><td>${fmt(m.holiday)}</td><td>${fmt(m.vacation)}</td><td>${fmt(m.sick)}</td><td>${fmt(m.floating_holiday)}</td><td>${fmt(otherTotal(m))}</td><td>${fmt(rawTotal)}</td><td><strong>${capAdjusted}</strong></td></tr>`
 }
