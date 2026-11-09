@@ -7,7 +7,7 @@
   color: var(--navy);
 }
 .weekly-extra-row .weekly-extra-value {
-  text-align: center;
+  text-align: right;
   font-variant-numeric: tabular-nums;
   padding: 3px 6px;
 }
@@ -15,8 +15,8 @@
 .weekly-extra-display {
   box-sizing: border-box;
   display: inline-block;
-  width: 80px;
-  max-width: 100%;
+  width: 100%;
+  max-width: 90px;
   padding: 4px 5px;
   font: inherit;
   font-weight: 700;
@@ -29,4 +29,5 @@
 @media print {
   .weekly-extra-row td { background: #fff !important; }
   .weekly-extra-input { border-color: transparent; background: transparent; appearance: textfield; }
+  .weekly-extra-value, .weekly-extra-label { text-align: right; }
 }

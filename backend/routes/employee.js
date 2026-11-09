@@ -121,6 +121,48 @@ function createEmployeeRouter({ requireUser, requireAnyPermission, pool, audit, 
     }
   });
 
+  // Employees may retract their own sign-off only before supervisor approval.
+  router.post('/employee/unlock-timecard', requireUser, requireAnyPermission('submit_timecard'), async (req, res) => {
+    let client;
+    try {
+      const period = await getRequestedPayPeriod(req);
+      client = await pool.connect();
+      await client.query('BEGIN');
+      await client.query('SELECT id FROM employees WHERE id=$1 FOR UPDATE', [req.user.id]);
+      const existingResult = await client.query(
+        `SELECT id,status,employee_signed_at,supervisor_approved_at,payroll_finalized_at
+           FROM pay_period_approvals
+          WHERE employee_id=$1 AND pay_period_start=$2::date AND pay_period_end=$3::date
+          ORDER BY id DESC LIMIT 1 FOR UPDATE`,
+        [req.user.id, period.pay_period_start, period.pay_period_end],
+      );
+      const approval = existingResult.rows[0];
+      if (!approval || approval.status !== 'employee_submitted' || !approval.employee_signed_at ||
+          approval.supervisor_approved_at || approval.payroll_finalized_at) {
+        await client.query('ROLLBACK');
+        return res.status(409).json({ error: 'Only a signed timecard awaiting supervisor approval can be unlocked by the employee.' });
+      }
+      await client.query(
+        `UPDATE pay_period_approvals
+            SET status='returned_to_employee',employee_signed_at=NULL
+          WHERE id=$1`,
+        [approval.id],
+      );
+      await client.query('COMMIT');
+      await audit(req.user.id, 'employee_unlock_timecard', 'employee', req.user.id, {
+        pay_period_start: period.pay_period_start,
+        pay_period_end: period.pay_period_end,
+      });
+      return res.json({ message: 'Timecard unlocked; please sign again when finished.' });
+    } catch (err) {
+      if (client) await client.query('ROLLBACK').catch(() => {});
+      console.error(err);
+      return res.status(500).json({ error: 'Unlock timecard error' });
+    } finally {
+      if (client) client.release();
+    }
+  });
+
   router.get('/employee/my-timecard', requireUser, requireAnyPermission('view_own_time'), async (req, res) => {
     try {
       const period = await getRequestedPayPeriod(req);
