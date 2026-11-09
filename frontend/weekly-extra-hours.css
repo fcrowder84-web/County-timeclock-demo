@@ -31,3 +31,10 @@
   .weekly-extra-input { border-color: transparent; background: transparent; appearance: textfield; }
   .weekly-extra-value, .weekly-extra-label { text-align: right; }
 }
+
+/* The extra-hours entry is a reference value, not the payable weekly total. */
+#timeRows tr.payroll-extra > td.weekly-extra-value { background: #fff4cd; }
+#timeRows tr.payroll-extra.weekly-extra-period > td.weekly-extra-value { background: #ffe9b1; }
+@media print {
+  #timeRows tr.payroll-extra > td.weekly-extra-value { background: #fff4cd !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+}

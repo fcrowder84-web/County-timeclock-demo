@@ -6,3 +6,29 @@
 .day-punch-modal{width:560px}.day-punch-row{display:grid;grid-template-columns:32px 1fr 42px;gap:8px;align-items:center;margin:7px 0}.day-punch-number{font-weight:700;text-align:center;color:var(--muted)}.day-punch-row input{font-variant-numeric:tabular-nums}.day-punch-add{margin:8px 0}.day-punch-preview{margin:10px 0;padding:10px;border:1px solid var(--line);background:#f7f9fa;line-height:1.5}.day-punch-warning{margin-top:6px;color:#8a1c1c;font-weight:700}.day-punch-message{display:none;margin-top:10px;padding:8px}.day-punch-message.error{display:block;background:#fff3f3;border:1px solid #e0a3a3;color:#7e1515}
 
 .punch.edited{color:#1f5f8b;font-weight:bold;background:#eef6fb;border-color:#9fc3dc}.edited-tag{font-size:8px;margin-left:3px;letter-spacing:.25px;vertical-align:1px}.pending-request.edited{color:#a61f1f!important;background:#fff0f0!important;border-color:#e1abab!important}
+
+/* Payroll scanning: yellow always identifies the payable-hours field.
+   Capped weeks use Cap Adj; uncapped weeks use Total. */
+:root { --payroll-yellow: #fff2b8; --payroll-yellow-strong: #ffe39a; --payroll-week-green: #dff2df; }
+#timeRows tr.payroll-cap > td:last-child,
+#timeRows tr.payroll-total > td:nth-last-child(2) {
+  background: var(--payroll-yellow);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+/* The two horizontal weekly totals stay green except for the payroll figure. */
+#timeRows tr.week-total > td { background: var(--payroll-week-green); border-top: 2px solid #87b88f; }
+#timeRows tr.week-total.payroll-cap > td:last-child,
+#timeRows tr.week-total.payroll-total > td:nth-last-child(2) {
+  background: var(--payroll-yellow-strong);
+  color: #263721;
+}
+#timeRows tr.period-total.payroll-cap > td:last-child,
+#timeRows tr.period-total.payroll-total > td:nth-last-child(2) { background: var(--payroll-yellow-strong); }
+@media print {
+  #timeRows tr.payroll-cap > td:last-child,
+  #timeRows tr.payroll-total > td:nth-last-child(2) { background: var(--payroll-yellow) !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  #timeRows tr.week-total > td { background: var(--payroll-week-green) !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  #timeRows tr.week-total.payroll-cap > td:last-child,
+  #timeRows tr.week-total.payroll-total > td:nth-last-child(2) { background: var(--payroll-yellow-strong) !important; }
+}
