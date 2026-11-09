@@ -39,10 +39,10 @@
   padding: 0;
   border-left: 0;
   border-right: 0;
-  border-top: 2px solid #c5d0d8;
-  border-bottom: 2px solid #c5d0d8;
-  background: #eef2f5;
+  border-top: 0;
+  border-bottom: 0;
+  background: #d62828;
 }
 @media print {
-  #timeRows tr.week-divider td { background: #eef2f5 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  #timeRows tr.week-divider td { background: #d62828 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
 }
