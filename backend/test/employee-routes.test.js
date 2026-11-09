@@ -276,7 +276,7 @@ function compact(sql) { return String(sql).replace(/\s+/g, ' ').trim(); }
   const unlocked = await unlockWithApproval({id:4,status:'employee_submitted',
     employee_signed_at:'2026-08-12T18:00:00Z', supervisor_approved_at:null, payroll_finalized_at:null});
   assert.strictEqual(unlocked.response.statusCode,200);
-  assert(unlocked.queries.some(q=>q.includes(\"SET status='returned_to_employee',employee_signed_at=NULL\")));
+  assert(unlocked.queries.some(q=>q.includes("SET status='returned_to_employee',employee_signed_at=NULL")));
   assert(unlocked.queries.includes('COMMIT'));
   assert(unlocked.auditEvents.some(event=>event[1]==='employee_unlock_timecard'));
   for (const approval of [
