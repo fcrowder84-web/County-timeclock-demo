@@ -56,6 +56,16 @@ renderTimecard = function renderTimecardWithExtraRows() {
         weeklyExtraValue(week, weekIndex),
         "weekly-extra-week",
       ));
+      // The divider follows Week 1's TOTAL, never its extra-hours row.
+      if (weekIndex === 0) {
+        const divider = document.createElement("tr");
+        divider.className = "week-divider";
+        divider.setAttribute("aria-hidden", "true");
+        const cell = document.createElement("td");
+        cell.colSpan = 15;
+        divider.appendChild(cell);
+        row.after(divider);
+      }
       weekIndex++;
     } else if (row.classList.contains("period-total")) {
       const totalCell = document.createElement("td");
