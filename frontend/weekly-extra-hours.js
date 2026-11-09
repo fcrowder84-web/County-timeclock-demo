@@ -33,10 +33,12 @@ function extraHoursSummaryRow(label, valueCell, className) {
   const row = document.createElement("tr");
   row.className = "weekly-extra-row " + className;
   const labelCell = document.createElement("td");
-  labelCell.colSpan = 14; // Day, four punches, and nine totals before Cap Adj.
+  labelCell.colSpan = 13; // End the label before Total; keep the approval aligned with daily and weekly totals.
   labelCell.className = "weekly-extra-label";
   labelCell.textContent = label;
-  row.append(labelCell, valueCell);
+  const capAdjCell = document.createElement("td");
+  capAdjCell.className = "weekly-extra-cap-spacer";
+  row.append(labelCell, valueCell, capAdjCell);
   return row;
 }
 
