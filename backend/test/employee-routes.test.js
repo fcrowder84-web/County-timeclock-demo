@@ -43,6 +43,7 @@ function compact(sql) { return String(sql).replace(/\s+/g, ' ').trim(); }
     router.stack.filter((x) => x.route).map((x) => `${Object.keys(x.route.methods)[0]} ${x.route.path}`),
     [
       'post /submit-timecard',
+      'post /employee/unlock-timecard',
       'get /employee/my-timecard',
       'get /employee/denied-change-requests',
       'post /employee/denied-change-requests/:requestId/acknowledge',
@@ -244,6 +245,51 @@ function compact(sql) { return String(sql).replace(/\s+/g, ' ').trim(); }
   );
   assert.strictEqual(res.statusCode, 400);
   assert.strictEqual(res.body.error, 'Clock out before submitting your timecard');
+
+  // A signed employee may unlock only before a supervisor or payroll approves.
+  async function unlockWithApproval(approval) {
+    const queries = [];
+    const auditEvents = [];
+    const client = {
+      async query(sql) {
+        const q = compact(sql);
+        queries.push(q);
+        if (['BEGIN', 'COMMIT', 'ROLLBACK'].includes(q)) return {rows:[]};
+        if (q.startsWith('SELECT id FROM employees WHERE id=$1 FOR UPDATE')) return {rows:[{id:7}]};
+        if (q.includes('FROM pay_period_approvals')) return {rows:approval ? [approval] : []};
+        if (q.startsWith('UPDATE pay_period_approvals')) return {rows:[]};
+        throw new Error('Unexpected unlock query: '+q);
+      },
+      release() {},
+    };
+    const unlockRouter = createEmployeeRouter({
+      requireUser:noop, requireAnyPermission:allow,
+      canAccessEmployee:async()=>true, getRequestedPayPeriod:async()=>period,
+      audit:async (...args)=>auditEvents.push(args),
+      pool:{connect:async()=>client},
+    });
+    const response = makeRes();
+    await handlerFor(unlockRouter,'post','/employee/unlock-timecard')(
+      {user:{id:7},body:{period_start:period.pay_period_start}},response);
+    return {response,queries,auditEvents};
+  }
+  const unlocked = await unlockWithApproval({id:4,status:'employee_submitted',
+    employee_signed_at:'2026-08-12T18:00:00Z', supervisor_approved_at:null, payroll_finalized_at:null});
+  assert.strictEqual(unlocked.response.statusCode,200);
+  assert(unlocked.queries.some(q=>q.includes(\"SET status='returned_to_employee',employee_signed_at=NULL\")));
+  assert(unlocked.queries.includes('COMMIT'));
+  assert(unlocked.auditEvents.some(event=>event[1]==='employee_unlock_timecard'));
+  for (const approval of [
+    null,
+    {id:4,status:'open',employee_signed_at:null},
+    {id:4,status:'employee_submitted',employee_signed_at:'2026-08-12T18:00:00Z',supervisor_approved_at:'2026-08-13T09:00:00Z'},
+    {id:4,status:'employee_submitted',employee_signed_at:'2026-08-12T18:00:00Z',payroll_finalized_at:'2026-08-13T09:00:00Z'},
+  ]) {
+    const rejected=await unlockWithApproval(approval);
+    assert.strictEqual(rejected.response.statusCode,409);
+    assert(rejected.queries.includes('ROLLBACK'));
+    assert(!rejected.queries.some(q=>q.startsWith('UPDATE pay_period_approvals')));
+  }
 
   // The employee timecard query must always hide soft-deleted work intervals.
   const timecardQueries = [];
